@@ -1,0 +1,21 @@
+{
+  "name": "cel-blade",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Cel Blade Online: game server and client",
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning server/main.js",
+    "dev": "node --disable-warning=ExperimentalWarning --watch-path=server server/main.js",
+    "test": "node tools/smoke.mjs",
+    "test:cluster": "node tools/smoke.mjs cluster"
+  },
+  "dependencies": {
+    "pg": "8.16.3",
+    "three": "0.160.0",
+    "ws": "8.21.3"
+  }
+}

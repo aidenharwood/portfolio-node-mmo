@@ -1,0 +1,68 @@
+# The realm's database: accounts, characters, guilds, mail — and how the layers find each other
+# and pass messages (LISTEN/NOTIFY). One Postgres on a local-path volume; nightly dumps go to a
+# second volume (cronjob.portfolio-cel-blade.yaml).
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: portfolio-cel-blade-postgres
+  labels:
+    app: portfolio-cel-blade-postgres
+    app.kubernetes.io/part-of: cel-blade
+spec:
+  replicas: 1
+  serviceName: portfolio-cel-blade-postgres
+  selector:
+    matchLabels:
+      app: portfolio-cel-blade-postgres
+  template:
+    metadata:
+      labels:
+        app: portfolio-cel-blade-postgres
+        app.kubernetes.io/part-of: cel-blade
+    spec:
+      securityContext:
+        fsGroup: 70 # the alpine image's postgres user
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: postgres
+          image: postgres:17.10-alpine
+          # Each realm layer and gateway keeps a small pool and the layers one listening
+          # connection each, so there's headroom for ~30 layers.
+          args: ["-c", "max_connections=300", "-c", "shared_buffers=256MB"]
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: celblade
+            - name: POSTGRES_DB
+              value: celblade
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: portfolio-cel-blade
+                  key: postgres-password
+            - name: PGDATA # a folder inside the volume (its root holds lost+found on some disks)
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "celblade", "-d", "celblade"]
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "celblade", "-d", "celblade"]
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            failureThreshold: 5
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 1Gi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: portfolio-cel-blade-postgres

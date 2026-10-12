@@ -1,0 +1,32 @@
+# The database and its nightly dumps. local-path volumes live on one node's disk and survive pod
+# restarts and redeploys; the storage class deletes the data when a claim is deleted, so the
+# claims are protected from being pruned or cascade-deleted by Argo CD or Helm.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: portfolio-cel-blade-postgres
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
+    helm.sh/resource-policy: keep
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: portfolio-cel-blade-backups
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
+    helm.sh/resource-policy: keep
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 5Gi

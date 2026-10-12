@@ -1,0 +1,24 @@
+# More gateways as players arrive: compressing their snapshots is a gateway's main work (about
+# one core per ~280 players). Realm layers are scaled by hand (their replica count): see
+# docs/DEPLOY.md.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: portfolio-cel-blade-gateway
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: portfolio-cel-blade-gateway
+  minReplicas: 1
+  maxReplicas: 4
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 600 # players on a gateway that goes reconnect: don't flap

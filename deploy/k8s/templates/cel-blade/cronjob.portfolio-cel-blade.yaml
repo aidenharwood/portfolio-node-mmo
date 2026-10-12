@@ -1,0 +1,52 @@
+# A nightly dump of the database (pg_dump, custom format), keeping the newest 14. Restore with
+#   pg_restore --clean --if-exists -d celblade /backups/celblade-<date>.dump   (see docs/DEPLOY.md)
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: portfolio-cel-blade-backup
+spec:
+  schedule: "30 4 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app: portfolio-cel-blade-backup
+            app.kubernetes.io/part-of: cel-blade
+        spec:
+          restartPolicy: OnFailure
+          securityContext:
+            runAsUser: 70
+            runAsGroup: 70
+            fsGroup: 70
+          containers:
+            - name: dump
+              image: postgres:17.10-alpine
+              command:
+                - sh
+                - -c
+                - |
+                  set -e
+                  # ($$ keeps Kubernetes from reading $(…) as one of its own variables.)
+                  f=/backups/celblade-$$(date -u +%Y-%m-%d-%H%M).dump
+                  pg_dump -h portfolio-cel-blade-postgres -U celblade -d celblade -Fc -f "$f.part"
+                  mv "$f.part" "$f"
+                  ls -1t /backups/celblade-*.dump | tail -n +15 | xargs -r rm --
+                  echo "saved $f"
+              env:
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: portfolio-cel-blade
+                      key: postgres-password
+              volumeMounts:
+                - name: backups
+                  mountPath: /backups
+          volumes:
+            - name: backups
+              persistentVolumeClaim:
+                claimName: portfolio-cel-blade-backups

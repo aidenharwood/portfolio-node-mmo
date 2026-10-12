@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Figure Viewer</title>
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #9cc0dc; font-family: system-ui, sans-serif; }
+    canvas { display: block; width: 100vw; height: 100vh; }
+    #bar { position: fixed; top: 6px; left: 6px; display: flex; gap: 4px; flex-wrap: wrap; }
+    #bar a { padding: 2px 8px; background: #1e1a2acc; color: #fff; border-radius: 4px; font-size: 12px; text-decoration: none; }
+  </style>
+  <script type="importmap">
+  { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+  </script>
+</head>
+<body>
+  <div id="bar"></div>
+  <script type="module">
+    // Dev tool: the character builders up close, from fixed angles and in test poses, to check
+    // shape and how the skin deforms at the joints. ?view=lineup|head|hands|poses|armour|creatures
+    import * as THREE from 'three';
+    import { buildHumanoid, buildGoblin, buildOgre, fist } from '../src/models/Characters.js';
+    import { bakeTree } from '../src/render/ModelKit.js';
+    import { PostFX } from '../src/render/PostFX.js';
+    import { qualityOf } from '../src/render/Quality.js';
+    import { setOutlinesVisible } from '../src/render/Toon.js';
+    import { lookFromChoice } from '../src/models/heroLooks.js';
+    import { generateArmor } from '../src/items/ArmorGenerator.js';
+    import { NPCS } from '../src/world/mapData.js';
+
+    const q = new URLSearchParams(location.search);
+    const view = q.get('view') ?? 'lineup';
+    const quality = q.get('q') ?? 'medium'; // as the game draws it (render/Quality.js)
+    const VIEWS = ['lineup', 'head', 'hands', 'poses', 'armour', 'npcs', 'creatures'];
+    document.getElementById('bar').innerHTML = VIEWS.map((v) => `<a href="?view=${v}&q=${quality}">${v}</a>`).join('')
+      + ['low', 'medium', 'high'].map((k) => `<a href="?view=${view}&q=${k}">${k}</a>`).join('');
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+    renderer.setPixelRatio(Math.max(2, devicePixelRatio));
+    renderer.setSize(innerWidth, innerHeight);
+    document.body.appendChild(renderer.domElement);
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x9cc0dc);
+    scene.add(new THREE.HemisphereLight(0xdff1ff, 0x6a8f5a, 0.7));
+    const sun = new THREE.DirectionalLight(0xfff4e0, 2.6);
+    sun.position.set(3, 7, 6);
+    scene.add(sun);
+    const ground = new THREE.Mesh(new THREE.CircleGeometry(30, 32).rotateX(-Math.PI / 2), new THREE.MeshLambertMaterial({ color: 0x7fa86a }));
+    scene.add(ground);
+    const cam = new THREE.PerspectiveCamera(Number(q.get('fov') ?? 18), innerWidth / innerHeight, 0.02, 200);
+
+    const add = (rig, x, z = 0, yaw = 0) => { rig.model.position.set(x, 0, z); rig.model.rotation.y = yaw; scene.add(rig.model); return rig; };
+    const look = (c) => lookFromChoice(c);
+    const aim = (x, y, z, tx, ty, tz) => { cam.position.set(x, y, z); cam.lookAt(tx, ty, tz); };
+
+    // Test poses: stride, crouch, arms raised to aim, twist and head turn.
+    function pose(rig, kind) {
+      const [L, R] = rig.legs;
+      if (kind === 'stride') {
+        L.thigh.rotation.x = -0.75; L.shin.rotation.x = 0.35; L.foot.rotation.x = 0.3;
+        R.thigh.rotation.x = 0.45; R.shin.rotation.x = 0.9; R.foot.rotation.x = 0.2;
+        rig.armL.upper.rotation.x = 0.5; rig.armL.fore.rotation.x = -0.6;
+        rig.armR.upper.rotation.x = -0.6; rig.armR.fore.rotation.x = -0.9;
+        rig.spine.rotation.y = 0.2; rig.chest.rotation.y = 0.15;
+      } else if (kind === 'crouch') {
+        rig.hips.position.y -= 0.42;
+        for (const l of [L, R]) { l.thigh.rotation.x = -1.6; l.shin.rotation.x = 2.2; l.foot.rotation.x = -0.6; }
+        L.thigh.rotation.z = 0.25; R.thigh.rotation.z = -0.25;
+        rig.spine.rotation.x = 0.35; rig.chest.rotation.x = 0.15;
+        rig.armL.upper.rotation.set(-0.9, 0, 0.2); rig.armL.fore.rotation.x = -1.9;
+        rig.armR.upper.rotation.set(-0.9, 0, -0.2); rig.armR.fore.rotation.x = -1.9;
+      } else if (kind === 'aim') {
+        rig.armR.upper.rotation.set(-1.45, 0.0, -0.25); rig.armR.fore.rotation.x = -0.35;
+        rig.armL.upper.rotation.set(-1.25, 0.0, 0.55); rig.armL.fore.rotation.x = -1.0;
+        rig.chest.rotation.y = 0.35; rig.head.rotation.set(0.1, -0.45, 0);
+      } else if (kind === 'reach') {
+        rig.armL.upper.rotation.set(-2.6, 0, 0.3); rig.armL.fore.rotation.x = -0.5;
+        rig.armR.upper.rotation.set(0, 0, -1.4); rig.armR.fore.rotation.x = -1.5;
+        rig.spine.rotation.z = 0.2; rig.head.rotation.set(-0.3, 0.6, 0);
+      }
+    }
+
+    if (view === 'lineup') {
+      const looks = [{}, look({ skin: 3, hair: 2, style: 1, outfit: 2, eye: 1, beard: 1 }), look({ skin: 5, hair: 1, style: 2, outfit: 3, eye: 2, beard: 0 }), look({ skin: 1, hair: 3, style: 3, outfit: 1, eye: 0, beard: 1 })];
+      looks.forEach((l, i) => add(buildHumanoid(Object.keys(l).length ? l : undefined), (i - 1.5) * 0.85, 0, i === 3 ? Math.PI : i === 2 ? Math.PI / 2 : 0));
+      aim(0, 1.25, 9.5, 0, 1.0, 0);
+    } else if (view === 'head') {
+      const looks = [{}, look({ skin: 3, hair: 2, style: 1, outfit: 2, eye: 1, beard: 1 }), look({ skin: 5, hair: 1, style: 2, outfit: 3, eye: 2, beard: 0 })];
+      looks.forEach((l, i) => add(buildHumanoid(Object.keys(l).length ? l : undefined), (i - 1) * 0.36, 0, [0, 0.6, Math.PI / 2][i]));
+      aim(0, 1.95, 3.0, 0, 1.9, 0);
+    } else if (view === 'hands') {
+      // Fists blown up 8×: back, palm (with a handle where weapons sit), relaxed, goblin claws.
+      const mk = (s, curl, palm, fingers, k = 1, claws = null, rod = false) => {
+        const g = new THREE.Group();
+        fist(g, palm, fingers, s, k, { curl, claws });
+        bakeTree(g);
+        if (rod) {
+          const r = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.26).rotateX(Math.PI / 2), new THREE.MeshLambertMaterial({ color: 0x8a8f99 }));
+          r.position.set(0, -0.065 * 1.38 * k, 0);
+          g.add(r);
+        }
+        g.scale.setScalar(8);
+        return g;
+      };
+      const hands = [mk(1, 1, 0x3a2a24, 0xf3cba5), mk(1, 1, 0x3a2a24, 0xf3cba5, 1, null, true), mk(-1, 0.35, 0xf3cba5, 0xf3cba5), mk(1, 1, 0x5f8a3a, 0x7fb24a, 0.95, 0xe8e0d0)];
+      hands.forEach((g, i) => { g.position.set((i - 1.5) * 1.15, 1.6, 0); g.rotation.y = [-0.9, 1.9, 0.0, -0.6][i]; scene.add(g); });
+      aim(0, 1.05, 9, 0, 1.05, 0);
+    } else if (view === 'poses') {
+      ['stride', 'crouch', 'aim', 'reach'].forEach((k, i) => { const r = add(buildHumanoid(), (i - 1.5) * 1.15, 0, i === 0 ? Math.PI / 2 : i === 1 ? 0.5 : 0.4); pose(r, k); });
+      aim(0, 1.3, 11, 0, 0.95, 0);
+    } else if (view === 'armour') {
+      let seed = Number(q.get('seed') ?? 3);
+      const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+      const orig = Math.random;
+      Math.random = rnd;
+      for (let i = 0; i < 4; i++) {
+        const gear = {};
+        for (const slot of ['head', 'chest', 'hands', 'legs', 'back']) if (slot !== 'back' || i % 2) gear[slot] = generateArmor({ level: 8, luck: 3, slot });
+        add(buildHumanoid(undefined, gear), (i - 1.5) * 0.9, 0, i === 3 ? Math.PI : 0);
+      }
+      Math.random = orig;
+      aim(0, 1.25, 10, 0, 1.0, 0);
+    } else if (view === 'npcs') {
+      const defs = NPCS.filter((d) => d.look).slice(0, 5);
+      defs.forEach((d, i) => add(buildHumanoid(d.look), (i - (defs.length - 1) / 2) * 0.9, 0, 0));
+      aim(0, 1.25, 10, 0, 1.0, 0);
+    } else if (view === 'creatures') {
+      add(buildGoblin(), -1.4, 0, 0.3); add(buildGoblin({ archer: true }), -0.5, 0, 0); add(buildOgre(), 1.0, 0, -0.2);
+      aim(0, 1.4, 11, 0, 1.1, 0);
+    }
+    const q3 = qualityOf(quality);
+    let post = null;
+    if (q3.post) {
+      post = new PostFX(renderer, scene, cam);
+      post.configure(q3, { outlines: true });
+    }
+    setOutlinesVisible(true, { world: !q3.ink, view: true });
+    const fake = { player: { velocity: { x: 0, z: 0 }, vy: 0, bulletJumpT: 0, state: '' }, state: 'title' };
+    const render = () => (post ? post.render(0, fake) : renderer.render(scene, cam));
+    render();
+    window.figure = { scene, cam, renderer, render };
+  </script>
+</body>
+</html>

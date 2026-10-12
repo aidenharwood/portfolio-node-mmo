@@ -1,0 +1,13 @@
+node_modules
+data
+.test-data
+.shots
+.git
+docs
+tools
+serve.py
+*.md
+.load-data
+.pg-test
+deploy
+.github

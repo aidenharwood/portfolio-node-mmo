@@ -1,0 +1,78 @@
+name: "[cel-blade] Test, build and push Docker image"
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+env:
+  IMAGE_REGISTRY: ghcr.io
+  IMAGE_NAME: aidenharwood/portfolio/cel-blade:${{ github.run_id }}-${{ github.run_number }}
+
+jobs:
+  test:
+    name: Run tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17.10-alpine
+        env:
+          POSTGRES_USER: celblade
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: celblade
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U celblade -d celblade"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.18.0"
+          cache: npm
+      - run: npm ci
+      - name: Syntax check
+        run: for f in server/*.js $(find src -name '*.js'); do node --check "$f"; done
+      - name: Smoke test (one process, SQLite)
+        run: npm test
+      - name: Smoke test (gateway and two layers, Postgres)
+        run: npm run test:cluster
+        env:
+          DATABASE_URL: postgres://celblade:ci-only-password@127.0.0.1:5432/celblade
+
+  build_and_push:
+    name: Build and push Docker image
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name != 'pull_request'
+    steps:
+      - uses: aidenharwood/portfolio-action-docker-build-push@v1
+        with:
+          registry: ghcr.io
+          username: ${{ secrets.GHCR_USERNAME }}
+          password: ${{ secrets.GHCR_PAT }}
+          image_name: ${{ env.IMAGE_NAME }}
+          dockerfile: Dockerfile
+          context: .
+
+  update_helm_chart:
+    name: Update Helm chart with new image reference
+    runs-on: ubuntu-latest
+    needs: build_and_push
+    if: github.event_name != 'pull_request'
+    steps:
+      # Both workloads (gateways and realm layers) are in this one file, and the path is set on
+      # every document in it, so they always run the same build.
+      - uses: aidenharwood/portfolio-action-helm-update-image@v1
+        with:
+          target_repo: aidenharwood/portfolio-helm-website
+          repo_token: ${{ secrets.GH_PAT }}
+          registry: ghcr.io
+          image_name: ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}
+          yaml_file: templates/cel-blade/application.portfolio-cel-blade.yaml
+          yaml_path: .spec.template.spec.containers[0].image

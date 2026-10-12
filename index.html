@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#0a0d16">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Cel Blade</title>
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Saira+Condensed:wght@500;600;700;800&family=Chakra+Petch:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body class="at-title">
+  <!-- From the first paint until the title is drawn (main.js bootDone). -->
+  <div id="loading">
+    <h1 class="tt-logo"><span class="tt-cel">CEL</span><span class="tt-blade">BLADE</span></h1>
+    <div class="ld-bar"><i></i></div>
+    <p id="loading-step">Loading…</p>
+  </div>
+  <div id="scope" class="hidden"></div>
+  <div id="labels"></div>
+  <div id="hud">
+    <div id="vignette"></div>
+    <div id="dmgdir"></div>
+
+    <div id="compass"><div id="compass-strip"></div><i class="caret"></i></div>
+
+    <div id="vitals">
+      <div class="lvl-hex"><span class="lbl">LV</span><span id="lvl">1</span></div>
+      <div class="bar-stack">
+        <div class="bar hp"><div class="lag" id="hp-lag"></div><div class="fill" id="hp-fill"></div><span id="hp-text"></span></div>
+        <div class="bar st"><div class="fill" id="st-fill"></div></div>
+        <div class="bar mp"><div class="fill" id="mp-fill"></div><span id="mp-text"></span></div>
+        <div class="gold-line"><span id="gold">0g</span><span id="points"></span></div>
+      </div>
+    </div>
+    <div id="xpbar"><div id="xp-fill"></div><span id="xp-text"></span></div>
+
+    <div id="map-wrap">
+      <div class="map-frame"><canvas id="minimap"></canvas></div>
+      <div id="zone">Brightwater Vale</div>
+      <div id="quests"></div>
+    </div>
+
+    <div id="bossbar" style="display:none"><div id="boss-name"></div><div class="boss-track"><div id="boss-fill"></div></div></div>
+    <div id="reticle" style="display:none"><i></i><i></i><i></i><i></i><b></b></div>
+    <div id="charge" style="display:none"></div>
+    <div id="hitmarker"></div>
+    <div id="combo" style="display:none"><b id="combo-mult"></b><span id="combo-count"></span><i><em id="combo-timer"></em></i></div>
+    <div id="banner"></div>
+    <div id="toast"></div>
+    <div id="prompt" style="display:none"></div>
+    <div id="loot-card" class="hidden"></div>
+
+    <div id="weapons">
+      <div id="slots"></div>
+      <div id="wpn-card">
+        <div id="wpn-name"></div>
+        <div id="wpn-sub"></div>
+        <div id="ammo"></div>
+        <div id="mag"></div>
+      </div>
+    </div>
+  </div>
+  <div id="fx-layer"></div>
+  <div id="dialogue" class="hidden"></div>
+  <div id="inventory" class="hidden"></div>
+  <div id="worldmap" class="hidden">
+    <div class="map-head"><h2>Brightwater Vale</h2><span class="map-info"></span><button class="close" onclick="window.game.closeMenus()">✕</button></div>
+    <canvas></canvas>
+  </div>
+  <div id="menu" class="hidden"></div>
+  <div id="mouse-hint">Click or press any key to take back the mouse</div>
+  <div id="rotate"><i></i>Turn your device sideways</div>
+  <div id="title" class="hidden"></div>
+  <div id="overlay" class="hidden">
+    <div class="panel">
+      <h1 id="overlay-title"></h1>
+      <p id="overlay-sub"></p>
+      <div id="overlay-buttons"></div>
+    </div>
+  </div>
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>

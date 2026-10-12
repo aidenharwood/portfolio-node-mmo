@@ -1,0 +1,44 @@
+# Who may talk to whom (enforced by Cilium): only Cel Blade's own pods reach its database, and
+# only its gateways reach the realm layers. Metrics ports are open to the lgtm namespace (Alloy).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: portfolio-cel-blade-postgres
+spec:
+  podSelector:
+    matchLabels:
+      app: portfolio-cel-blade-postgres
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/part-of: cel-blade
+      ports:
+        - protocol: TCP
+          port: 5432
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: portfolio-cel-blade-realm
+spec:
+  podSelector:
+    matchLabels:
+      app: portfolio-cel-blade-realm
+  policyTypes: [Ingress]
+  ingress:
+    - from: # players, through the gateways
+        - podSelector:
+            matchLabels:
+              app: portfolio-cel-blade-gateway
+      ports:
+        - protocol: TCP
+          port: 8080
+    - from: # health checks and metrics
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: lgtm
+      ports:
+        - protocol: TCP
+          port: 9090

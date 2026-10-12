@@ -1,0 +1,23 @@
+# Everything players reach goes through the gateways: the game, the account API and the
+# realm's WebSocket (/ws — Traefik passes WebSocket upgrades through as they are). Metrics are
+# served on a port of their own (METRICS_PORT), which nothing here routes to.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: cel-blade-ingress
+  annotations:
+    traefik.ingress.kubernetes.io/service.serversscheme: http
+    traefik.ingress.kubernetes.io/router.priority: "10"
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: celblade.aidenharwood.uk
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: portfolio-cel-blade
+                port:
+                  number: 80

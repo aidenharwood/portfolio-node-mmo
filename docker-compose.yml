@@ -1,0 +1,32 @@
+# The realm behind Caddy, which gets and renews a TLS certificate for DOMAIN by itself.
+#   DOMAIN=play.example.com ADMINS=youraccount docker compose up -d
+# (Point DOMAIN's DNS at the machine first; ports 80 and 443 must be reachable.)
+services:
+  celblade:
+    build: .
+    restart: unless-stopped
+    environment:
+      TRUST_PROXY: "1"
+      LOG_FORMAT: json
+      ADMINS: ${ADMINS:-}
+      METRICS_TOKEN: ${METRICS_TOKEN:-}
+      BACKUP_HOURS: ${BACKUP_HOURS:-6}
+    volumes:
+      - celblade-data:/data
+
+  caddy:
+    image: caddy:2.8.4
+    restart: unless-stopped
+    depends_on: [celblade]
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+
+volumes:
+  celblade-data:
+  caddy-data:

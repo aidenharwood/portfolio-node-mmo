@@ -1,0 +1,180 @@
+# Cel Blade: gateways (the front door: the client, the account API, players' connections) and
+# realm layers (each a copy of the world, ~110 players comfortably). See docs/DEPLOY.md.
+#
+# Only the two workloads live in this file: CI sets the image on every document in it
+# (.spec.template.spec.containers[0].image), so both always run the same build.
+#
+# Needs the secret portfolio-cel-blade (postgres-password, internal-key) — created once by hand:
+#   kubectl -n website create secret generic portfolio-cel-blade \
+#     --from-literal=postgres-password=$(openssl rand -hex 24) \
+#     --from-literal=internal-key=$(openssl rand -hex 24)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: portfolio-cel-blade-gateway
+  labels:
+    app: portfolio-cel-blade-gateway
+    app.kubernetes.io/part-of: cel-blade
+spec:
+  replicas: 1 # the autoscaler adds more (hpa.portfolio-cel-blade.yaml)
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0 # players reconnect to the new gateway before the old one goes
+  selector:
+    matchLabels:
+      app: portfolio-cel-blade-gateway
+  template:
+    metadata:
+      labels:
+        app: portfolio-cel-blade-gateway
+        app.kubernetes.io/part-of: cel-blade
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000 # the node image's own user
+        runAsGroup: 1000
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: gateway
+          image: ghcr.io/aidenharwood/portfolio/cel-blade:initial # updated by CI on every build
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: metrics # Prometheus, for the cluster only (never routed by the ingress)
+              containerPort: 9090
+          env:
+            - name: ROLE
+              value: gateway
+            - name: NODE_ENV
+              value: production
+            - name: LOG_FORMAT
+              value: json
+            - name: METRICS_PORT
+              value: "9090"
+            - name: TRUST_PROXY # behind Traefik: the player's address comes from X-Forwarded-For
+              value: "1"
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: portfolio-cel-blade
+                  key: postgres-password
+            - name: DATABASE_URL
+              value: postgres://celblade:$(POSTGRES_PASSWORD)@portfolio-cel-blade-postgres:5432/celblade
+            - name: INTERNAL_KEY # layers only take connections from gateways that know it
+              valueFrom:
+                secretKeyRef:
+                  name: portfolio-cel-blade
+                  key: internal-key
+            - name: LAYER_SOFT_CAP # layers fill to this before the next one is used...
+              value: "110"
+            - name: LAYER_HARD_CAP # ...and parties and moves may take them up to this
+              value: "150"
+            - name: DB_POOL
+              value: "8"
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 200m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: portfolio-cel-blade-realm
+  labels:
+    app: portfolio-cel-blade-realm
+    app.kubernetes.io/part-of: cel-blade
+spec:
+  # One pod per layer; its number is the pod's ordinal (…-realm-0 is layer 1 to players).
+  # More players: more replicas (each holds ~110 comfortably, up to the gateway's hard cap).
+  replicas: 2
+  serviceName: portfolio-cel-blade-realm
+  podManagementPolicy: Parallel
+  updateStrategy:
+    type: RollingUpdate # one layer at a time: its players (and parties) move to another and back
+  selector:
+    matchLabels:
+      app: portfolio-cel-blade-realm
+  template:
+    metadata:
+      labels:
+        app: portfolio-cel-blade-realm
+        app.kubernetes.io/part-of: cel-blade
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+      terminationGracePeriodSeconds: 30 # a closing layer saves everyone and hands them on
+      containers:
+        - name: realm
+          image: ghcr.io/aidenharwood/portfolio/cel-blade:initial # updated by CI on every build
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: metrics # Prometheus, for the cluster only (never routed by the ingress)
+              containerPort: 9090
+          env:
+            - name: ROLE
+              value: realm
+            - name: NODE_ENV
+              value: production
+            - name: LOG_FORMAT
+              value: json
+            - name: METRICS_PORT
+              value: "9090"
+            - name: TRUST_PROXY # the gateway passes the player's address on
+              value: "1"
+            - name: POD_IP # where gateways reach this layer
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: portfolio-cel-blade
+                  key: postgres-password
+            - name: DATABASE_URL
+              value: postgres://celblade:$(POSTGRES_PASSWORD)@portfolio-cel-blade-postgres:5432/celblade
+            - name: INTERNAL_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: portfolio-cel-blade
+                  key: internal-key
+            - name: ADMINS # account names given the admin role (comma-separated)
+              value: ""
+            - name: DB_POOL
+              value: "5"
+          readinessProbe: # 503 while the layer closes, so no one new is sent to it
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 250m
+              memory: 384Mi
+            limits:
+              memory: 1536Mi # ~720 MB at 135 players and 1,200 enemies
