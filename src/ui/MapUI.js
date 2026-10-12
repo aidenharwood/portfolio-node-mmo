@@ -17,6 +17,13 @@ export function levelColor(diff) {
 
 const RACE_COLOR = { scav: '#e8603a', hive: '#b07aff', synth: '#3ad8ff', fauna: '#ffb030' };
 
+export function pickMapDrawStride({ width, height, zoom, chunkCount }) {
+  if (!Number.isFinite(width) || !Number.isFinite(height) || !Number.isFinite(zoom) || zoom <= 0) return 1;
+  const visibleArea = (width * height) / (zoom * zoom);
+  if (chunkCount <= 256 || visibleArea < 2_000_000) return 1;
+  return Math.min(8, Math.max(2, Math.ceil(Math.sqrt(chunkCount / 250))));
+}
+
 // Draws explored chunk tiles plus a blurred fog over unexplored cells into `ctx`, for the world
 // rectangle visible through `toScreen` (shared by the map and the minimap).
 export function drawExplored(ctx, game, x0, z0, x1, z1, toScreen, px, budget = 6) {
@@ -27,6 +34,7 @@ export function drawExplored(ctx, game, x0, z0, x1, z1, toScreen, px, budget = 6
   const cz0 = Math.floor(z0 / CHUNK);
   const cz1 = Math.floor(z1 / CHUNK);
   const size = CHUNK * px;
+  const drawStride = pickMapDrawStride({ width: ctx.canvas.width, height: ctx.canvas.height, zoom: px, chunkCount: d.chunks.size });
   let painted = 0;
   ctx.imageSmoothingEnabled = true;
   const wide = (cx1 - cx0 + 1) * (cz1 - cz0 + 1) > 2500;
@@ -34,7 +42,10 @@ export function drawExplored(ctx, game, x0, z0, x1, z1, toScreen, px, budget = 6
     if (wide) {
       for (const key of d.chunks.keys()) {
         const [cx, cz] = key.split(',').map(Number);
-        if (cx >= cx0 && cx <= cx1 && cz >= cz0 && cz <= cz1) fn(cx, cz);
+        if (cx >= cx0 && cx <= cx1 && cz >= cz0 && cz <= cz1) {
+          if (drawStride > 1 && ((cx + cz) % drawStride) !== 0) continue;
+          fn(cx, cz);
+        }
       }
     } else for (let cx = cx0; cx <= cx1; cx++) for (let cz = cz0; cz <= cz1; cz++) if (d.mask(cx, cz)) fn(cx, cz);
   };

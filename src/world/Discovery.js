@@ -51,13 +51,36 @@ export class Discovery {
 
   toJSON() {
     const out = [];
-    for (const [k, m] of this.chunks) out.push(`${k}:${m[0].toString(36)}:${m[1].toString(36)}`);
-    return out.join(';');
+    for (const [k, m] of this.chunks) {
+      const [cx, cz] = k.split(',').map(Number);
+      out.push([cx, cz, m[0] >>> 0, m[1] >>> 0]);
+    }
+    return JSON.stringify(out);
   }
 
   load(s) {
     this.chunks.clear();
-    if (typeof s !== 'string' || !s.includes(':')) return; // old fixed-valley format: start fresh
+    if (Array.isArray(s)) {
+      for (const entry of s) {
+        if (!Array.isArray(entry) || entry.length < 4) continue;
+        const [cx, cz, a, b] = entry;
+        const key = `${cx},${cz}`;
+        this.chunks.set(key, new Uint32Array([Number(a) >>> 0, Number(b) >>> 0]));
+      }
+      this.version++;
+      return;
+    }
+    if (typeof s !== 'string' || !s) return;
+    if (s.startsWith('[')) {
+      try {
+        const parsed = JSON.parse(s);
+        if (Array.isArray(parsed)) {
+          this.load(parsed);
+          return;
+        }
+      } catch { /* malformed JSON: fall back to the legacy string format */ }
+    }
+    if (!s.includes(':')) return; // old fixed-valley format: start fresh
     for (const part of s.split(';')) {
       const [k, a, b] = part.split(':');
       if (!k || a === undefined) continue;
