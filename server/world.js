@@ -126,6 +126,7 @@ export class HeadlessWorld extends World {
       o.group = { traverse() {} };
       this.flames = [];
       this.shards = [];
+      this.spinners = [];
     }
   }
 

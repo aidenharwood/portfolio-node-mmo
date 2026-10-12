@@ -7,13 +7,13 @@
 //   - whether its attacks hit the local player is decided here, against the enemy as this player
 //     sees it (so a dodge you saw land, landed);
 //   - hits on it are taken here (blocks and wards shown and applied) and reported to the sim.
-// Rigs: bipeds use the humanoid Animator, beasts and spiders the LegAnimator, drones and wraiths
-// the HoverAnimator — each fed from the same attack phase.
+// Rigs: bipeds use the humanoid Animator, the wild's many-legged animals the LegAnimator, sentries
+// and psions the HoverAnimator — each fed from the same attack phase.
 import * as THREE from 'three';
 import { Character, wrapAngle } from './Character.js';
 import { performSweep } from '../combat/Damage.js';
 import { statusTint } from '../combat/Status.js';
-import { ENEMY_TYPES, liveAttack, SUPPORT_KINDS } from '../sim/enemyDefs.js';
+import { ENEMY_TYPES, liveAttack, SUPPORT_KINDS, RANGED_KINDS } from '../sim/enemyDefs.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 import { MODELS, bindAny } from '../models/Creatures.js';
 import { applyComic } from '../render/Toon.js';
@@ -28,13 +28,14 @@ const _fwd = new THREE.Vector3();
 const _p = new THREE.Vector3();
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
-export const RACE_GLOW = { goblin: 0x9aff3a, hollow: 0xb46aff, construct: 0x3ad8ff, beast: 0xff7a3a };
+export const RACE_GLOW = { scav: 0xff8a2a, hive: 0xc46aff, synth: 0x3ad8ff, fauna: 0xffb030 };
+const WARD = 0x7fd8ff; // a tech's shield bubble
 
 // Biped arm poses: forearm/weapon direction (model-space Euler YXZ) and elbow bend.
 const POSE = {
   rest: [0.9, -0.4, 0, 0.5],
   reach: [0.15, -0.15, 0, 0.3],
-  bowRest: [0.7, -0.5, 0, 0.6],
+  gun: [0.55, -0.3, 0, 0.55],
   staff: [0.55, -0.2, 0, 1.0],
   aim: [0, 0, 0, 0.25],
   raised: [-2.3, -0.3, Math.PI / 2, 1.1],
@@ -51,10 +52,6 @@ const POSE = {
   castHigh: [-2.5, 0, 0, 0.15],
   chargeBack: [1.6, -0.5, 0, 0.4],
   chargeFwd: [0.25, 0.2, 0, 0.2],
-};
-const HUNCH = {
-  goblin: 0.3, ogre: 0.16, 'ogre:boss': 0.12, 'hollow:husk': 0.38, 'hollow:bloated': 0.26, 'hollow:archer': 0.1, 'hollow:marksman': 0.08,
-  'hollow:revenant': 0.04, 'hollow:captain': 0.04, 'hollow:king': 0.02, 'construct:stalker': 0.22, construct: 0.08,
 };
 // Leg-rig poses per attack kind.
 const LEG_POSE = { bite: 'bite', combo: 'swipe', swing: 'swipe', charge: 'charge', pounce: 'pounce', bolt: 'spit', stomp: 'rear', howl: 'howl', summon: 'howl' };
@@ -163,11 +160,10 @@ export class Enemy extends Character {
       this.animator = new HoverAnimator(this.rig);
     } else {
       this.anim = makeAnimState();
-      this.anim.hunch = type.hunchless ? 0 : HUNCH[type.model] ?? HUNCH[type.model.split(':')[0]] ?? 0;
-      this.anim.armSwing = type.model === 'hollow:husk' || type.model === 'hollow:bloated' ? 0.15 : 0.6;
+      this.anim.hunch = type.hunch ?? 0;
+      this.anim.armSwing = type.armSwing ?? 0.6;
       this.animator = new Animator(this.rig);
       this.armPose = [...this.restPose()];
-      this.draw = { obj: this.rig.weaponMount, local: new THREE.Vector3() };
       // The shield arm's guard: a frame in front of the chest the off hand holds the shield in.
       if (type.block && this.rig.offMount) {
         const d = this.rig.dims;
@@ -189,11 +185,7 @@ export class Enemy extends Character {
   get behavior() { return this.type.behavior; }
 
   restPose() {
-    const t = this.type;
-    if (t.bow) return POSE.bowRest;
-    if (t.model.startsWith('goblin:sha') || t.model === 'goblin:spark') return POSE.staff;
-    if (t.model === 'hollow:husk' || t.model === 'hollow:bloated') return POSE.reach;
-    return POSE.rest;
+    return POSE[this.type.stance] ?? POSE.rest;
   }
 
   // ================================================================ following the sim
@@ -252,7 +244,7 @@ export class Enemy extends Character {
     const s = this.state;
     if (s === 'windup' && newAttack && a) {
       if (a.kind === 'stomp' || a.kind === 'nova') {
-        g.effects.spawnTelegraph(this.position, a.radius, a.windup, a.kind === 'nova' ? RACE_GLOW.hollow : 0xff3a1a);
+        g.effects.spawnTelegraph(this.position, a.radius, a.windup, a.kind === 'nova' ? RACE_GLOW.hive : 0xff3a1a);
         g.audio.rumble(this.position, a.windup);
       } else if (a.kind === 'charge') g.audio.roar?.(this.position, this.type.mass);
       else if (a.kind === 'howl' || (a.kind === 'summon' && a.howl)) g.audio.howl?.(this.position, this.isBoss);
@@ -335,16 +327,16 @@ export class Enemy extends Character {
     void dt;
   }
 
-  // Where shots leave the body (for effects; the sim fires from its own estimate).
+  // Where shots leave the body (for effects; the sim fires from its own estimate): the tip of the
+  // weapon (staff, cannon) as drawn, or the type's muzzle point.
   muzzle(out) {
     const r = this.rig;
     this.forward(_fwd);
     if (this.rigKind === 'hover') return r.body.getWorldPosition(out).addScaledVector(_fwd, 0.45);
     if (this.rigKind === 'legs') return (r.head ?? r.body).getWorldPosition(out).addScaledVector(_fwd, 0.25);
-    const m = this.type.model;
-    if (m.startsWith('goblin:sha') || m === 'goblin:spark') return r.weaponMount.localToWorld(out.set(0, 0, 1.15));
-    if (m.startsWith('construct:') && m !== 'construct:stalker') return out.copy(this.position).setY(this.position.y + this.height * 0.95).addScaledVector(_fwd, -0.3);
-    return out.copy(this.position).addScaledVector(_fwd, 0.6).setY(this.position.y + this.height * 0.72);
+    const m = this.type.muzzle;
+    if (m?.tip) return r.weaponMount.localToWorld(out.set(0, 0, m.tip));
+    return out.copy(this.position).addScaledVector(_fwd, m?.f ?? 0.6).setY(this.position.y + this.height * (m?.y ?? 0.72));
   }
 
   // ================================================================ damage
@@ -384,7 +376,7 @@ export class Enemy extends Character {
 
   updateWard() {
     if (this.ward && !this.wardMesh) {
-      const mat = new THREE.MeshBasicMaterial({ color: RACE_GLOW.goblin, transparent: true, opacity: 0.22, depthWrite: false, blending: THREE.AdditiveBlending });
+      const mat = new THREE.MeshBasicMaterial({ color: WARD, transparent: true, opacity: 0.22, depthWrite: false, blending: THREE.AdditiveBlending });
       this.wardMesh = new THREE.Mesh(WARD_GEO, mat);
       this.root.add(this.wardMesh);
     }
@@ -489,20 +481,18 @@ export class Enemy extends Character {
     s.twist = 0;
     s.crouch = 0;
     s.offGrip = null;
-    s.offPose = this.type.model === 'hollow:husk' || this.type.model === 'hollow:bloated' ? 'cast' : null;
+    s.offPose = this.type.offPose ?? null;
 
     const [phase, t] = this.phaseInfo();
     const a = this.cur;
     let P = this.restPose();
     let k = 1 - Math.exp(-12 * dt);
-    if (this.type.bow) {
-      const drawing = phase === 'windup';
-      if (drawing || (phase === 'recover' && t < 0.4)) P = POSE.aim;
-      if (drawing) {
-        // Off hand pulls the string back to the cheek.
-        const R = this.type.model === 'hollow:marksman' ? 0.6 : 0.5;
-        this.draw.local.set(0, 0, -R - Math.min(1, t / 0.6) * 0.22);
-        s.offGrip = this.draw;
+    if (this.type.stance === 'gun' && a && RANGED_KINDS.has(a.kind)) {
+      // A gun arm comes up to aim through the windup and holds through the recoil.
+      if (phase === 'windup' || phase === 'active' || (phase === 'recover' && t < 0.4)) {
+        P = POSE.aim;
+        k = 1 - Math.exp(-14 * dt);
+        s.strike = phase === 'active' ? 0.5 : 0;
       }
     } else if (a && phase !== 'none') {
       const kind = a.kind;

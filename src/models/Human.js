@@ -145,7 +145,7 @@ export function legPiece(rig, s, color, o = {}, po = {}) {
 // The hand bone sits at the wrist; the hand hangs along -Y, back of the hand outward (+X·s), palm
 // in, thumb forward (+Z). Gripped handles run along Z through the curl of the fingers, 1.38 × grip
 // below the wrist (anim/Animator.js) — a full curl wraps the fingers round (0, -0.09). curl < 1
-// relaxes the hand (nothing in it). k scales it (goblins, ogres, bulky gauntlets).
+// relaxes the hand (nothing in it). k scales it (exo-suits, bulky gauntlets).
 const PALM = [
   { y: -0.104, x: 0.027, wo: 0.007, wi: 0.008, zf: 0.03, zb: 0.026, n: 3 },
   { y: -0.096, x: 0.027, wo: 0.0145, wi: 0.016, zf: 0.04, zb: 0.037, n: 3.2 },
@@ -328,6 +328,22 @@ export function buildHead(skull, L, { hidesFace = false } = {}) {
     piece(skull, G.torus(0.0152, 0.0016, Math.PI * 0.84, 3, 10), LINE, { pos: [x, 0.0745, 0.0985], rot: [0, 0, Math.PI * 0.08], scale: [1, 0.72, 1], glow: true, outline: 0 });
     piece(skull, new THREE.CapsuleGeometry(0.0038, 0.026, 2, 6).rotateZ(Math.PI / 2), L.brow ?? L.hair, { pos: [0.037 * s, 0.1025, 0.1015], rot: [0, 0.3 * s, -0.12 * s], scale: [1, 0.8, 1], outline: 0 });
   }
+}
+
+// A carved head in one material (monuments): the same skull, face, nose, brow, lips and ears,
+// with hollow eyes. Outlines are for the scale it's shown at, so pass them in.
+export function sculptHead(parent, color, dark = shade(color, 0.6), ink = 0.004) {
+  piece(parent, G.sphere(1, 16, 12), color, { pos: CRANIUM.pos, scale: CRANIUM.r, outline: ink });
+  piece(parent, loftGeometry(FACE, { seg: 18, sub: 2, caps: [true, false], dome: 0.5 }), color, { outline: ink });
+  piece(parent, loftGeometry(NOSE, { seg: 10, sub: 2, caps: [true, true], dome: 0.6 }), color, { outline: ink });
+  for (const s of [-1, 1]) {
+    piece(parent, G.sphere(1, 8, 6), color, { pos: [0.095 * s, 0.066, -0.012], rot: [-0.15, -0.6 * s, 0], scale: [0.012, 0.03, 0.019], outline: ink });
+    piece(parent, G.sphere(1, 10, 8), dark, { pos: [0.035 * s, 0.078, 0.088], scale: [0.016, 0.01, 0.008], outline: 0 });
+  }
+  piece(parent, G.sphere(1, 14, 6), color, { pos: [0, 0.098, 0.089], scale: [0.076, 0.017, 0.0145], outline: 0 });
+  piece(parent, new THREE.CapsuleGeometry(0.006, 0.026, 3, 8).rotateZ(Math.PI / 2), color, { pos: [0, -0.003, 0.1], scale: [1, 1, 0.8], outline: 0 });
+  piece(parent, new THREE.CapsuleGeometry(0.0072, 0.02, 3, 8).rotateZ(Math.PI / 2), color, { pos: [0, -0.016, 0.096], scale: [1, 1, 0.85], outline: 0 });
+  piece(parent, new THREE.CylinderGeometry(0.06, 0.07, 0.12, 12), color, { pos: [0, -0.05, -0.02], outline: ink });
 }
 
 // Old-style headwear (hats, goggles, visors and every armour helm) is modelled round a head of

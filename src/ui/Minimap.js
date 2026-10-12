@@ -7,7 +7,7 @@ import { PARTY_COLOR } from './PartyUI.js';
 
 const SIZE = 180;
 const RANGE = 60; // world units from centre to edge
-const RACE_FILL = { goblin: 'rgba(200,80,50,0.65)', hollow: 'rgba(150,90,230,0.6)', construct: 'rgba(40,180,230,0.6)', beast: 'rgba(230,150,40,0.6)' };
+const RACE_FILL = { scav: 'rgba(200,80,50,0.65)', hive: 'rgba(150,90,230,0.6)', synth: 'rgba(40,180,230,0.6)', fauna: 'rgba(230,150,40,0.6)' };
 
 export class Minimap {
   constructor(canvas) {
@@ -133,6 +133,13 @@ export class Minimap {
           ctx.fillRect(-1.6, -1.6, 3.2, 3.2);
           ctx.restore();
         } else if (poi.type === 'chest' && !game.openedChests.has(poi.id)) this.dot(poi.x, poi.z, 1.4, '#f0c75e');
+        else if (poi.type === 'settlement') {
+          ctx.fillStyle = 'rgba(255,210,122,0.55)';
+          ctx.beginPath();
+          ctx.arc(poi.x, poi.z, poi.r, 0, Math.PI * 2);
+          ctx.fill();
+          this.dot(poi.x, poi.z, 2.6, '#ffd27a');
+        } else if (poi.type === 'landmark') this.dot(poi.x, poi.z, 2.6, '#c8b4ff');
       }
     }
     for (const dr of game.drops) if (dr.tier >= 2) this.dot(dr.position.x, dr.position.z, 1.2, RARITY[dr.weapon.rarity].css);

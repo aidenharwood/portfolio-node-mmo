@@ -25,7 +25,17 @@ export const BIOME_COLOR = {
   marsh: new THREE.Color(0x6a8a4c),
   ash: new THREE.Color(0x6e5e56),
   mountain: new THREE.Color(0x8c877d),
+  desert: new THREE.Color(0xe2c48c),
+  badlands: new THREE.Color(0xc27448),
+  jungle: new THREE.Color(0x3f9a4a),
+  crystal: new THREE.Color(0x9aa4dc),
+  fungal: new THREE.Color(0x7d5c8e),
 };
+// Badlands rock in bands by height, so terraces and canyon walls show their strata.
+const STRATA = [0xc27448, 0xae5e3a, 0xd4905e, 0x9c5236].map((c) => new THREE.Color(c));
+const SANDSTONE = new THREE.Color(0xc9a070);
+const SPORE_MOSS = new THREE.Color(0xa874c8);
+const VEIN = new THREE.Color(0xc8f0ff);
 const ROCK = new THREE.Color(0x9a948a);
 const SNOWCAP = new THREE.Color(0xeef3f6);
 const SAND = new THREE.Color(0xd9c992);
@@ -214,9 +224,20 @@ export class Chunk {
 
   colorAt(x, z, h, slope, feats, out) {
     const gen = this.gen;
-    out.copy(BIOME_COLOR[gen.biomeAt(x, z)]);
+    const biome = gen.biomeAt(x, z);
+    if (biome === 'badlands') out.copy(STRATA[((Math.floor((h + 60) / 1.7) % 4) + 4) % 4]);
+    else out.copy(BIOME_COLOR[biome]);
+    if (biome === 'fungal') {
+      const n = gen.nD(x * 0.05, z * 0.05);
+      if (n > 0.25) out.lerp(SPORE_MOSS, Math.min(1, (n - 0.25) * 1.5));
+    } else if (biome === 'crystal') {
+      const v = Math.abs(gen.nD(x * 0.09 + 3, z * 0.09));
+      if (v < 0.05) out.lerp(VEIN, (0.05 - v) * 14);
+    } else if (biome === 'desert') {
+      out.multiplyScalar(0.97 + gen.nD(x * 0.11, z * 0.03) * 0.05);
+    }
     if (h > 30) out.lerp(SNOWCAP, smoothstep(30, 44, h));
-    if (slope > 0.75) out.lerp(ROCK, smoothstep(0.75, 1.2, slope));
+    if (slope > 0.75 && biome !== 'badlands') out.lerp(biome === 'desert' ? SANDSTONE : ROCK, smoothstep(0.75, 1.2, slope));
     if (h < WATER_LEVEL + 0.7) out.lerp(SAND, smoothstep(WATER_LEVEL + 0.7, WATER_LEVEL + 0.1, h));
     if (h < WATER_LEVEL - 0.3) out.copy(LAKEBED);
     for (const p of feats.pads) {

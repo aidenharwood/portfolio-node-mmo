@@ -16,7 +16,10 @@ import { WATER_LEVEL } from '../world/Gen.js';
 const HN = 128;            // height texels per side
 const CN = 64;             // colour/density texels per side
 const BUDGET_MS = 2.5;     // per frame, for rebuilding the textures
-const DENSITY = { meadow: 0.85, forest: 0.6, highland: 0.45, marsh: 0.5, mountain: 0.25, snow: 0, ash: 0.04 };
+const DENSITY = {
+  meadow: 0.85, forest: 0.6, highland: 0.45, marsh: 0.5, mountain: 0.25, snow: 0, ash: 0.04,
+  desert: 0.03, badlands: 0.08, jungle: 1, crystal: 0.18, fungal: 0.55,
+};
 const smooth = (a, b, x) => {
   const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
   return t * t * (3 - 2 * t);

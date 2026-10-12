@@ -131,7 +131,7 @@ export function makeAnimState() {
     stance: 0,             // 0..1 feet planted wide, left foot forward (fighting stance)
     aimPitch: 0, lookYaw: 0,
     flinch: 0, flip: 0, corkscrew: 0, spin: 0, glide: false,
-    hunch: 0,              // permanent stoop (goblins, ogres)
+    hunch: 0,              // permanent stoop (hive bugs, raiders, exo-suits)
   };
 }
 
@@ -373,7 +373,10 @@ export class Animator {
     else if (mode === 'dead') base = lerp(d.hipY, d.hipY * 0.25, ease(clamp(s.t * 1.4, 0, 1)));
     else if (mode === 'mantle') base = d.hipY * 0.92;
     const baseY = sp.base.step(base, dt);
-    this.hipsBase = baseY; // how high the hips are carried (springs, no bob): the first-person eye
+    // How high the hips are carried (springs, no bob), for the first-person eye — which keeps only
+    // a quarter of the gait's running dip (a full one sinks the view whenever you break into a run).
+    this.eyeLift = (this.eyeLift ?? 0) + ((mode === 'ground' ? drop * 0.75 : 0) - (this.eyeLift ?? 0)) * (1 - Math.exp(-8 * dt));
+    this.hipsBase = baseY + this.eyeLift;
     const bobAmp = L * lerp(0.025, -0.05, run) * move * groundW;
     const bob = bobAmp * Math.cos(TAU * 2 * (this.phase - D / 2));
     const breathe = Math.sin(this.time * 2.1) * 0.006 * (1 - move);

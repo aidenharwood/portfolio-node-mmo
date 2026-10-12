@@ -60,6 +60,15 @@ export class CharacterCore {
     return Math.hypot(this.position.x - x, this.position.z - z) <= r;
   }
 
+  // By the hub's trader, or a settlement's (world/Gen.js places them).
+  nearTrader() {
+    if (!this.strict || this.near(TRADER.x, TRADER.z, REACH.trader)) return true;
+    for (const s of this.world?.poisNear?.(this.position.x, this.position.z, 40, ['settlement']) ?? []) {
+      for (const n of s.npcs) if (n.role === 'trader' && this.near(n.x, n.z, REACH.trader)) return true;
+    }
+    return false;
+  }
+
   // ================================================================ the authority's dice
   roll(op) {
     const lvl = this.stats.level;
@@ -126,7 +135,7 @@ export class CharacterCore {
         if (!validLoc(op.loc)) return false;
         const item = inv.at(op.loc);
         if (!item) return false;
-        if (op.op === 'sell' && !this.near(TRADER.x, TRADER.z, REACH.trader)) return false;
+        if (op.op === 'sell' && !this.nearTrader()) return false;
         const value = itemValue(item);
         inv.remove(item);
         s.gold += op.op === 'sell' ? value : Math.ceil(value * 0.5);
@@ -135,7 +144,7 @@ export class CharacterCore {
       }
       case 'buy': {
         const item = this.shop.stock[op.i];
-        if (!item || !this.near(TRADER.x, TRADER.z, REACH.trader)) return false;
+        if (!item || !this.nearTrader()) return false;
         const price = itemValue(item) * 3;
         if (s.gold < price) return false;
         const to = Number.isInteger(op.to) && op.to >= 0 && op.to < inv.backpack.length && !inv.backpack[op.to] ? op.to : inv.backpack.indexOf(null);

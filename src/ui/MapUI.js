@@ -15,7 +15,7 @@ export function levelColor(diff) {
   return '#ffffff';
 }
 
-const RACE_COLOR = { goblin: '#e8603a', hollow: '#b07aff', construct: '#3ad8ff', beast: '#ffb030' };
+const RACE_COLOR = { scav: '#e8603a', hive: '#b07aff', synth: '#3ad8ff', fauna: '#ffb030' };
 
 // Draws explored chunk tiles plus a blurred fog over unexplored cells into `ctx`, for the world
 // rectangle visible through `toScreen` (shared by the map and the minimap).
@@ -195,6 +195,8 @@ export class MapUI {
         if (p.type === 'waystone') out.push({ kind: 'waystone', x: p.x, z: p.z, name: p.name, active: g.attuned.has(p.id), id: p.id });
         else if (p.type === 'camp') out.push({ kind: 'camp', x: p.x, z: p.z, name: p.name, level: p.level, race: p.race, cleared: g.encounters.isCleared(p.id), boss: !!p.stronghold });
         else if (p.type === 'chest' && !g.openedChests.has(p.id)) out.push({ kind: 'chest', x: p.x, z: p.z, name: 'Treasure' });
+        else if (p.type === 'settlement') out.push({ kind: 'settlement', x: p.x, z: p.z, name: p.name, trader: p.npcs.some((n) => n.role === 'trader') });
+        else if (p.type === 'landmark') out.push({ kind: 'landmark', x: p.x, z: p.z, name: p.name });
       }
     }
     return out;
@@ -292,6 +294,12 @@ export class MapUI {
       } else if (p.kind === 'waystone') {
         this.icon(sx, sy, 'waystone', !p.active);
         if (this.zoom > 1.2 || this.hover === p) this.label(sx, sy + 16, p.name, p.active ? '#7fe8ff' : '#aaa');
+      } else if (p.kind === 'settlement') {
+        this.icon(sx, sy, 'settlement');
+        this.label(sx, sy + 18, p.trader ? `${p.name} · Trader` : p.name, '#ffe2a8');
+      } else if (p.kind === 'landmark') {
+        this.icon(sx, sy, 'landmark');
+        if (this.zoom > 0.35 || this.hover === p) this.label(sx, sy + 18, p.name, '#d8c8ff');
       } else if (this.zoom > 0.4) {
         this.icon(sx, sy, 'chest');
       }
@@ -381,6 +389,27 @@ export class MapUI {
       ctx.fillStyle = '#f0c75e';
       ctx.strokeRect(-6, -4, 12, 9);
       ctx.fillRect(-6, -4, 12, 9);
+    } else if (kind === 'settlement') {
+      // A house: walls and a roof.
+      ctx.fillStyle = '#ffd27a';
+      ctx.beginPath();
+      ctx.moveTo(-8, 7); ctx.lineTo(-8, -1); ctx.lineTo(0, -9); ctx.lineTo(8, -1); ctx.lineTo(8, 7); ctx.closePath();
+      ctx.stroke();
+      ctx.fill();
+      ctx.fillStyle = '#5a3a1a';
+      ctx.fillRect(-2, 1, 4, 6);
+    } else if (kind === 'landmark') {
+      // A four-pointed star.
+      ctx.fillStyle = '#c8b4ff';
+      ctx.beginPath();
+      for (let i = 0; i < 8; i++) {
+        const r = i % 2 ? 3.5 : 10;
+        const a = (i / 8) * Math.PI * 2 - Math.PI / 2;
+        ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+      }
+      ctx.closePath();
+      ctx.stroke();
+      ctx.fill();
     } else if (kind === 'hub') {
       ctx.fillStyle = '#9fe3ff';
       ctx.beginPath();

@@ -4,6 +4,8 @@
 //   bounty         repeatable: slay any dozen monsters
 // Objective types: kill (enemy type), killRace, killAny, clear (camp id), attune, chest.
 // Rewards: xp, gold, weapon / armor (generator options). Generated quests are saved whole.
+import { OLD_RACE } from '../combat/bestiary.js';
+
 export const QUESTS = [
   {
     id: 'ys1', giver: 'sage', title: 'Stones That Remember',
@@ -32,10 +34,22 @@ export const QUESTS = [
 ];
 
 const RACE = {
-  goblin: { name: 'Goblin Warband', plural: 'goblins', line: 'Scrap-tech raiders — they\'ll swarm you, then the bombs start flying.' },
-  hollow: { name: 'the Hollow', plural: 'Hollow dead', line: 'The void-touched dead. Fire them, bury them, don\'t let the casters linger.' },
-  construct: { name: 'the Constructs', plural: 'rogue constructs', line: 'Old arcane machines gone rogue. Their drones hit hard and die fast; the big ones don\'t.' },
-  beast: { name: 'the Wild', plural: 'beasts', line: 'Packs that hunt together. Keep your back to something solid.' },
+  scav: {
+    name: 'the Scav Clans', plural: 'scavs', seat: 'Their warlord holds it, in an exo-suit with a hammer the size of a door.',
+    line: 'Raiders in salvaged armour — they\'ll swarm you, then the grenades start flying. Drop the tech first.',
+  },
+  hive: {
+    name: 'the Hive', plural: 'hive-spawn', seat: 'A queen broods at the heart of it.',
+    line: 'Bugs that came down with the old ships, and they breed. Burn the nests, and don\'t let the psions linger.',
+  },
+  synth: {
+    name: 'the Synths', plural: 'rogue synths', seat: 'A colossus stands guard over the foundry.',
+    line: 'War machines nobody switched off. Their sentries hit hard and die fast; the big ones don\'t.',
+  },
+  fauna: {
+    name: 'the Wild', plural: 'wild things', seat: 'Something huge has made it its lair.',
+    line: 'Packs that hunt together. Keep your back to something solid.',
+  },
 };
 
 const COMPASS = ['east', 'north-east', 'north', 'north-west', 'west', 'south-west', 'south', 'south-east'];
@@ -113,7 +127,7 @@ export class QuestLog {
       id: `contract-${n}`, giver: 'warden', generated: true, target: best.id,
       title: best.stronghold ? `Siege: ${best.name}` : `Contract: ${best.name}`,
       offer: best.stronghold
-        ? `${best.name} — ${R.name} have dug in there, in ${region.name}, about ${dist} metres ${dir}. Their warlord holds it. Break the place and end whatever sits on that throne.`
+        ? `${best.name} — ${R.name} have dug in there, in ${region.name}, about ${dist} metres ${dir}. ${R.seat} Break the place and end whatever sits on that throne.`
         : `There's a camp of ${R.plural} — ${best.name}, out in ${region.name}, about ${dist} metres ${dir}. ${R.line} Clear it out.`,
       progress: `${best.name} lies ${dir} of here, in ${region.name}. Your map marks it.`,
       turnIn: best.stronghold ? 'You broke their stronghold. Songs will be sung — badly, by Tobbin, but sung.' : `${best.name}'s quiet. Good work. There'll be another.`,
@@ -224,7 +238,11 @@ export class QuestLog {
   }
 
   load(d) {
-    for (const q of d.generated ?? []) this.defs.set(q.id, q);
+    for (const q of d.generated ?? []) {
+      // Hunts saved before the factions were redesigned name them the old way.
+      for (const o of q.objectives ?? []) if (o.race && OLD_RACE[o.race]) o.race = OLD_RACE[o.race];
+      this.defs.set(q.id, q);
+    }
     // Quests from the old fixed valley no longer exist; drop their progress.
     this.active = Object.fromEntries(Object.entries(d.active ?? {}).filter(([id]) => this.defs.has(id)));
     this.completed = new Set(d.completed ?? []);

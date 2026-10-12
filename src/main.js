@@ -17,6 +17,7 @@ import { DevTools } from './dev/DevTools.js';
 import { Sfx } from './audio/Sfx.js';
 import { World } from './world/World.js';
 import { NPCS } from './world/mapData.js';
+import { settlementFolk, KIND_TITLE } from './world/settlements.js';
 import { HUB } from './world/Gen.js';
 import { Discovery } from './world/Discovery.js';
 import { MapUI } from './ui/MapUI.js';
@@ -177,6 +178,10 @@ class Game {
 
     this.npcs = NPCS.map((def) => new NPC(this, def));
     for (const n of this.npcs) this.scene.add(n.root);
+    // Settlements bring their folk with them as they stream in, and take them when they go.
+    this.seenLandmarks = new Set();
+    this.world.onPoiLoad = (p) => { if (p.type === 'settlement') this.addSettlementFolk(p); };
+    this.world.onPoiUnload = (p) => { if (p.type === 'settlement') this.removeSettlementFolk(p); };
     this.campfire = { kind: 'campfire', name: 'Hearth Reactor', title: 'Rest', position: new THREE.Vector3(HUB.x, 0, HUB.z), height: 1.2 };
 
     // A save that can't be restored must never stop the game from starting: report it and fall
@@ -864,10 +869,37 @@ class Game {
       if (!first && !region.hub) this.hud.banner(region.name, `Level ${region.level} · ${RACE[region.race].name.replace(/^the /, 'The ')}`);
     }
     const z = this.world.zoneAt(p.x, p.z);
-    if (z === this.zone) return;
-    this.zone = z;
-    if (z && z.level) this.hud.banner(z.name, `Level ${z.level}${z.stronghold ? ' · Stronghold' : ''}`);
-    else if (z === HUB) this.hud.banner(HUB.name, 'Safe haven');
+    if (z !== this.zone) {
+      this.zone = z;
+      if (z?.type === 'settlement') this.hud.banner(z.name, `${KIND_TITLE[z.kind] ?? 'Settlement'} · Safe haven`);
+      else if (z && z.level) this.hud.banner(z.name, `Level ${z.level}${z.stronghold ? ' · Stronghold' : ''}`);
+      else if (z === HUB) this.hud.banner(HUB.name, 'Safe haven');
+    }
+    // The first time this session you reach a landmark.
+    const lm = this.world.landmarkAt(p.x, p.z);
+    if (lm && !this.seenLandmarks.has(lm.id)) {
+      this.seenLandmarks.add(lm.id);
+      this.hud.banner(lm.name, 'Landmark discovered');
+    }
+  }
+
+  addSettlementFolk(place) {
+    for (const n of place.npcs) {
+      if (this.npcs.some((o) => o.id === n.id)) continue;
+      const npc = new NPC(this, settlementFolk(place, n));
+      npc.place = place.id;
+      this.npcs.push(npc);
+      this.scene.add(npc.root);
+    }
+  }
+
+  removeSettlementFolk(place) {
+    this.npcs = this.npcs.filter((n) => {
+      if (n.place !== place.id) return true;
+      this.scene.remove(n.root);
+      n.dispose();
+      return false;
+    });
   }
 
   // Where the tracked quest points (cached briefly: it's drawn by the compass, map and minimap).
@@ -996,7 +1028,7 @@ class Game {
     if (npc.role === 'trader') {
       this.dialogue.open({
         name: npc.name, title: npc.title,
-        text: 'Steel, powder and sorcery — fair prices, mostly. Got anything to sell?',
+        text: npc.def.greeting ?? 'Steel, powder and sorcery — fair prices, mostly. Got anything to sell?',
         options: [{ label: 'Browse wares', onClick: () => this.openGameMenu('inventory', { shop: true }) }],
       });
       return;

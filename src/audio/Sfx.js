@@ -132,7 +132,8 @@ export class Sfx {
     if (pos.y > w.groundHeight(pos.x, pos.z) + 0.08) return 'hard';
     if (w.zoneAt(pos.x, pos.z) || w.nearRoad(pos.x, pos.z)) return 'gravel';
     const b = w.biomeAt(pos.x, pos.z);
-    return b === 'snow' ? 'snow' : b === 'marsh' ? 'mud' : b === 'ash' || b === 'highland' || b === 'mountain' ? 'gravel' : 'grass';
+    return b === 'snow' || b === 'desert' ? 'snow' : b === 'marsh' ? 'mud'
+      : b === 'ash' || b === 'highland' || b === 'mountain' || b === 'badlands' || b === 'crystal' ? 'gravel' : 'grass';
   }
 
   footstep(surface, intensity = 0.5, pan = 0, pos = null, rattle = false) {
@@ -733,7 +734,8 @@ export class Sfx {
     E.burst(v.in, v.t, { color: 'brown', filter: 'lowpass', f: 120, f2: 260, dur, attack: dur * 0.85, peak: 0.8 });
   }
 
-  // Enemy spellwork building up: void (hollow), energy (constructs), web (spiders), support magic.
+  // Enemy shots building up: psi (psions), energy (techs, synths), web (crawlers' resin), and
+  // the hum of a tech's shield or repair field.
   enemyCast(pos, kind, dur = 0.6) {
     const E = this.E;
     if (!E.allow('ecast', 0.08)) return;
@@ -741,7 +743,7 @@ export class Sfx {
     if (!v) return;
     const t = v.t;
     const o = v.in;
-    if (kind === 'void') {
+    if (kind === 'psi') {
       E.tone(o, t, { wave: 'sawtooth', f: 90, f2: 180, glide: dur, dur: dur + 0.15, attack: dur * 0.8, peak: 0.35, lp: 700, vib: [6, 12] });
       E.fm(o, t + dur * 0.4, { f: 233, ratio: 1.41, index: 3, dur: dur * 0.8, peak: 0.18 });
     } else if (kind === 'energy' || kind === 'fan') {
@@ -757,7 +759,8 @@ export class Sfx {
     }
   }
 
-  // An enemy shot leaving: zaps for energy, a hollow moan for void, a wet flick for web.
+  // An enemy shot leaving: zaps for energy, a warbling moan for psi, a wet flick for acid, resin
+  // and spines.
   enemyShot(pos, kind) {
     const E = this.E;
     if (!E.allow('eshot-' + kind, 0.04)) return;
@@ -766,14 +769,14 @@ export class Sfx {
     if (kind === 'energy') {
       E.tone(v.in, v.t, { wave: 'square', f: vary(1800), f2: 300, dur: 0.1, peak: 0.25, lp: 4000 });
       E.burst(v.in, v.t, { color: 'white', filter: 'highpass', f: 2500, dur: 0.04, attack: 0.0005, peak: 0.3 });
-    } else if (kind === 'void') {
+    } else if (kind === 'psi') {
       E.tone(v.in, v.t, { wave: 'sawtooth', f: vary(220), f2: 110, dur: 0.35, peak: 0.25, lp: 900, vib: [9, 14] });
     } else {
       E.burst(v.in, v.t, { color: 'pink', filter: 'lowpass', f: 1400, f2: 500, dur: 0.12, attack: 0.002, peak: 0.45 });
     }
   }
 
-  // A wolf (or an Ursa calling its pack): rising, wavering, long.
+  // A razorhound (or the Behemoth calling its pack): rising, wavering, long.
   howl(pos, big = false) {
     const E = this.E;
     const v = E.voice({ pos, gain: big ? 0.9 : 0.6, wet: 0.55, dur: 2.6, reach: 45, priority: 2 });
@@ -794,7 +797,7 @@ export class Sfx {
     E.tone(E.drive(v.in, 3), v.t + 0.1, { wave: 'sawtooth', f: 110 / Math.sqrt(size), f2: 70 / Math.sqrt(size), dur: 0.7, attack: 0.15, peak: 0.35, lp: 600, vib: [22, 8] });
   }
 
-  // Spider screech before a pounce.
+  // A crawler's screech before it pounces.
   screech(pos) {
     const E = this.E;
     const v = E.voice({ pos, gain: 0.9, wet: 0.2, dur: 0.6, reach: 18 });

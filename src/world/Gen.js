@@ -1,11 +1,15 @@
 // Endless world generation. Everything here is a pure function of (seed, position), so any part of
 // the world can be rebuilt identically at any time and nothing but the seed needs saving.
-//   shape     continental basins and lakes, rolling hills, ridged mountain ranges inside a range
-//             mask, and rivers along a warped noise's zero line; the hub plain stays gentle
-//   climate   temperature / moisture / corruption fields (domain-warped) → biomes
+//   shape     continental basins and lakes; hills that roll gently round the hub and stand up into
+//             ridgelines in rugged country; ridged mountain ranges inside a range mask; rivers along
+//             a warped noise's zero line — and landforms by climate (blended, so the land stays
+//             continuous across borders): dune seas in the deserts, plateaus stepped into terraces
+//             and cut by canyons in the badlands
+//   climate   temperature / moisture / strangeness fields (domain-warped) → twelve biomes
 //   regions   the world is cut into Voronoi regions (~REGION apart): each has a name, biome,
 //             owning race, danger level (rising with distance from the hub) and its points of
-//             interest — camps, a waystone, towers, ruins, mesas, chests, maybe a stronghold —
+//             interest — a waystone (often with a friendly settlement built round it, so it sits on
+//             the roads), a landmark, camps, maybe a stronghold, mesas, towers, ruins and chests —
 //             plus roads to its neighbours. Features flatten pads and raise mesas in the terrain.
 import { makeNoise2D, fbm, smoothstep } from '../core/noise.js';
 import { mulberry32 } from '../core/rng.js';
@@ -13,6 +17,7 @@ import { mulberry32 } from '../core/rng.js';
 export const REGION = 240;
 export const WATER_LEVEL = -0.9;
 export const HUB = { id: 'hub', name: 'Brightwater Outpost', x: 0, z: 0, radius: 15 };
+export const BIOMES = ['meadow', 'forest', 'highland', 'snow', 'marsh', 'ash', 'mountain', 'desert', 'badlands', 'jungle', 'crystal', 'fungal'];
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const lerp = (a, b, t) => a + (b - a) * t;
@@ -21,16 +26,22 @@ const hash2 = (a, b, s) => {
   h = Math.imul(h ^ (h >>> 13), 1274126177);
   return (h ^ (h >>> 16)) >>> 0;
 };
+const pick = (rng, list) => list[Math.floor(rng() * list.length)];
 
-// Which races claim which biomes (weights).
+// Which races (factions) claim which biomes (weights).
 const RACE_BY_BIOME = {
-  meadow: { goblin: 0.5, beast: 0.35, construct: 0.15 },
-  forest: { beast: 0.55, goblin: 0.3, hollow: 0.15 },
-  highland: { construct: 0.5, goblin: 0.35, beast: 0.15 },
-  snow: { beast: 0.5, construct: 0.3, hollow: 0.2 },
-  marsh: { hollow: 0.6, beast: 0.25, goblin: 0.15 },
-  ash: { hollow: 0.55, construct: 0.3, goblin: 0.15 },
-  mountain: { construct: 0.45, beast: 0.35, hollow: 0.2 },
+  meadow: { scav: 0.5, fauna: 0.35, synth: 0.15 },
+  forest: { fauna: 0.55, scav: 0.3, hive: 0.15 },
+  highland: { synth: 0.5, scav: 0.35, fauna: 0.15 },
+  snow: { fauna: 0.5, synth: 0.3, hive: 0.2 },
+  marsh: { hive: 0.6, fauna: 0.25, scav: 0.15 },
+  ash: { hive: 0.55, synth: 0.3, scav: 0.15 },
+  mountain: { synth: 0.45, fauna: 0.35, hive: 0.2 },
+  desert: { scav: 0.45, synth: 0.35, fauna: 0.2 },
+  badlands: { scav: 0.5, synth: 0.3, fauna: 0.2 },
+  jungle: { fauna: 0.6, hive: 0.25, scav: 0.15 },
+  crystal: { synth: 0.55, hive: 0.3, fauna: 0.15 },
+  fungal: { hive: 0.5, fauna: 0.35, scav: 0.15 },
 };
 
 // Region names: biome-flavoured adjective + landform.
@@ -42,16 +53,112 @@ const NAME = {
   marsh: [['Mire', 'Bog', 'Murk', 'Sunken', 'Rot', 'Grey', 'Reed'], ['fen', 'Marsh', 'Sump', 'Mires', 'Slough', 'Shallows']],
   ash: [['Ash', 'Cinder', 'Ember', 'Soot', 'Char', 'Scorch', 'Pyre'], ['fields', 'Barrens', 'Waste', 'Scar', 'Hollows', 'Flats']],
   mountain: [['Storm', 'Grim', 'High', 'Broken', 'Spine', 'Thunder', 'Crag'], ['peak', 'Spires', 'Ridge', 'Teeth', 'Pass', 'Crags']],
+  desert: [['Sun', 'Dune', 'Sand', 'Glass', 'Mirage', 'Bleach', 'Salt'], ['Sea', 'Wastes', 'Expanse', 'Flats', 'Dunes', 'Basin']],
+  badlands: [['Red', 'Rust', 'Broken', 'Ochre', 'Dust', 'Scour', 'Sunder'], ['Canyons', 'Badlands', 'Gulch', 'Mesas', 'Breaks', 'Gorge']],
+  jungle: [['Verdant', 'Tangle', 'Emerald', 'Steam', 'Vine', 'Lush', 'Drowned'], ['Jungle', 'Canopy', 'Tangle', 'Wilds', 'Deeps', 'Green']],
+  crystal: [['Prism', 'Shard', 'Glass', 'Gleam', 'Lattice', 'Quartz', 'Halo'], ['Fields', 'Spires', 'Expanse', 'Reach', 'Garden', 'Shelf']],
+  fungal: [['Spore', 'Glow', 'Mycel', 'Bloom', 'Puff', 'Velvet', 'Dusk'], ['wood', 'Grove', 'Hollows', 'Caps', 'Thicket', 'Gardens']],
 };
 const CAMP_NAME = {
-  goblin: ['Warcamp', 'Scrapyard', 'Raider Camp', 'Junk Fort', 'Snare Den', 'Rustcamp'],
-  hollow: ['Bonepit', 'Ossuary', 'Barrow', 'Grave Ring', 'Dead Camp', 'Mournfield'],
-  construct: ['Relay Node', 'Foundry Post', 'Signal Spire', 'Assembly Yard', 'Conduit Hub', 'Array'],
-  beast: ['Den', 'Lair', 'Hollow', 'Nest', 'Burrows', 'Run'],
+  scav: ['Warcamp', 'Scrapyard', 'Raider Camp', 'Junk Fort', 'Chop Shop', 'Rustcamp'],
+  hive: ['Brood Pit', 'Spawning Mound', 'Hive Node', 'Egg Field', 'Creep', 'Chitin Spire'],
+  synth: ['Relay Node', 'Foundry Post', 'Signal Spire', 'Assembly Yard', 'Conduit Hub', 'Array'],
+  fauna: ['Den', 'Lair', 'Hollow', 'Nest', 'Burrows', 'Run'],
 };
 const STRONGHOLD_NAME = {
-  goblin: 'Warlord Fort', hollow: 'Crypt of Kings', construct: 'Colossus Foundry', beast: 'Elder Lair',
+  scav: 'Warlord Fort', hive: 'Queen\'s Hive', synth: 'Colossus Foundry', fauna: 'Behemoth Lair',
 };
+
+// Landmarks: one-off sights, about one a region. Which biomes favour each (weights), footprint
+// radius (m), whether the ground is levelled under it, the steepest ground it will stand on, the
+// first region ring it can appear in, where its cache sits (local, metres; +z is the landmark's
+// front) and its names. world/World.js builds them.
+export const LANDMARKS = {
+  wreck: {
+    biomes: { meadow: 1, highland: 1.2, desert: 1.4, badlands: 1, snow: 1, ash: 0.6, crystal: 0.6 }, r: 22, pad: true, slope: 0.3, chest: [7, -2],
+    name: (r) => `Wreck of the ${pick(r, ['Halcyon', 'Meridian', 'Pilgrim', 'Starward', 'Covenant', 'Icarus', 'Long Night', 'Vesper', 'Argo'])}`,
+  },
+  skeleton: {
+    biomes: { desert: 1.6, badlands: 1, ash: 1.2, snow: 0.8, highland: 0.5 }, r: 18, slope: 0.4, chest: [0, 3],
+    name: (r) => `${pick(r, ['The Leviathan', 'The Old Wyrm', 'The Behemoth', 'The Colossus', 'The Sky Whale'])}'s Bones`,
+  },
+  ring: {
+    biomes: { crystal: 1.6, meadow: 0.7, highland: 0.8, forest: 0.4, snow: 0.6, desert: 0.6 }, r: 12, pad: true, slope: 0.4, chest: [0, 5],
+    name: (r) => `${pick(r, ['Ring', 'Gate', 'Halo', 'Circle'])} of ${pick(r, ['Ages', 'the Makers', 'Echoes', 'Dawn', 'the First', 'Stars'])}`,
+  },
+  titan: {
+    biomes: { highland: 1.2, badlands: 1.2, ash: 1, snow: 0.8, meadow: 0.5, desert: 0.6 }, r: 12, slope: 0.4, chest: [0, 6],
+    name: (r) => `The ${pick(r, ['Sleeping', 'Kneeling', 'Silent', 'Fallen', 'Broken', 'Last'])} Titan`,
+  },
+  monoliths: {
+    biomes: { meadow: 1.2, forest: 1, marsh: 0.8, highland: 0.6, snow: 0.5 }, r: 11, pad: true, slope: 0.35, chest: [0, 0],
+    name: (r) => `The ${pick(r, ['Whispering', 'Singing', 'Old', 'Watching', 'Hollow', 'Dreaming'])} Stones`,
+  },
+  spires: {
+    biomes: { crystal: 2, snow: 0.8, mountain: 0.6, highland: 0.4 }, r: 14, slope: 0.5, chest: [0, 0],
+    name: (r) => `${pick(r, ['Prism', 'Glass', 'Singing', 'Halo', 'Frost', 'Starfall'])} Spires`,
+  },
+  elder: {
+    biomes: { forest: 1.4, jungle: 1.4, marsh: 0.8, meadow: 0.5 }, r: 14, pad: true, slope: 0.35, chest: [0, 6],
+    name: (r) => `The ${pick(r, ['Elder', 'Mother', 'Old', 'Great', 'First', 'Hollow'])} Tree`,
+  },
+  caps: {
+    biomes: { fungal: 2, marsh: 0.8, jungle: 0.7, forest: 0.3 }, r: 14, slope: 0.45, chest: [0, 0],
+    name: (r) => `${pick(r, ["Giant's", 'Glowcap', 'Velvet', 'Elder', 'Dusk', 'Moonlit'])} Caps`,
+  },
+  array: {
+    biomes: { highland: 1.2, meadow: 0.9, snow: 1, desert: 0.8, badlands: 0.6, mountain: 0.4 }, r: 13, pad: true, slope: 0.3, chest: [-5, 6],
+    name: (r) => `${pick(r, ['Deep Sky', 'Listening', 'Echo', 'Vigil', 'Long Range', 'Farcall'])} Array`,
+  },
+  arcology: {
+    biomes: { marsh: 1.4, jungle: 1.2, forest: 0.8, meadow: 0.6, fungal: 0.6 }, r: 18, slope: 0.4, chest: [0, 0],
+    name: (r) => `Ruins of ${pick(r, ['Arcadia', 'New Haven', 'Solace', 'Tessaly', 'Concord', 'Meridia', 'Ostrava'])}`,
+  },
+  arch: {
+    biomes: { badlands: 2, desert: 1.4, highland: 0.6 }, r: 14, slope: 0.6, chest: [0, 0],
+    name: (r) => `${pick(r, ['Sun', 'Sky', 'Wind', 'Red', "Giant's", 'Hollow'])} Arch`,
+  },
+  statue: {
+    biomes: { meadow: 1, desert: 1, forest: 0.6, highland: 0.6, jungle: 0.6, snow: 0.5 }, r: 12, slope: 0.4, chest: [5, 3],
+    name: (r) => `The ${pick(r, ['Fallen', 'Last', 'Forgotten', 'Weeping', 'Broken'])} ${pick(r, ['King', 'Queen', 'Pilot', 'Founder', 'Guardian', 'Prophet'])}`,
+  },
+  vents: {
+    biomes: { ash: 2.2, badlands: 0.4, mountain: 0.3 }, r: 13, slope: 0.5, chest: [0, 0],
+    name: (r) => `${pick(r, ['Ember', 'Cinder', 'Smoke', 'Brimstone', 'Furnace'])} Vents`,
+  },
+  elevator: {
+    biomes: { meadow: 0.25, highland: 0.3, desert: 0.3, badlands: 0.25, snow: 0.2, crystal: 0.3, forest: 0.15, jungle: 0.15, marsh: 0.1, ash: 0.15, fungal: 0.1 },
+    r: 12, pad: true, slope: 0.3, minRing: 2, chest: [0, 9],
+    name: (r) => `The ${pick(r, ['Skyward', 'Severed', 'Endless', 'Broken', 'Silver'])} Tether`,
+  },
+};
+
+// Friendly settlements, built round a region's waystone: which biomes favour each kind, and how
+// likely one keeps a trader. Their folk are placed here (the server checks traders' positions);
+// world/World.js builds the place and the client dresses its people (world/settlements.js).
+export const SETTLEMENTS = {
+  homestead: {
+    biomes: { meadow: 1.4, forest: 1, jungle: 0.6, highland: 0.6, fungal: 0.3 }, trader: 0.45,
+    name: (r) => `${pick(r, ['Harrow', 'Okafor', 'Lindqvist', 'Tanaka', 'Moreau', 'Vasquez', 'Brennan', 'Adeyemi', 'Kowal'])} Homestead`,
+  },
+  outpost: {
+    biomes: { highland: 1, snow: 1.2, desert: 0.8, badlands: 1, ash: 0.8, mountain: 0.8, crystal: 0.6, meadow: 0.4 }, trader: 0.85,
+    name: (r) => `Fort ${pick(r, ['Vigil', 'Hale', 'Resolve', 'Kessler', 'Dawn', 'Ardent', 'Haven'])}`,
+  },
+  mining: {
+    biomes: { badlands: 1.4, crystal: 1.4, mountain: 1, ash: 1, snow: 0.6, highland: 0.6 }, trader: 0.6,
+    name: (r) => `${pick(r, ['Deepcut', 'Glitter', 'Rockjaw', 'Seam', 'Lodestar', 'Brightvein'])} Mine`,
+  },
+  caravan: {
+    biomes: { desert: 2, badlands: 0.8, highland: 0.8, meadow: 0.5 }, trader: 1,
+    name: (r) => `${pick(r, ['Wandering', 'Dust', 'Long Road', 'Sandsail', 'Drifter', 'Sunrunner'])} Caravan`,
+  },
+  stilts: {
+    biomes: { marsh: 2, jungle: 1.2, fungal: 0.8 }, trader: 0.5,
+    name: (r) => pick(r, ['Reedwater', 'Stillwater', 'Heron Rest', 'Mistwater', 'Lanternfen', 'Bogholm']),
+  },
+};
+export const SETTLEMENT_RADIUS = 18;
 
 function weighted(rng, weights) {
   let total = 0;
@@ -63,6 +170,16 @@ function weighted(rng, weights) {
   }
   return Object.keys(weights)[0];
 }
+// Weights of each entry of `table` for a biome (and ring), leaving out the ones it can't have.
+function affinity(table, biome, ring) {
+  const out = {};
+  for (const [k, def] of Object.entries(table)) {
+    const w = def.biomes[biome] ?? 0;
+    if (w > 0 && ring >= (def.minRing ?? 0)) out[k] = w;
+  }
+  return out;
+}
+const NO_LANDFORM = { dune: 0, terrace: 0 };
 
 export class WorldGen {
   constructor(seed) {
@@ -79,8 +196,14 @@ export class WorldGen {
     this.nQ = makeNoise2D(s ^ 0x92a3);
     this.nC = makeNoise2D(s ^ 0xa3b4);
     this.nB = makeNoise2D(s ^ 0xb4c5);
+    this.nG = makeNoise2D(s ^ 0xc5d6);
+    this.nK = makeNoise2D(s ^ 0xd6e7);
+    this.nU = makeNoise2D(s ^ 0xe7f8);
     this.regions = new Map();
     this.order = [];
+    this._cx = NaN;
+    this._cz = NaN;
+    this._clim = { t: 0, m: 0, c: 0 };
   }
 
   // ------------------------------------------------------------------ shape
@@ -98,14 +221,43 @@ export class WorldGen {
     return fbm(this.nV, wx * 0.0024, wz * 0.0024, 2);
   }
 
+  // How the land is shaped here, from the climate — blended, so the ground stays continuous across
+  // biome borders: dunes in the deserts, terraced plateaus in the badlands (weights 0..1 that
+  // reach 1 inside those biomes; see biomeAt).
+  landform(x, z) {
+    const { t, m } = this.climate(x, z);
+    const dune = smoothstep(0.16, 0.24, t) * smoothstep(-0.11, -0.19, m);
+    const dry = smoothstep(0.06, 0.14, t) * smoothstep(0.01, -0.07, m);
+    return { dune, terrace: dry * (1 - dune) };
+  }
+
   // Terrain before features (pads, mesas): what POIs are placed against.
   baseHeight(x, z) {
     const wild = this.wild(x, z);
     const cont = fbm(this.nE, x * 0.0019, z * 0.0019, 4);
     // Basins dip below the water line only where the continental field is lowest (lakes, not seas).
     let h = (cont > -0.15 ? cont * 13 : -1.95 + (cont + 0.15) * 26) * (0.4 + 0.6 * wild) + 3;
-    h += fbm(this.nH, x * 0.011, z * 0.011, 3) * 6.5 * (0.45 + 0.55 * wild);
+    // Rugged country: hills stand taller and ridgelines run across them; plains stay plain.
+    const rug = smoothstep(-0.12, 0.38, fbm(this.nG, x * 0.0011 + 7, z * 0.0011 - 3, 2)) * wild;
+    const { dune, terrace } = wild > 0 ? this.landform(x, z) : NO_LANDFORM;
+    h += fbm(this.nH, x * 0.011, z * 0.011, 3) * 6.5 * (0.45 + 0.55 * wild) * (0.8 + 1.1 * rug + 0.9 * terrace) * (1 - 0.6 * dune);
     h += this.nD(x * 0.06, z * 0.06) * 0.55;
+    if (rug > 0.02) {
+      let r = 0;
+      let amp = 1;
+      let norm = 0;
+      let fx = x * 0.0055 + 13;
+      let fz = z * 0.0055 - 29;
+      for (let o = 0; o < 3; o++) {
+        const n = 1 - Math.abs(this.nR(fx, fz));
+        r += n * n * amp;
+        norm += amp;
+        amp *= 0.5;
+        fx *= 2.07;
+        fz *= 2.07;
+      }
+      h += rug * (1 - dune) * Math.pow(r / norm, 1.6) * 26;
+    }
     const mm = this.mountainMask(x, z);
     if (mm > 0.001) {
       let r = 0;
@@ -123,6 +275,27 @@ export class WorldGen {
       }
       h += mm * (14 + (r / norm) * 62);
     }
+    // Dune seas: long windward slopes up to a crest and a short slip face, meandering across the
+    // sand, taller in some fields than others.
+    if (dune > 0.01) {
+      const u = (x * 0.83 + z * 0.56) / 34 + fbm(this.nU, x * 0.005, z * 0.005, 2) * 2.4;
+      const s = u - Math.floor(u);
+      const crest = s < 0.7 ? smoothstep(0, 0.7, s) : 1 - smoothstep(0.7, 1, s);
+      const amp = 2.5 + 3.5 * (0.5 + 0.5 * this.nU(x * 0.004 + 9, z * 0.004 - 2));
+      h += dune * (crest * amp + this.nU(x * 0.05, z * 0.05) * 0.35);
+    }
+    // Badlands: winding canyons cut first, then the land lifted and stepped into flat treads with
+    // steep risers — so the canyon walls step too.
+    if (terrace > 0.01) {
+      const wx = x + fbm(this.nK, z * 0.004, x * 0.004 + 3, 2) * 50;
+      const wz = z + fbm(this.nK, x * 0.004 - 5, z * 0.004, 2) * 50;
+      const cv = Math.abs(fbm(this.nK, wx * 0.0026 + 11, wz * 0.0026 - 7, 2));
+      if (cv < 0.075) h -= 15 * smoothstep(0.075, 0.03, cv) * terrace;
+      const step = 3.4;
+      const k = (h + 5) / step;
+      const f = k - Math.floor(k);
+      h = lerp(h, (Math.floor(k) + smoothstep(0.6, 0.9, f)) * step, terrace);
+    }
     // Rivers: a wide shallow valley with a channel below the water line.
     const rv = Math.abs(this.riverValue(x, z));
     const rw = wild * (1 - mm);
@@ -133,8 +306,8 @@ export class WorldGen {
     return h;
   }
 
-  // Final terrain height: base + mesas + flattened pads (camps, waystones, towers, strongholds,
-  // the hub). Features come from the regions around (x, z).
+  // Final terrain height: base + mesas + flattened pads (settlements, camps, waystones, towers,
+  // strongholds, levelled landmarks, the hub). Features come from the regions around (x, z).
   height(x, z) {
     let h = this.baseHeight(x, z);
     const feats = this.featuresNear(x, z);
@@ -156,23 +329,35 @@ export class WorldGen {
   }
 
   // ------------------------------------------------------------------ climate / biomes
+  // Remembers the last point asked about: a chunk asks for the climate (biome, landform) of the
+  // same spot several times in a row.
   climate(x, z) {
+    if (x === this._cx && z === this._cz) return this._clim;
     const wx = x + fbm(this.nB, x * 0.006, z * 0.006, 2) * 45;
     const wz = z + fbm(this.nB, z * 0.006 + 5, x * 0.006, 2) * 45;
     const near = 1 - smoothstep(150, 420, Math.hypot(x, z)); // temperate around the hub
-    const t = fbm(this.nT, wx * 0.0019, wz * 0.0019, 3) * (1 - near * 0.8);
-    const m = fbm(this.nQ, wx * 0.0021 + 40, wz * 0.0021, 3);
-    const c = fbm(this.nC, wx * 0.0016, wz * 0.0016 + 70, 3) * (1 - near);
-    return { t, m, c };
+    const c = this._clim;
+    c.t = fbm(this.nT, wx * 0.0019, wz * 0.0019, 3) * (1 - near * 0.8);
+    c.m = fbm(this.nQ, wx * 0.0021 + 40, wz * 0.0021, 3);
+    c.c = fbm(this.nC, wx * 0.0016, wz * 0.0016 + 70, 3) * (1 - near);
+    this._cx = x;
+    this._cz = z;
+    return c;
   }
 
+  // Cold → snow; strange → ash (hot), fungal groves (wet) or crystal fields; wet lowland → marsh;
+  // hot and dry → desert, then badlands; hot and wet → jungle; dry → highland steppe; wet →
+  // forest; otherwise meadow. Mountains wherever the range mask peaks.
   biomeAt(x, z) {
     if (this.mountainMask(x, z) > 0.55) return 'mountain';
     const { t, m, c } = this.climate(x, z);
     if (t < -0.3) return 'snow';
-    if (c > 0.33) return 'ash';
+    if (c > 0.27) return t > 0.12 ? 'ash' : m > 0.04 ? 'fungal' : 'crystal';
     if (m > 0.3 && this.baseHeight(x, z) < 4) return 'marsh';
-    if (t > 0.18 && m < -0.12) return 'highland';
+    if (t > 0.2 && m < -0.15) return 'desert';
+    if (t > 0.1 && m < -0.03) return 'badlands';
+    if (t > 0.14 && m > 0.16) return 'jungle';
+    if (t > -0.06 && m < -0.08) return 'highland';
     if (m > 0.02) return 'forest';
     return 'meadow';
   }
@@ -269,7 +454,7 @@ export class WorldGen {
     const biome = hub ? 'meadow' : this.biomeAt(sx, sz);
     const ring = Math.max(Math.abs(rx), Math.abs(rz));
     let race = weighted(rng, RACE_BY_BIOME[biome]);
-    if (ring <= 1 && (race === 'hollow' || race === 'construct')) race = rng() < 0.6 ? 'goblin' : 'beast';
+    if (ring <= 1 && (race === 'hive' || race === 'synth')) race = rng() < 0.6 ? 'scav' : 'fauna';
     const level = hub ? 1 : Math.max(1, Math.round(1 + dist / 130 + (rng() - 0.5) * 0.8));
     const [adj, noun] = NAME[biome];
     const a = adj[Math.floor(rng() * adj.length)];
@@ -306,6 +491,8 @@ export class WorldGen {
       return null;
     };
     const pad = (x, z, r, h, fall = 12, dirt = false) => region.pads.push({ x, z, r, h, fall, dirt });
+    let chestN = 0;
+    const chest = (x, z, extra = {}) => region.pois.push({ type: 'chest', id: `k:${key}:${chestN++}`, x, z, level: level + (extra.bonus ?? 0), ...extra });
 
     if (hub) {
       taken.push({ x: 0, z: 0, r: 40 });
@@ -316,15 +503,57 @@ export class WorldGen {
     } else {
       const w = this.waystoneSpot(rx, rz);
       if (w) {
-        const h = this.baseHeight(w.x, w.z);
+        let h = this.baseHeight(w.x, w.z);
+        // A friendly settlement round the waystone (so on the roads), in about two regions of five.
+        if (rng() < (ring === 1 ? 0.55 : 0.4)) {
+          const kinds = affinity(SETTLEMENTS, biome, ring);
+          const c = Object.keys(kinds).length ? spot(0, { r: SETTLEMENT_RADIUS + 8, maxSlope: 0.32, near: { x: w.x, z: w.z, min: 11, max: 15 } }) : null;
+          if (c) {
+            const kind = weighted(rng, kinds);
+            const S = SETTLEMENTS[kind];
+            const rot = Math.atan2(w.x - c.x, w.z - c.z); // its front faces the waystone and the road
+            const npcs = [];
+            const trader = rng() < S.trader;
+            const count = 2 + (rng() < 0.5 ? 1 : 0) + (trader ? 1 : 0);
+            for (let i = 0; i < count; i++) {
+              const role = trader && i === 0 ? 'trader' : 'flavor';
+              const ang = rot + (role === 'trader' ? 0.15 : 1.7 + i * 1.45 + (rng() - 0.5) * 0.5);
+              const d = role === 'trader' ? 5.5 : 3.2 + rng() * 2.6;
+              npcs.push({ id: `n:${key}:${i}`, role, x: c.x + Math.sin(ang) * d, z: c.z + Math.cos(ang) * d, facing: ang + Math.PI, seed: Math.floor(rng() * 1e9) });
+            }
+            region.pois.push({
+              type: 'settlement', id: `v:${key}`, kind, x: c.x, z: c.z, r: SETTLEMENT_RADIUS, rot, h: c.h, name: S.name(rng), level,
+              way: { x: w.x, z: w.z }, npcs, seed: Math.floor(rng() * 1e9),
+            });
+            pad(c.x, c.z, SETTLEMENT_RADIUS, c.h, 10, true);
+            h = c.h;
+          }
+        }
         taken.push({ x: w.x, z: w.z, r: 4 });
         region.pois.push({ type: 'waystone', id: `w:${key}`, x: w.x, z: w.z, name: region.name });
         pad(w.x, w.z, 3, h, 6);
       }
+      // A landmark: something worth the walk, in about three regions of four.
+      if (rng() < (ring === 1 ? 0.55 : 0.75)) {
+        const kinds = affinity(LANDMARKS, biome, ring);
+        if (Object.keys(kinds).length) {
+          const kind = weighted(rng, kinds);
+          const L = LANDMARKS[kind];
+          const c = spot(45, { r: L.r + 6, maxSlope: L.slope });
+          if (c) {
+            const rot = rng() * Math.PI * 2;
+            const id = `l:${key}`;
+            region.pois.push({ type: 'landmark', id, kind, x: c.x, z: c.z, r: L.r, rot, h: c.h, name: L.name(rng), level, seed: Math.floor(rng() * 1e9) });
+            if (L.pad) pad(c.x, c.z, L.r * 0.85, c.h, 10, kind === 'wreck');
+            const [lx, lz] = L.chest;
+            chest(c.x + Math.cos(rot) * lx + Math.sin(rot) * lz, c.z - Math.sin(rot) * lx + Math.cos(rot) * lz, { landmark: id, bonus: 2 });
+          }
+        }
+      }
     }
 
-    // Camps (and maybe a stronghold) of the owning race.
-    const campStyle = { goblin: 'goblin', hollow: 'grave', construct: 'relay', beast: 'den' }[race];
+    // Camps (and maybe a stronghold) of the owning race — well away from settlements.
+    const campStyle = { scav: 'scav', hive: 'nest', synth: 'relay', fauna: 'den' }[race];
     const camps = hub ? 1 : 2 + (rng() < 0.45 ? 1 : 0);
     const names = [...CAMP_NAME[race]];
     for (let i = 0; i < camps; i++) {
@@ -333,7 +562,7 @@ export class WorldGen {
       if (!c) continue;
       const nm = names.splice(Math.floor(rng() * names.length), 1)[0];
       region.pois.push({
-        type: 'camp', id: `c:${key}:${i}`, x: c.x, z: c.z, radius: R, race, style: rng() < 0.25 && race === 'goblin' ? 'ogre' : campStyle,
+        type: 'camp', id: `c:${key}:${i}`, x: c.x, z: c.z, radius: R, race, style: rng() < 0.25 && race === 'scav' ? 'salvage' : campStyle,
         level: level + (rng() < 0.35 ? 1 : 0), name: `${region.name.split(' ')[0]} ${nm}`, seed: Math.floor(rng() * 1e9),
       });
       pad(c.x, c.z, R + 2, c.h, 11, true);
@@ -349,10 +578,9 @@ export class WorldGen {
       }
     }
 
-    // Verticality: mesas (rugged biomes favour them), a tower, ruins — with chests up top.
-    let chestN = 0;
-    const chest = (x, z, extra = {}) => region.pois.push({ type: 'chest', id: `k:${key}:${chestN++}`, x, z, level: level + (extra.bonus ?? 0), ...extra });
-    const mesaN = (biome === 'highland' ? 2 : biome === 'meadow' || biome === 'ash' ? 1 : rng() < 0.4 ? 1 : 0) - (hub ? 1 : 0);
+    // Verticality: mesas (canyon and desert country is full of them), a tower, ruins — with chests
+    // up top.
+    const mesaN = (biome === 'badlands' ? 2 + (rng() < 0.5 ? 1 : 0) : biome === 'highland' ? 2 : biome === 'meadow' || biome === 'ash' || biome === 'desert' ? 1 : rng() < 0.4 ? 1 : 0) - (hub ? 1 : 0);
     for (let i = 0; i < mesaN; i++) {
       const r = 9 + rng() * 15;
       const c = spot(30, { r: r + 10, maxSlope: 0.5 });
@@ -363,7 +591,7 @@ export class WorldGen {
       region.pois.push({ type: 'mesa', id: `m:${key}:${i}`, ...m });
       if (rng() < 0.7) chest(c.x, c.z, { onMesa: true, bonus: 1 });
     }
-    if (rng() < (hub ? 1 : 0.55)) {
+    if (rng() < (hub ? 1 : 0.45)) {
       const t = hub ? spot(15, { r: 6, near: { x: 30, z: 26, min: 0, max: 12 }, minHub: 20 }) : spot(25, { r: 6 });
       if (t) {
         const id = `t:${key}`;
@@ -372,7 +600,7 @@ export class WorldGen {
         chest(t.x, t.z, { on: id, bonus: 1 });
       }
     }
-    if (!hub && rng() < 0.4) {
+    if (!hub && rng() < 0.35) {
       const r = 9 + rng() * 3;
       const c = spot(25, { r: r + 4, maxSlope: 0.35 });
       if (c) {
@@ -383,7 +611,7 @@ export class WorldGen {
       }
     }
     // A cache or two hidden in the wilds.
-    for (let i = 0, n = hub ? 0 : 1 + (rng() < 0.5 ? 1 : 0); i < n; i++) {
+    for (let i = 0, k = hub ? 0 : 1 + (rng() < 0.5 ? 1 : 0); i < k; i++) {
       const c = spot(15, { r: 2 });
       if (c) chest(c.x, c.z);
     }
@@ -394,7 +622,8 @@ export class WorldGen {
 
   // ------------------------------------------------------------------ roads
   // Each region draws its roads east and north to neighbouring waystones (so every pair is drawn
-  // once), plus spurs from its waystone to its camps and landmarks.
+  // once), plus spurs from its waystone to its camps and landmarks. Settlements stand round their
+  // waystone, so the roads run through them.
   buildRoads(region) {
     const way = region.pois.find((p) => p.type === 'waystone');
     if (!way) return;
@@ -406,6 +635,7 @@ export class WorldGen {
     }
     for (const p of region.pois) {
       if (p.type === 'camp' || p.type === 'tower' || p.type === 'ruin' || p.type === 'hub') stops.push({ x: p.x, z: p.z, inset: (p.radius ?? p.r ?? 3) * 0.7 });
+      else if (p.type === 'landmark') stops.push({ x: p.x, z: p.z, inset: p.r + 2 });
     }
     for (const s of stops) {
       const pts = this.roadPath(way, s, rng);
@@ -476,3 +706,4 @@ export class WorldGen {
     return false;
   }
 }
+

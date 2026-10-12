@@ -1,6 +1,7 @@
 // Friendly townsfolk: idle animation, turn to face the player when near, and an interaction hook.
 import * as THREE from 'three';
 import { buildHumanoid } from '../models/Characters.js';
+import { disposeObject } from '../render/Toon.js';
 import { wrapAngle } from './Character.js';
 import { Animator, makeAnimState } from '../anim/Animator.js';
 import { CapeCloth } from '../anim/Cloth.js';
@@ -18,7 +19,7 @@ export class NPC {
     this.rig = buildHumanoid(def.look);
     this.root = new THREE.Group();
     this.root.add(this.rig.model);
-    this.root.position.set(def.x, 0, def.z);
+    this.root.position.set(def.x, game.world.groundHeight(def.x, def.z), def.z);
     this.baseFacing = def.facing ?? 0;
     this.facing = this.baseFacing;
     this.root.rotation.y = this.facing;
@@ -38,6 +39,8 @@ export class NPC {
 
   get position() { return this.root.position; }
 
+  dispose() { disposeObject(this.root); }
+
   // '!' quest available, '?' quest ready to turn in, null otherwise.
   get marker() {
     if (this.role !== 'quest') return null;
@@ -51,6 +54,10 @@ export class NPC {
     this.time += dt;
     const p = this.game.player.position;
     const d = Math.hypot(p.x - this.position.x, p.z - this.position.z);
+    // Folk are a couple of dozen draw calls each: past talking range they're specks, so they're
+    // neither drawn nor animated.
+    this.root.visible = d < 70;
+    if (!this.root.visible) return;
     const target = d < 7 ? Math.atan2(p.x - this.position.x, p.z - this.position.z) : this.baseFacing;
     this.facing += wrapAngle(target - this.facing) * (1 - Math.exp(-4 * dt));
     this.root.rotation.y = this.facing;

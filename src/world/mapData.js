@@ -13,8 +13,8 @@ export const NPCS = [
   {
     id: 'sage', name: 'Old Ysolde', title: 'Hedge Witch', role: 'quest', x: -9, z: 6, facing: 2.6,
     lines: [
-      'The goblins aren\'t the worst of it, dear. Something bigger feeds them courage.',
-      'Fire for the beasts, frost for the quick ones. Shock for crowds. Mind you remember.',
+      'The scavs aren\'t the worst of it, dear. Something bigger feeds them courage.',
+      'Fire for the bugs, shock for the machines, frost for the quick ones. Mind you remember.',
       'High ground is good ground. Climb, and the valley shows you its secrets.',
     ],
     look: { skin: 0xd8b090, hair: 0xdddddd, hairStyle: 'long', top: 0x4a3a6a, topDark: 0x2e2448, trim: 0xb0e0ff, pants: 0x2e2448, boots: 0x2a2030, leather: 0x3a2a3a, hat: 'hood', hatColor: 0x2e2448, glow: 0xd6a8ff },

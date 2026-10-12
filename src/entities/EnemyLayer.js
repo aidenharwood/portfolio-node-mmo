@@ -10,12 +10,15 @@ import { EnemyReplica } from '../net/EnemyReplica.js';
 import { Enemy, prewarmRace, RACE_GLOW } from './Enemy.js';
 import { ELEMENTS } from '../items/elements.js';
 
-// Projectile looks by the sim's `proj`.
+// Projectile looks by the sim's `proj`: spitters' acid and lancers' spines, energy bolts from
+// techs and synths, psions' homing psi orbs, crawlers' sticky resin, grenades and mortar shells.
 const PROJ = {
   arrow: { kind: 'arrow', color: 0xd8c9a3, size: 1 },
+  spine: { kind: 'arrow', color: 0xe6dcc0, size: 1.25 },
+  acid: { kind: 'orb', color: 0x9be22d, size: 0.42 },
   energy: { kind: 'bolt', color: 0x3ad8ff, size: 0.6 },
-  void: { kind: 'orb', color: 0xb46aff, size: 0.5 },
-  web: { kind: 'web', color: 0xeef2f8, size: 1 },
+  psi: { kind: 'orb', color: 0xc46aff, size: 0.5 },
+  web: { kind: 'web', color: 0xe8f0c0, size: 1 },
   bomb: { kind: 'bomb', color: 0xffb030, size: 1 },
 };
 const INTERP_DELAY = 100; // ms: server enemies are shown this far in the past (two ticks)
@@ -214,10 +217,10 @@ export class EnemyLayer {
         _p.fromArray(ev.p);
         const owner = v ?? this.ghost(ev);
         g.explode(_p, ev.r, ev.dmg, owner, null, {
-          color: ev.nova ? RACE_GLOW.hollow : ev.el ? ELEMENTS[ev.el].color : 0xff5a2a,
+          color: ev.nova ? RACE_GLOW.hive : ev.el ? ELEMENTS[ev.el].color : 0xff5a2a,
           knockback: ev.kb, scaled: true, element: ev.el, inflict: ev.el,
         });
-        if (ev.nova) g.effects.spawnRing(_p, ev.r, RACE_GLOW.hollow);
+        if (ev.nova) g.effects.spawnRing(_p, ev.r, RACE_GLOW.hive);
         if (ev.sh) g.rig.addShake(ev.sh * Math.max(0, 1 - _p.distanceTo(g.player.position) / 40));
         break;
       }
@@ -230,9 +233,9 @@ export class EnemyLayer {
         const h = v ? v.height * 0.5 : 0.9;
         _p.fromArray(ev.from).setY(ev.from[1] + h);
         g.effects.spawnPuff(_p, { size: 1.6, life: 0.5, color: 0x2a1a3a });
-        g.effects.glow(_p, RACE_GLOW.hollow, { size: 2, grow: 1, life: 0.3 });
+        g.effects.glow(_p, RACE_GLOW.hive, { size: 2, grow: 1, life: 0.3 });
         _q.fromArray(ev.to).setY(ev.to[1] + h);
-        g.effects.glow(_q, RACE_GLOW.hollow, { size: 2.2, grow: 0.6, life: 0.35 });
+        g.effects.glow(_q, RACE_GLOW.hive, { size: 2.2, grow: 0.6, life: 0.35 });
         g.audio.blink?.(_q);
         break;
       }
@@ -241,7 +244,7 @@ export class EnemyLayer {
         if (!v || !t) break;
         const from = v.muzzle(_o);
         _p.copy(t.position).setY(t.position.y + t.height * 0.6);
-        const color = ev.el === 'shock' ? 0x58cfff : RACE_GLOW.goblin;
+        const color = ev.el === 'shock' ? 0x58cfff : 0x7fd8ff;
         g.effects.spawnBolt(from, _p, color);
         g.effects.spawnRing(t.position, t.radius * 2.5, color);
         g.audio.ward?.(_p);

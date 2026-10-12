@@ -13,13 +13,13 @@ export const SUPPORT_KINDS = new Set(['ward', 'heal', 'howl', 'summon']);
 
 // Named elites, by race.
 const NAMES = {
-  goblin: [['Skarn', 'Grakk', 'Vex', 'Morra', 'Thul', 'Krev', 'Zil', 'Hruk', 'Brakka'], ['the Quick', 'the Cruel', 'Bloodtusk', 'Gloomeye', 'Ashmaw', 'Scrapjaw']],
-  hollow: [['Morwen', 'Aldric', 'Seveth', 'Ilsa', 'Corvane', 'Orrin', 'Vael'], ['the Pale', 'the Forsworn', 'Hollowheart', 'the Drowned', 'Ninefold', 'the Unburied']],
-  construct: [['Warden', 'Sentinel', 'Arbiter', 'Custodian', 'Engine', 'Vigil'], ['Mk. IV', 'K-7', 'Prime', 'Omega', 'of the Deep Forge', 'Unbound']],
-  beast: [['Greymane', 'Old Scar', 'Thornback', 'Ashpelt', 'Rimefang', 'Blackmaw'], ['the Elder', 'the Hungry', 'of the Hollows', 'the Untamed', 'Mankiller']],
+  scav: [['Skarn', 'Rook', 'Vex', 'Morra', 'Dutch', 'Krev', 'Jinx', 'Hask', 'Brakka'], ['the Quick', 'the Cruel', 'Ironjaw', 'Two-Guns', 'Ashmaw', 'Scrapjaw']],
+  hive: [['Xith', 'Vrael', 'Ssekh', 'Ixa', 'Kzhar', 'Thrae', 'Uulk'], ['Broodmother', 'the Many', 'of the Deep Nest', 'Hollowsong', 'the Ninefold', 'the Unseen']],
+  synth: [['Warden', 'Sentinel', 'Arbiter', 'Custodian', 'Engine', 'Vigil'], ['Mk. IV', 'K-7', 'Prime', 'Omega', 'of the Deep Forge', 'Unbound']],
+  fauna: [['Greymane', 'Old Scar', 'Thornback', 'Ashpelt', 'Rimefang', 'Blackmaw'], ['the Elder', 'the Hungry', 'of the Hollows', 'the Untamed', 'Mankiller']],
 };
 export function eliteName(race, rand = Math.random) {
-  const [a, b] = NAMES[race] ?? NAMES.goblin;
+  const [a, b] = NAMES[race] ?? NAMES.scav;
   return `${a[Math.floor(rand() * a.length)]} ${b[Math.floor(rand() * b.length)]}`;
 }
 

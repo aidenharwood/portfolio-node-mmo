@@ -30,7 +30,7 @@ const SOUNDS = {
   'Footsteps': (a, g) => ['grass', 'gravel', 'hard', 'snow', 'mud', 'water'].forEach((s, i) => setTimeout(() => a.footstep(s, 0.7), i * 280)),
   'Jump': (a) => a.jump(), 'Double jump': (a) => a.doubleJump(), 'Land (high)': (a) => a.land(9), 'Bullet jump': (a) => a.bulletJump(), 'Air dash': (a) => a.airDash(),
   'Dash': (a) => a.dash(), 'Mantle': (a) => a.mantle(), 'Slam dive': (a) => a.slamDive(), 'Hurt': (a) => a.playerHurt(0.2), 'Kill': (a, g) => a.kill(ahead(g, 5), false),
-  'Arrow whizz': (a, g) => a.whiz(ahead(g, 1)), 'Ogre stomp step': (a, g) => a.stomp(ahead(g, 4), 1.2),
+  'Arrow whizz': (a, g) => a.whiz(ahead(g, 1)), 'Heavy stomp step': (a, g) => a.stomp(ahead(g, 4), 1.2),
   'Wolf howl': (a, g) => a.howl(ahead(g, 12)), 'Ursa call': (a, g) => a.howl(ahead(g, 12), true), 'Tusker roar': (a, g) => a.roar(ahead(g, 6), 2.4),
   'Spider screech': (a, g) => a.screech(ahead(g, 5)), 'Void cast': (a, g) => a.enemyCast(ahead(g, 6), 'void', 0.8), 'Sentry charge': (a, g) => a.enemyCast(ahead(g, 6), 'energy', 0.5),
   'Sentry shot': (a, g) => a.enemyShot(ahead(g, 6), 'energy'), 'Wraith blink': (a, g) => a.blink(ahead(g, 5)), 'Shield block': (a, g) => a.block(ahead(g, 2)),
@@ -209,6 +209,8 @@ export class DevTools {
         if (poi.type === 'camp') list.push({ label: `   ${poi.stronghold ? 'Stronghold' : 'Camp'} — ${poi.name} (Lv ${poi.level})`, x: poi.x, z: poi.z + poi.radius + 4 });
         else if (poi.type === 'waystone') list.push({ label: `   Waystone — ${poi.name}`, x: poi.x + 2.5, z: poi.z - 2.5 });
         else if (poi.type === 'tower' || poi.type === 'ruin') list.push({ label: `   ${poi.type === 'tower' ? 'Tower' : 'Ruins'}`, x: poi.x + 4, z: poi.z + (poi.r ?? 0) + 4 });
+        else if (poi.type === 'landmark') list.push({ label: `   Landmark — ${poi.name} (${poi.kind})`, x: poi.x + Math.sin(poi.rot) * (poi.r + 8), z: poi.z + Math.cos(poi.rot) * (poi.r + 8) });
+        else if (poi.type === 'settlement') list.push({ label: `   Settlement — ${poi.name} (${poi.kind})`, x: poi.x, z: poi.z });
       }
     }
     return list;

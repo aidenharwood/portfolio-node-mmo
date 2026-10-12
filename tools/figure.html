@@ -18,9 +18,15 @@
   <div id="bar"></div>
   <script type="module">
     // Dev tool: the character builders up close, from fixed angles and in test poses, to check
-    // shape and how the skin deforms at the joints. ?view=lineup|head|hands|poses|armour|creatures
+    // shape and how the skin deforms at the joints. ?view=lineup|head|hands|poses|armour|npcs|enemies
+    // (&race=scav|hive|synth|fauna: every model of a faction, base types then variants, posed
+    // by the game's animators at rest).
     import * as THREE from 'three';
-    import { buildHumanoid, buildGoblin, buildOgre, fist } from '../src/models/Characters.js';
+    import { buildHumanoid, fist } from '../src/models/Characters.js';
+    import { MODELS } from '../src/models/Creatures.js';
+    import { ENEMY_TYPES, resolveType } from '../src/combat/bestiary.js';
+    import { Animator, makeAnimState } from '../src/anim/Animator.js';
+    import { LegAnimator, makeLegState, HoverAnimator, makeHoverState } from '../src/anim/LegAnimator.js';
     import { bakeTree } from '../src/render/ModelKit.js';
     import { PostFX } from '../src/render/PostFX.js';
     import { qualityOf } from '../src/render/Quality.js';
@@ -32,9 +38,11 @@
     const q = new URLSearchParams(location.search);
     const view = q.get('view') ?? 'lineup';
     const quality = q.get('q') ?? 'medium'; // as the game draws it (render/Quality.js)
-    const VIEWS = ['lineup', 'head', 'hands', 'poses', 'armour', 'npcs', 'creatures'];
+    const race = q.get('race') ?? 'scav';
+    const VIEWS = ['lineup', 'head', 'hands', 'poses', 'armour', 'npcs', 'enemies'];
     document.getElementById('bar').innerHTML = VIEWS.map((v) => `<a href="?view=${v}&q=${quality}">${v}</a>`).join('')
-      + ['low', 'medium', 'high'].map((k) => `<a href="?view=${view}&q=${k}">${k}</a>`).join('');
+      + ['scav', 'hive', 'synth', 'fauna'].map((r) => `<a href="?view=enemies&race=${r}&q=${quality}">${r}</a>`).join('')
+      + ['low', 'medium', 'high'].map((k) => `<a href="?view=${view}&race=${race}&q=${k}">${k}</a>`).join('');
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
     renderer.setPixelRatio(Math.max(2, devicePixelRatio));
@@ -90,7 +98,7 @@
       looks.forEach((l, i) => add(buildHumanoid(Object.keys(l).length ? l : undefined), (i - 1) * 0.36, 0, [0, 0.6, Math.PI / 2][i]));
       aim(0, 1.95, 3.0, 0, 1.9, 0);
     } else if (view === 'hands') {
-      // Fists blown up 8×: back, palm (with a handle where weapons sit), relaxed, goblin claws.
+      // Fists blown up 8×: back, palm (with a handle where weapons sit), relaxed, clawed.
       const mk = (s, curl, palm, fingers, k = 1, claws = null, rod = false) => {
         const g = new THREE.Group();
         fist(g, palm, fingers, s, k, { curl, claws });
@@ -125,9 +133,62 @@
       const defs = NPCS.filter((d) => d.look).slice(0, 5);
       defs.forEach((d, i) => add(buildHumanoid(d.look), (i - (defs.length - 1) / 2) * 0.9, 0, 0));
       aim(0, 1.25, 10, 0, 1.0, 0);
-    } else if (view === 'creatures') {
-      add(buildGoblin(), -1.4, 0, 0.3); add(buildGoblin({ archer: true }), -0.5, 0, 0); add(buildOgre(), 1.0, 0, -0.2);
-      aim(0, 1.4, 11, 0, 1.1, 0);
+    } else if (view === 'enemies') {
+      // Arm stances as entities/Enemy.js holds them between attacks.
+      const STANCE = { rest: [0.9, -0.4, 0, 0.5], reach: [0.15, -0.15, 0, 0.3], gun: [0.55, -0.3, 0, 0.55], staff: [0.55, -0.2, 0, 1.0] };
+      const list = [];
+      for (const [id, t] of Object.entries(ENEMY_TYPES)) {
+        if (t.race !== race) continue;
+        list.push(resolveType(id));
+        for (const v of Object.keys(t.variants ?? {})) list.push(resolveType(id, v));
+      }
+      const rigs = [];
+      let x = 0;
+      let top = 0;
+      for (const t of list) {
+        const rig = MODELS[t.model]();
+        const k = t.scale ?? 1;
+        rig.model.scale.setScalar(k);
+        const w = Math.max(0.95, t.radius * 2.3 * k);
+        x += w / 2;
+        add(rig, x, 0, 0.45);
+        rig.model.position.y = t.hover ?? 0;
+        top = Math.max(top, (rig.height ?? t.height) * k + (t.hover ?? 0));
+        x += w / 2 + 0.35;
+        rigs.push([rig, t]);
+      }
+      for (const [rig, t] of rigs) {
+        rig.model.position.x -= x / 2;
+        rig.model.updateMatrixWorld(true);
+        if (rig.kind === 'legs') {
+          const a = new LegAnimator(rig);
+          const s = makeLegState();
+          s.facing = 0.45;
+          s.ground = () => 0;
+          for (let i = 0; i < 40; i++) a.update(1 / 30, s);
+        } else if (rig.kind === 'hover') {
+          const a = new HoverAnimator(rig);
+          const s = makeHoverState();
+          s.facing = 0.45;
+          for (let i = 0; i < 40; i++) a.update(1 / 30, s);
+        } else {
+          const a = new Animator(rig);
+          const s = makeAnimState();
+          s.facing = 0.45;
+          s.ground = () => 0;
+          s.hunch = t.hunch ?? 0;
+          s.offPose = t.offPose ?? null;
+          const P = STANCE[t.stance] ?? STANCE.rest;
+          s.pose[0] = P[0]; s.pose[1] = P[1]; s.pose[2] = P[2];
+          s.elbow = P[3];
+          s.snap = true;
+          for (let i = 0; i < 40; i++) a.update(1 / 30, s);
+        }
+      }
+      const hf = Math.atan(Math.tan(THREE.MathUtils.degToRad(cam.fov / 2)) * cam.aspect);
+      const d = Math.max((x / 2 + 0.4) / Math.tan(hf), (top * 0.62) / Math.tan(THREE.MathUtils.degToRad(cam.fov / 2)));
+      aim(0, top * 0.55, d, 0, top * 0.45, 0);
+      window.lineup = rigs.map(([, t]) => t.name);
     }
     const q3 = qualityOf(quality);
     let post = null;
@@ -139,7 +200,20 @@
     const fake = { player: { velocity: { x: 0, z: 0 }, vy: 0, bulletJumpT: 0, state: '' }, state: 'title' };
     const render = () => (post ? post.render(0, fake) : renderer.render(scene, cam));
     render();
-    window.figure = { scene, cam, renderer, render };
+    // Console helpers: turn(yaw) every figure, frame(i0, i1, camY, dist, lookY) the camera on
+    // figures i0..i1, shot(name) saves the frame through serve.py's /__shot endpoint.
+    const figures = scene.children.filter((o) => o.type === 'Group');
+    const turn = (yaw) => { for (const f of figures) f.rotation.y = yaw; };
+    const frame = (i0, i1, y, d, ty) => {
+      const cx = (figures[i0].position.x + figures[i1].position.x) / 2;
+      cam.position.set(cx, y, d);
+      cam.lookAt(cx, ty, 0);
+    };
+    const shot = async (name) => {
+      render();
+      return (await fetch(`/__shot/${name}`, { method: 'POST', body: renderer.domElement.toDataURL('image/png') })).status;
+    };
+    window.figure = { scene, cam, renderer, render, turn, frame, shot };
   </script>
 </body>
 </html>

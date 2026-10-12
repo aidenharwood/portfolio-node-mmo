@@ -3,9 +3,11 @@
 // collision and placement query the game makes.
 //   chunks     64 m terrain squares at three levels of detail, a 2 m height grid near the player,
 //              scenery (trees, rocks, grass, glowing flora) packed into shared instanced meshes
-//   POIs       the hub, camps and strongholds (one style per race), towers, ruins, mesas with
-//              their floating shards, waystones and chests — built when within reach, disposed
-//              when left far behind, each owning its colliders
+//   POIs       the hub, friendly settlements, landmarks (world/Landmarks.js), camps and
+//              strongholds (one style per race), towers, ruins, mesas with their floating shards,
+//              waystones and chests — built when within reach, disposed when left far behind,
+//              each owning its colliders
+//   sky        the fog and sky take on the colour (and the fog its depth) of the biome you're in
 //   roads      ribbons draped over the terrain between waystones, camps and landmarks
 //   colliders  a spatial hash with ownership, so streamed-out content takes its colliders with it
 import * as THREE from 'three';
@@ -15,22 +17,20 @@ import { piece, bakeTree, G, shade } from '../render/ModelKit.js';
 import { mulberry32 } from '../core/rng.js';
 import { WorldGen, REGION, WATER_LEVEL, HUB } from './Gen.js';
 import { Chunk, CHUNK, RES0 } from './Chunks.js';
+import { C, HEARTH, FORGE, HIVE, ARC, CARGO, RUNE } from './palette.js';
+import { LANDMARK_BUILDERS, SETTLEMENT_BUILDERS } from './Landmarks.js';
 
-const C = {
-  dirt: 0xc9a774, dirtDark: 0xa98a5c, stone: 0xb9b4a8, stoneDark: 0x8f8a80, wood: 0x7a4f32, woodDark: 0x5a3622,
-  canvas: 0xe8dcc0, hide: 0x9a7a54, bone: 0xeee3c8, pine: 0x3f8a52, leaf: 0x5aa84e, snowPine: 0x6f9a86,
-  dead: 0x5a4a3e, charred: 0x3a3230, reed: 0x8aa04a, bush: 0x5f9e4c,
-  metal: 0x8a909c, metalDark: 0x454b57, steel: 0x5c6370, rust: 0x8a5a3a, hab: 0xdfe4ea,
-  grave: 0x7d7a86, graveDark: 0x5a5866, moss: 0x5f7a4a,
-};
-const HEARTH = 0x6ae8ff; // outpost tech glow
-const TINKER = 0x9aff3a; // goblin junk-tech glow
-const FORGE = 0xff8a2a;  // ogre / warband forge glow
-const VOID = 0xb46aff;   // the Hollow's glow
-const ARC = 0x3ad8ff;    // construct conduit glow
-const CARGO = [0x5a6a7a, 0xb06a2a, 0x4a6a4a, 0x7a3a3a];
 const GRID = 8;
-const RUNE = 0x6ae8ff; // precursor tech glow used on ruins, towers and waystones
+const TAU = Math.PI * 2;
+
+// Each biome's sky (and fog) colour, and how deep the fog sits: close in the jungle, the fens and
+// the spore groves, far off over the desert.
+const SKY = {
+  meadow: 0xa6d8f2, forest: 0x9fd2e2, highland: 0xbad9ea, snow: 0xd2e4f0, marsh: 0xa2c2b4, ash: 0xa8948a,
+  mountain: 0xb2d0e6, desert: 0xf0dcb4, badlands: 0xeec6a4, jungle: 0x9cd6c4, crystal: 0xc4cdfa, fungal: 0xbca6dc,
+};
+const FOG = { jungle: [60, 200], marsh: [60, 210], fungal: [55, 200], ash: [60, 210], desert: [100, 270], snow: [70, 230] };
+const FOG_DEFAULT = [80, 240];
 
 const VIEW = 4;            // chunks kept loaded around the player (Chebyshev radius)
 const LOD0_DIST = 110;
@@ -40,6 +40,8 @@ const DETAIL_DIST = 120;   // grass, flowers and glowing flora
 const COLLIDE_DIST = 150;  // tree and rock colliders
 const POI_LOAD = 300;
 const POI_UNLOAD = 360;
+const LANDMARK_LOAD = 420; // landmarks are big: built before they loom out of the fog
+const LANDMARK_UNLOAD = 480;
 const ROAD_LOAD = 420;
 const ROAD_UNLOAD = 520;
 const BUDGET_MS = 5;
@@ -62,9 +64,30 @@ const SWAY = {
   reed: { amp: 0.06, base: 0 },
   tuft: { amp: 0.3, base: 0 },
   head: { amp: 0.27, base: -0.35 }, // flowers ride the tips of the tufts they grow from
+  frond: { amp: 0.012, base: 4.5 },
+  fern: { amp: 0.035, base: 0 },
 };
 function sceneryTypes() {
   const noUV = (g) => { g.deleteAttribute('uv'); return g; };
+  const flat = (list) => mergeGeometries(list.map((g) => noUV(g.index ? g.toNonIndexed() : g)));
+  const cactusGeo = flat([
+    new THREE.CylinderGeometry(0.32, 0.38, 4.2, 8).translate(0, 2.1, 0),
+    new THREE.SphereGeometry(0.32, 8, 4, 0, TAU, 0, Math.PI / 2).translate(0, 4.2, 0),
+    new THREE.CylinderGeometry(0.2, 0.2, 1.1, 6).rotateZ(Math.PI / 2).translate(0.75, 2.0, 0),
+    new THREE.CylinderGeometry(0.2, 0.22, 1.6, 6).translate(1.3, 2.75, 0),
+    new THREE.SphereGeometry(0.2, 6, 3, 0, TAU, 0, Math.PI / 2).translate(1.3, 3.55, 0),
+    new THREE.CylinderGeometry(0.18, 0.18, 0.9, 6).rotateZ(Math.PI / 2).translate(-0.6, 2.8, 0),
+    new THREE.CylinderGeometry(0.18, 0.2, 1.2, 6).translate(-1.05, 3.35, 0),
+    new THREE.SphereGeometry(0.18, 6, 3, 0, TAU, 0, Math.PI / 2).translate(-1.05, 3.95, 0),
+  ]);
+  const hoodooGeo = flat([
+    new THREE.CylinderGeometry(0.9, 1.4, 3, 7).translate(0, 1.5, 0),
+    new THREE.CylinderGeometry(0.55, 0.9, 2.4, 7).translate(0.1, 4.2, 0),
+    new THREE.DodecahedronGeometry(1.5, 0).scale(1, 0.42, 1).translate(0.15, 5.7, 0),
+  ]);
+  const frondGeo = flat(Array.from({ length: 7 }, (_, k) => new THREE.BoxGeometry(0.9, 0.08, 3.4).translate(0, 0, 1.7).rotateX(0.55).rotateY((k / 7) * TAU).translate(0, 6.2, 0)));
+  const fernGeo = flat(Array.from({ length: 6 }, (_, k) => new THREE.ConeGeometry(0.5, 2.6, 4).scale(1, 1, 0.18).translate(0, 1.3, 0).rotateX(0.85).rotateY((k / 6) * TAU + 0.3)));
+  const crystalGeo = flat([[0, 0, 0, 0], [0.5, 0.2, 0.6, 0.5], [-0.45, -0.3, 0.5, -0.45], [0.1, 0.55, 0.45, 0.3]].map(([x, z, s, t]) => new THREE.OctahedronGeometry(0.55, 0).scale(1 - s * 0.6, 2.6 - s * 1.4, 1 - s * 0.6).rotateZ(t).translate(x, 1.2 - s, z)));
   const pineGeo = mergeGeometries([
     new THREE.ConeGeometry(1.6, 2.4, 7).translate(0, 2.4, 0).toNonIndexed(),
     new THREE.ConeGeometry(1.25, 2.0, 7).translate(0, 3.5, 0).toNonIndexed(),
@@ -98,13 +121,35 @@ function sceneryTypes() {
     flowerP: [new THREE.SphereGeometry(0.07, 5, 4), 0xff8ac6, 0, 1500, false, SWAY.head],
     flowerB: [new THREE.SphereGeometry(0.07, 5, 4), 0x9ad0ff, 0, 1500, false, SWAY.head],
     stem: [new THREE.CylinderGeometry(0.05, 0.07, 0.4, 6).translate(0, 0.2, 0), 0xe8e4d8, 0.015, 2500, false],
+    // Desert and badlands
+    cactus: [cactusGeo, C.cactus, 0.04, 2500, true],
+    dryBush: [new THREE.IcosahedronGeometry(0.55, 0), 0x9a8a5a, 0.03, 3500, false],
+    sandRock: [new THREE.DodecahedronGeometry(1, 0), C.sandstone, 0.05, 3000, true],
+    redRock: [new THREE.DodecahedronGeometry(1, 0), C.redrock, 0.05, 4000, true],
+    hoodoo: [hoodooGeo, shade(C.redrock, 1.08), 0.06, 1200, true],
+    // Jungle
+    tallTrunk: [new THREE.CylinderGeometry(0.18, 0.3, 6.3, 7).translate(0, 3.15, 0), 0x6a5a3a, 0.04, 3500, true],
+    palm: [frondGeo, C.jungleLeaf, 0.04, 3500, true, SWAY.frond],
+    fern: [fernGeo, 0x2f8a3a, 0.03, 4000, false, SWAY.fern],
+    // Crystal fields
+    crystal: [crystalGeo, 0x8ce0ff, 0.04, 3000, true],
+    spire: [new THREE.OctahedronGeometry(1, 0).scale(1, 5, 1).translate(0, 4.5, 0), 0xb894ff, 0.06, 800, true],
+    // Fungal groves
+    shroomStem: [new THREE.CylinderGeometry(0.25, 0.42, 3.2, 8).translate(0, 1.6, 0), C.shroomStem, 0.04, 3000, true],
+    shroomCap: [new THREE.SphereGeometry(1.6, 12, 6, 0, TAU, 0, Math.PI / 2).scale(1, 0.55, 1).translate(0, 3.1, 0), C.shroomCap, 0.05, 3000, true],
+    puff: [new THREE.IcosahedronGeometry(0.6, 1), 0xd8b8e8, 0.03, 2500, false],
   };
 }
 const FLORA_TYPES = {
   shard: [new THREE.OctahedronGeometry(0.25).scale(0.6, 2.2, 0.6).translate(0, 0.5, 0), 3000],
   cap: [new THREE.SphereGeometry(0.2, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2).scale(1, 0.6, 1).translate(0, 0.38, 0), 2500],
 };
-const FLORA_COLOR = { highland: 0x7fe8ff, snow: 0xbff4ff, ash: 0xff8a2a, marsh: 0xb84aff, forest: 0x6affc8, meadow: 0x7fe8ff, mountain: 0x7fe8ff };
+const FLORA_COLOR = {
+  highland: 0x7fe8ff, snow: 0xbff4ff, ash: 0xff8a2a, marsh: 0xb84aff, forest: 0x6affc8, meadow: 0x7fe8ff, mountain: 0x7fe8ff,
+  desert: 0xffb347, badlands: 0xff8a2a, jungle: 0x6affa0, crystal: 0xb07aff, fungal: 0xff6ae0,
+};
+// Where ground cover (grass tufts) grows.
+const TUFTS = new Set(['meadow', 'forest', 'highland', 'marsh', 'mountain', 'jungle', 'fungal']);
 const DENSITY = {
   meadow: { round: 0.06, pine: 0.02, bush: 0.08, rock: 0.025 },
   forest: { pine: 0.32, round: 0.12, bush: 0.08, rock: 0.03 },
@@ -113,6 +158,11 @@ const DENSITY = {
   marsh: { dead: 0.07, reed: 0.3, bush: 0.08, round: 0.03 },
   ash: { charred: 0.07, rock: 0.09, boulder: 0.02 },
   mountain: { pine: 0.12, snowPine: 0.08, boulder: 0.08, rock: 0.06 },
+  desert: { cactus: 0.035, dryBush: 0.04, sandRock: 0.03 },
+  badlands: { redRock: 0.07, hoodoo: 0.025, dryBush: 0.04, dead: 0.01 },
+  jungle: { palm: 0.16, fern: 0.16, round: 0.06, bush: 0.08 },
+  crystal: { crystal: 0.06, spire: 0.012, rock: 0.04 },
+  fungal: { shroom: 0.12, puff: 0.05, bush: 0.04, dead: 0.02 },
 };
 
 const _m = new THREE.Matrix4();
@@ -131,6 +181,11 @@ export class World {
     this.grid = new Map();
     this.flames = [];
     this.shards = [];
+    this.spinners = [];         // turning parts (wind turbines)
+    this.onPoiLoad = null;      // (poi, owner) hooks: the game dresses settlements with their folk
+    this.onPoiUnload = null;
+    this.skyBiome = 'meadow';
+    this.skyTimer = 0;
     this.waystones = new Map(); // loaded waystones (id → state)
     this.chests = new Map();    // loaded chests
     this.root = new THREE.Group();
@@ -308,11 +363,23 @@ export class World {
 
   inBounds(pos) { return pos.y < 260 && pos.y > -60 && Math.hypot(pos.x - this.focus.x, pos.z - this.focus.z) < 600; }
 
-  // The hub or a camp at (x, z) (for banners, footsteps and scatter), else null.
-  zoneAt(x, z) {
-    if (Math.hypot(x - HUB.x, z - HUB.z) < HUB.radius + 4) return HUB;
+  // The hub, a settlement or a camp at (x, z) (for banners, footsteps and scatter), else null.
+  // `pad` widens the safe places (the hub and settlements) — roaming packs keep further off.
+  zoneAt(x, z, pad = 0) {
+    if (Math.hypot(x - HUB.x, z - HUB.z) < HUB.radius + 4 + pad) return HUB;
     for (const r of this.gen.regionsNear(x, z, this._zr ??= [])) {
-      for (const p of r.pois) if (p.type === 'camp' && Math.hypot(x - p.x, z - p.z) < p.radius + 8) return p;
+      for (const p of r.pois) {
+        if (p.type === 'camp' && Math.hypot(x - p.x, z - p.z) < p.radius + 8) return p;
+        if (p.type === 'settlement' && Math.hypot(x - p.x, z - p.z) < p.r + 6 + pad) return p;
+      }
+    }
+    return null;
+  }
+
+  // The landmark you're at (within sight of its foot), else null.
+  landmarkAt(x, z) {
+    for (const r of this.gen.regionsNear(x, z, this._lr ??= [])) {
+      for (const p of r.pois) if (p.type === 'landmark' && Math.hypot(x - p.x, z - p.z) < p.r + 14) return p;
     }
     return null;
   }
@@ -361,11 +428,30 @@ export class World {
       s.group.rotation.y = time * 0.3 + s.seed;
       s.group.position.y = s.base + Math.sin(time * 0.8 + s.seed) * 0.5;
     }
+    for (const s of this.spinners) s.group.rotation.z = time * s.speed;
+    this.updateSky(dt, focus);
     for (const w of this.waystones.values()) {
       w.crystal.rotation.y = time * 1.2;
       w.ring.rotation.z = time * (w.active ? 2.4 : 0.4);
       w.crystal.position.y = 3.3 + Math.sin(time * 2 + w.seed) * 0.12;
     }
+  }
+
+  // The sky and fog drift towards the colour (and depth) of the biome underfoot.
+  updateSky(dt, focus) {
+    this.skyTimer -= dt;
+    if (this.skyTimer <= 0) {
+      this.skyTimer = 0.5;
+      this.skyBiome = this.gen.biomeAt(focus.x, focus.z);
+    }
+    const s = this.scene;
+    if (!s.fog || !s.background?.isColor) return;
+    const k = 1 - Math.exp(-Math.min(dt, 0.1) * 0.7);
+    s.background.lerp(_col.set(SKY[this.skyBiome] ?? SKY.meadow), k);
+    s.fog.color.copy(s.background);
+    const [near, far] = FOG[this.skyBiome] ?? FOG_DEFAULT;
+    s.fog.near += (near - s.fog.near) * k;
+    s.fog.far += (far - s.fog.far) * k;
   }
 
   // Switches to another world (new game / loading a save): everything streamed out, new generator.
@@ -432,13 +518,13 @@ export class World {
         const r = this.gen.region(rcx + dx, rcz + dz);
         for (const p of r.pois) {
           const d = Math.hypot(p.x - focus.x, p.z - focus.z);
-          if (d < POI_LOAD && !this.pois.has(p.id)) jobs.push({ d, run: () => this.loadPoi(p) });
+          if (d < (p.type === 'landmark' ? LANDMARK_LOAD : POI_LOAD) && !this.pois.has(p.id)) jobs.push({ d, run: () => this.loadPoi(p) });
         }
         const rd = Math.hypot(r.x - focus.x, r.z - focus.z);
         if (rd < ROAD_LOAD && r.roads.length && !this.roads.has(r.key)) jobs.push({ d: rd, run: () => this.loadRoads(r) });
       }
     }
-    for (const [id, o] of this.pois) if (Math.hypot(o.poi.x - focus.x, o.poi.z - focus.z) > POI_UNLOAD) this.unload(o, this.pois, id);
+    for (const [id, o] of this.pois) if (Math.hypot(o.poi.x - focus.x, o.poi.z - focus.z) > (o.poi.type === 'landmark' ? LANDMARK_UNLOAD : POI_UNLOAD)) this.unload(o, this.pois, id);
     for (const [k, o] of this.roads) if (Math.hypot(o.region.x - focus.x, o.region.z - focus.z) > ROAD_UNLOAD) this.unload(o, this.roads, k);
     jobs.sort((a, b) => a.d - b.d);
     this.jobs = jobs;
@@ -494,11 +580,13 @@ export class World {
   }
 
   unload(o, map, id) {
+    if (o.poi) this.onPoiUnload?.(o.poi, o);
     this.root.remove(o.group);
     disposeObject(o.group);
     for (const c of o.colliders) this.removeCollider(c);
     this.flames = this.flames.filter((f) => f.owner !== o);
     this.shards = this.shards.filter((s) => s.owner !== o);
+    this.spinners = this.spinners.filter((s) => s.owner !== o);
     if (o.waystone) this.waystones.delete(o.waystone);
     if (o.chest) this.chests.delete(o.chest);
     map.delete(id);
@@ -559,7 +647,8 @@ export class World {
     const blocked = (x, z) => {
       for (const p of pois) {
         const pad = p.type === 'hub' ? HUB.radius + 6 : p.type === 'camp' ? p.radius + (p.stronghold ? 12 : 5)
-          : p.type === 'tower' ? 6 : p.type === 'ruin' ? p.r + 4 : p.type === 'mesa' ? 0 : 3;
+          : p.type === 'settlement' ? p.r + 6 : p.type === 'landmark' ? p.r + 3
+            : p.type === 'tower' ? 6 : p.type === 'ruin' ? p.r + 4 : p.type === 'mesa' ? 0 : 3;
         if (pad && Math.hypot(x - p.x, z - p.z) < pad) return true;
       }
       return gen.nearRoad(x, z);
@@ -577,7 +666,7 @@ export class World {
         const slope = this.slopeFast(x, z);
         // Glowing flora and ground cover.
         const fr = rnd();
-        if (fr < 0.035 && slope < 0.9 && !(biome === 'meadow' && rnd() < 0.85)) {
+        if (fr < (biome === 'crystal' ? 0.09 : 0.035) && slope < 0.9 && !(biome === 'meadow' && rnd() < 0.85)) {
           _col.set(FLORA_COLOR[biome]);
           for (let k = 0; k < 3; k++) {
             if (biome === 'forest' || biome === 'marsh') {
@@ -589,7 +678,7 @@ export class World {
             } else push('shard', x + (rnd() - 0.5) * 0.8, y, z + (rnd() - 0.5) * 0.8, 0.5 + rnd() * 0.9, { tilt: 0.8, color: _col });
           }
         }
-        if (biome !== 'ash' && biome !== 'snow' && slope < 0.8) {
+        if (TUFTS.has(biome) && slope < 0.8) {
           for (let k = 0; k < 3; k++) {
             const tx = x + (rnd() - 0.5) * STEP;
             const tz = z + (rnd() - 0.5) * STEP;
@@ -614,6 +703,36 @@ export class World {
           const m = lists[kind].slice(-16);
           (lists.trunk ??= []).push(...m);
           colliders.push({ x, z, r: 0.4 * s, h: 6 * s, y });
+        } else if (kind === 'palm') {
+          push('palm', x, y - 0.1, z, s, { tilt: 0.3 });
+          (lists.tallTrunk ??= []).push(...lists.palm.slice(-16));
+          colliders.push({ x, z, r: 0.35 * s, h: 6.5 * s, y });
+        } else if (kind === 'shroom') {
+          const ss = s * (0.8 + rnd() * 0.9);
+          push('shroomCap', x, y - 0.05, z, ss, { tilt: 0.2 });
+          (lists.shroomStem ??= []).push(...lists.shroomCap.slice(-16));
+          colliders.push({ x, z, r: 0.45 * ss, h: 3.6 * ss, y });
+        } else if (kind === 'cactus') {
+          push('cactus', x, y - 0.1, z, s, { tilt: 0.12 });
+          colliders.push({ x, z, r: 0.45 * s, h: 4.4 * s, y });
+        } else if (kind === 'hoodoo') {
+          const hs = 0.8 + rnd() * 0.9;
+          push('hoodoo', x, y - 0.3, z, hs, { tilt: 0.1 });
+          colliders.push({ x, z, r: 1.3 * hs, h: 6 * hs, y });
+        } else if (kind === 'crystal') {
+          const cs = 0.7 + rnd() * 1.2;
+          push('crystal', x, y - 0.15, z, cs, { tilt: 0.4 });
+          colliders.push({ x, z, r: 0.8 * cs, h: 2.4 * cs, y });
+        } else if (kind === 'spire') {
+          const cs = 0.6 + rnd() * 0.8;
+          push('spire', x, y - 0.5, z, cs, { tilt: 0.35 });
+          colliders.push({ x, z, r: 0.9 * cs, h: 8 * cs, y });
+        } else if (kind === 'sandRock' || kind === 'redRock') {
+          const rs = 0.5 + rnd() * 1.4;
+          push(kind, x, y + rs * 0.25, z, rs, { sy: rs * 0.7, tilt: 3 });
+          colliders.push({ x, z, r: rs * 0.85, h: rs, y });
+        } else if (kind === 'fern' || kind === 'dryBush' || kind === 'puff') {
+          push(kind, x, kind === 'puff' ? y + s * 0.3 : y, z, s * (kind === 'fern' ? 1.1 : 1), { sy: kind === 'dryBush' ? s * 0.7 : s, tilt: 0.3 });
         } else if (kind === 'dead' || kind === 'charred') {
           push(kind, x, y - 0.1, z, s);
           colliders.push({ x, z, r: 0.35 * s, h: 4 * s, y });
@@ -667,6 +786,9 @@ export class World {
         n += cnt;
       }
       counts[k] = n;
+      // Most biomes use a few of the sets: an empty one would still cost a draw (and a shadow
+      // draw) every frame.
+      (set.colors ? set.mesh : set.body).visible = n > 0;
       if (set.colors) {
         set.mesh.count = n;
         set.mesh.instanceMatrix.needsUpdate = true;
@@ -698,7 +820,10 @@ export class World {
       case 'mesa': this.buildMesa(p); break;
       case 'waystone': this.buildWaystone(p); break;
       case 'chest': this.buildChest(p); break;
+      case 'landmark': LANDMARK_BUILDERS[p.kind]?.(this, p); break;
+      case 'settlement': SETTLEMENT_BUILDERS[p.kind]?.(this, p); break;
     }
+    this.onPoiLoad?.(p, o);
     this.own = null;
     this.rnd = Math.random;
     this.root.add(o.group);
@@ -826,7 +951,7 @@ export class World {
     this.roads.set(region.key, o);
   }
 
-  // Hub reactor (cyan plasma), a camp fire barrel (orange) or a void brazier (violet); flicker.
+  // Hub reactor (cyan plasma), a camp fire barrel (orange) or a hive node (violet); flicker.
   campfire(x, z, { scale = 1, style = 'barrel' } = {}) {
     const g = this.anchor(x, z);
     g.scale.setScalar(scale);
@@ -842,14 +967,15 @@ export class World {
       piece(g, G.torus(0.7, 0.04, Math.PI * 2, 4, 24), HEARTH, { pos: [0, 0.4, 0], rot: [Math.PI / 2, 0, 0], glow: true, outline: 0 });
       flameY = 0.45;
       colors = [HEARTH, 0xe6fdff];
-    } else if (style === 'void') {
-      piece(g, G.cyl(0.55, 0.7, 0.5, 6), C.graveDark, { pos: [0, 0.25, 0] });
+    } else if (style === 'node') {
+      // A resin mound split open on a glowing sac, ribs of chitin curling over it.
+      piece(g, G.dodeca(0.8), C.resinDark, { pos: [0, 0.18, 0], scale: [1, 0.5, 1], outline: 0.02 });
       for (let i = 0; i < 5; i++) {
         const a = (i / 5) * Math.PI * 2;
-        piece(g, G.cone(0.08, 0.5, 4), C.bone, { pos: [Math.cos(a) * 0.5, 0.65, Math.sin(a) * 0.5], rot: [Math.cos(a) * 0.4, 0, -Math.sin(a) * 0.4], outline: 0.01 });
+        piece(g, G.cone(0.1, 1.0, 5), C.chitin, { pos: [Math.cos(a) * 0.62, 0.62, Math.sin(a) * 0.62], rot: [-Math.sin(a) * 0.55, 0, Math.cos(a) * 0.55], outline: 0.012 });
       }
-      flameY = 0.5;
-      colors = [VOID, 0xf0d8ff];
+      flameY = 0.35;
+      colors = [HIVE, 0xf0d8ff];
     } else {
       piece(g, G.cyl(0.42, 0.38, 0.9, 12), C.rust, { pos: [0, 0.45, 0] });
       for (const y of [0.15, 0.75]) piece(g, G.torus(0.43, 0.035, Math.PI * 2, 4, 14), C.metalDark, { pos: [0, y, 0], rot: [Math.PI / 2, 0, 0], outline: 0.01 });
@@ -872,7 +998,7 @@ export class World {
     this.addCollider(x, z, (style === 'reactor' ? 1.3 : 0.5) * scale, style === 'reactor' ? 2.0 : 1.0);
   }
 
-  // Hab domes for the hub; scrap shacks for goblin camps.
+  // Hab domes for the hub; scrap shacks for scav camps.
   tent(x, z, rot, { r = 1.7, style = 'dome' } = {}) {
     const g = this.anchor(x, z, rot);
     if (style === 'dome') {
@@ -896,7 +1022,7 @@ export class World {
     plates.forEach((col, i) => piece(g, G.box(w * 0.48, 0.8, 0.04), col, { pos: [(i % 2 ? 0.25 : -0.25) * w, 0.5 + Math.floor(i / 2) * 0.8, d / 2 + 0.02], rot: [0, 0, (i - 1.5) * 0.04], outline: 0.012 }));
     piece(g, G.box(w * 1.15, 0.08, d * 1.25), C.rust, { pos: [0, 1.95, 0], rot: [0.18, 0, 0], outline: 0.02 });
     piece(g, G.box(0.6, 1.1, 0.06), 0x1a1a1e, { pos: [-w * 0.2, 0.55, d / 2 + 0.05], outline: 0 });
-    piece(g, G.box(0.35, 0.25, 0.05), TINKER, { pos: [w * 0.27, 1.2, d / 2 + 0.05], glow: true, outline: 0.006 });
+    piece(g, G.box(0.35, 0.25, 0.05), FORGE, { pos: [w * 0.27, 1.2, d / 2 + 0.05], glow: true, outline: 0.006 });
     piece(g, G.cyl(0.09, 0.09, 1.0, 8), C.metal, { pos: [w * 0.35, 2.3, -d * 0.2], outline: 0.01 });
     this.finish(g);
     this.addCollider(x, z, Math.max(w, d) * 0.62, 1.9);
@@ -923,7 +1049,7 @@ export class World {
     this.addCollider(x, z, 0.45, 1.0);
   }
 
-  // Goblin scrap barricade plate (world coordinates, inside group g).
+  // A scav scrap barricade plate (world coordinates, inside group g).
   stake(g, x, z, h, lean = 0, ry = 0) {
     const y0 = this.groundHeight(x, z) - g.position.y;
     piece(g, G.box(0.7, h, 0.06), C.rust, { pos: [x - g.position.x, y0 + h / 2, z - g.position.z], rot: [lean * 0.6, ry, 0], outline: 0.015 });
@@ -1035,18 +1161,18 @@ export class World {
     const { x, z, radius: R } = camp;
     if (camp.style === 'fort') return this.buildFort(camp);
     const g = this.anchor(x, z);
-    if (camp.style === 'goblin') {
+    if (camp.style === 'scav') {
       this.campfire(x, z);
       for (let i = 0; i < 3; i++) {
         const a = (i / 3) * Math.PI * 2 + rnd();
         this.tent(x + Math.cos(a) * (R - 2.5), z + Math.sin(a) * (R - 2.5), -a - Math.PI / 2, { r: 1.5, style: 'shack' });
       }
-      // Junk antenna totem with a skull and blinking lights.
+      // A junk radio mast with a skull, a clan banner and blinking lights.
       piece(g, G.cyl(0.12, 0.16, 3.4, 6), C.metalDark, { pos: [2.4, 1.7, -1.6] });
       for (let i = 0; i < 3; i++) piece(g, G.box(0.5 - i * 0.1, 0.3, 0.4), [C.rust, 0xb08a3e, C.metal][i], { pos: [2.4, 0.5 + i * 0.75, -1.6], rot: [0, i * 0.7, 0.1], outline: 0.012 });
       piece(g, G.sphere(0.28, 10, 8), C.bone, { pos: [2.4, 3.1, -1.6], scale: [1, 0.9, 1.1] });
       piece(g, G.dome(0.4, 10, 5), C.metal, { pos: [2.7, 3.5, -1.6], rot: [0, 0, -1.1], outline: 0.012 });
-      for (const yy of [1.4, 2.2]) piece(g, G.sphere(0.06, 6, 4), TINKER, { pos: [2.55, yy, -1.45], glow: true, outline: 0 });
+      for (const yy of [1.4, 2.2]) piece(g, G.sphere(0.06, 6, 4), FORGE, { pos: [2.55, yy, -1.45], glow: true, outline: 0 });
       piece(g, G.box(1.0, 0.7, 0.04), 0xb8342a, { pos: [2.9, 2.2, -1.6], outline: 0.02 });
       this.addCollider(x + 2.4, z - 1.6, 0.4, 3.4);
       for (let a = 0; a < Math.PI * 2; a += 0.55) {
@@ -1057,7 +1183,7 @@ export class World {
         this.addCollider(bx, bz, 0.7, 1.4);
       }
       for (let i = 0; i < 4; i++) this.crate(x + (rnd() - 0.5) * R, z + (rnd() - 0.5) * R, rnd() * 3, 0.8 + rnd() * 0.4);
-    } else if (camp.style === 'ogre') {
+    } else if (camp.style === 'salvage') {
       this.campfire(x, z, { scale: 1.4 });
       for (let a = 0; a < Math.PI * 2; a += 0.42) {
         if (rnd() < 0.3) continue;
@@ -1067,7 +1193,7 @@ export class World {
         piece(g, G.dodeca(s), C.stone, { pos: [bx, s * 0.4, bz], rot: [rnd() * 3, rnd() * 3, 0], scale: [1, 0.8, 1] });
         this.addCollider(x + bx, z + bz, s * 0.85, s * 1.1);
       }
-      // Scrap heap and slag furnace: ogres smelt what goblins scavenge.
+      // Scrap heap and slag furnace, where the juggernauts' suits are patched up.
       for (let i = 0; i < 7; i++) piece(g, G.box(0.6 + rnd() * 0.6, 0.15, 0.5 + rnd() * 0.5), [C.rust, C.metalDark, C.metal][i % 3], { pos: [-3 + (rnd() - 0.5) * 1.6, 0.2 + i * 0.12, 2 + (rnd() - 0.5) * 1.6], rot: [rnd(), rnd() * 3, rnd()], outline: 0.012 });
       this.addCollider(x - 3, z + 2, 1.2, 1.2);
       piece(g, G.cyl(1.0, 1.2, 1.8, 10), C.metalDark, { pos: [3, 0.9, -2.5] });
@@ -1075,39 +1201,64 @@ export class World {
       piece(g, G.box(0.7, 0.5, 0.1), FORGE, { pos: [3, 0.7, -1.38], glow: true, outline: 0.01 });
       piece(g, G.torus(0.95, 0.06, Math.PI * 2, 4, 16), FORGE, { pos: [3, 1.8, -2.5], rot: [Math.PI / 2, 0, 0], glow: true, outline: 0 });
       this.addCollider(x + 3, z - 2.5, 1.25, 2);
-    } else if (camp.style === 'grave') {
-      // The Hollow: a ring of leaning headstones round a void brazier, a broken arch, bone heaps.
-      this.campfire(x, z, { style: 'void' });
-      for (let a = 0; a < Math.PI * 2; a += 0.38) {
-        if (rnd() < 0.25) continue;
-        const d = R - 1 + rnd() * 2.5;
+    } else if (camp.style === 'nest') {
+      // The Hive: resin mounds ringing a glowing node, creep spread over the ground with light in
+      // its veins, clutches of eggs, and chitin spires curving up out of it all.
+      this.campfire(x, z, { style: 'node' });
+      for (let i = 0; i < 9; i++) {
+        const a = (i / 9) * Math.PI * 2 + rnd() * 0.3;
+        const len = R * (0.45 + rnd() * 0.4);
+        piece(g, G.box(0.08, 0.03, len), HIVE, { pos: [Math.cos(a) * len * 0.5, 0.08, Math.sin(a) * len * 0.5], rot: [0, -a + Math.PI / 2, 0], glow: true, outline: 0 });
+      }
+      piece(g, G.cyl(R * 0.62, R * 0.7, 0.08, 14), C.resin, { pos: [0, 0.02, 0], outline: 0.02 });
+      for (let a = 0; a < Math.PI * 2; a += 0.42) {
+        if (rnd() < 0.3) continue;
+        const d = R - 0.5 + rnd() * 2;
         const bx = Math.cos(a) * d;
         const bz = Math.sin(a) * d;
-        const h = 0.9 + rnd() * 0.9;
+        const s = 0.9 + rnd() * 1.2;
         const gy = this.groundHeight(x + bx, z + bz) - g.position.y;
-        piece(g, G.box(0.7, h, 0.22), rnd() < 0.5 ? C.grave : C.graveDark, { pos: [bx, gy + h / 2 - 0.1, bz], rot: [(rnd() - 0.5) * 0.4, -a, (rnd() - 0.5) * 0.3], outline: 0.02 });
-        if (rnd() < 0.4) piece(g, G.box(0.3, 0.05, 0.24), VOID, { pos: [bx, gy + h * 0.65, bz], rot: [0, -a, 0], glow: true, outline: 0 });
-        this.addCollider(x + bx, z + bz, 0.45, h);
+        piece(g, G.dodeca(s), rnd() < 0.5 ? C.resin : C.resinDark, { pos: [bx, gy + s * 0.25, bz], rot: [rnd() * 3, rnd() * 3, 0], scale: [1, 0.75, 1], outline: 0.02 });
+        if (rnd() < 0.35) piece(g, G.sphere(0.16, 8, 6), HIVE, { pos: [bx, gy + s * 0.75, bz], glow: true, outline: 0.01 });
+        this.addCollider(x + bx, z + bz, s * 0.8, s);
       }
-      const archA = rnd() * Math.PI * 2;
-      const ax = Math.cos(archA) * (R * 0.55);
-      const az = Math.sin(archA) * (R * 0.55);
-      for (const s of [-1, 1]) {
-        const px = ax + Math.cos(archA + Math.PI / 2) * 1.6 * s;
-        const pz = az + Math.sin(archA + Math.PI / 2) * 1.6 * s;
-        const h = s > 0 ? 3.8 : 2.4;
-        piece(g, G.box(0.7, h, 0.7), C.graveDark, { pos: [px, h / 2, pz], rot: [0, -archA, 0], outline: 0.03 });
-        this.addCollider(x + px, z + pz, 0.5, h);
-      }
-      piece(g, G.box(3.6, 0.5, 0.7), C.grave, { pos: [ax + Math.cos(archA + Math.PI / 2) * 0.4, 3.9, az + Math.sin(archA + Math.PI / 2) * 0.4], rot: [0, -archA, 0.18], outline: 0.03 });
+      // Clutches of eggs, each with a glowing seam.
       for (let i = 0; i < 4; i++) {
-        const bx = (rnd() - 0.5) * R;
-        const bz = (rnd() - 0.5) * R;
-        for (let k = 0; k < 5; k++) piece(g, G.cyl(0.04, 0.05, 0.6, 5), C.bone, { pos: [bx + (rnd() - 0.5) * 0.6, 0.12 + k * 0.04, bz + (rnd() - 0.5) * 0.6], rot: [Math.PI / 2, rnd() * 3, 0], outline: 0.008 });
-        piece(g, G.sphere(0.17, 8, 6), C.bone, { pos: [bx, 0.2, bz], outline: 0.01 });
+        const a = rnd() * Math.PI * 2;
+        const d = R * (0.3 + rnd() * 0.4);
+        const cx = Math.cos(a) * d;
+        const cz = Math.sin(a) * d;
+        const gy = this.groundHeight(x + cx, z + cz) - g.position.y;
+        const n = 3 + Math.floor(rnd() * 3);
+        for (let k = 0; k < n; k++) {
+          const ex = cx + (rnd() - 0.5) * 1.2;
+          const ez = cz + (rnd() - 0.5) * 1.2;
+          const h = 0.45 + rnd() * 0.25;
+          piece(g, G.sphere(0.3, 10, 8), C.egg, { pos: [ex, gy + h * 0.6, ez], scale: [0.9, h / 0.3 * 0.55, 0.9], outline: 0.012 });
+          piece(g, G.box(0.04, h * 0.6, 0.02), HIVE, { pos: [ex, gy + h * 0.75, ez + 0.27], glow: true, outline: 0 });
+        }
+        this.addCollider(x + cx, z + cz, 0.9, 0.8);
+      }
+      // Chitin spires, bowed toward the node.
+      for (let i = 0; i < 3; i++) {
+        const a = (i / 3) * Math.PI * 2 + rnd();
+        const d = R * 0.62;
+        const px = Math.cos(a) * d;
+        const pz = Math.sin(a) * d;
+        const h = 3 + rnd() * 2;
+        const gy = this.groundHeight(x + px, z + pz) - g.position.y;
+        for (let k = 0; k < 3; k++) {
+          const t = k / 3;
+          const lean = 0.18 + t * 0.3;
+          piece(g, G.cone(0.55 * (1 - t * 0.55), h * 0.42, 6), k % 2 ? C.chitin : C.resinDark, {
+            pos: [px * (1 - t * 0.14), gy + h * (0.2 + t * 0.32), pz * (1 - t * 0.14)], rot: [Math.sin(a) * lean, 0, -Math.cos(a) * lean], outline: 0.025,
+          });
+        }
+        piece(g, G.torus(0.42, 0.05, Math.PI * 2, 4, 12), HIVE, { pos: [px, gy + h * 0.3, pz], rot: [Math.PI / 2, 0, 0], glow: true, outline: 0 });
+        this.addCollider(x + px, z + pz, 0.6, h);
       }
     } else if (camp.style === 'relay') {
-      // Constructs: a conduit platform round a humming pylon, cable runs and cargo pods.
+      // Synths: a conduit platform round a humming pylon, cable runs and cargo pods.
       piece(g, G.cyl(R * 0.45, R * 0.48, 0.4, 16), C.metalDark, { pos: [0, 0.2, 0], outline: 0.03 });
       piece(g, G.torus(R * 0.45, 0.06, Math.PI * 2, 4, 32), ARC, { pos: [0, 0.42, 0], rot: [Math.PI / 2, 0, 0], glow: true, outline: 0 });
       piece(g, G.cyl(0.55, 0.8, 5.5, 8), C.steel, { pos: [0, 2.75, 0], outline: 0.03 });
@@ -1125,7 +1276,7 @@ export class World {
       }
       for (let i = 0; i < 3; i++) this.crate(x + (rnd() - 0.5) * R * 1.2, z + (rnd() - 0.5) * R * 1.2, rnd() * 3, 1 + rnd() * 0.3);
     } else {
-      // Beasts: a ring of boulders round a rocky overhang, a nest of branches and gnawed bones.
+      // The wild: a ring of boulders round a rocky overhang, a nest of branches and gnawed bones.
       for (let a = 0; a < Math.PI * 2; a += 0.5) {
         if (rnd() < 0.35) continue;
         const s = 1.0 + rnd() * 1.6;
@@ -1149,14 +1300,15 @@ export class World {
     this.finish(g);
   }
 
-  // Strongholds: the race's walled seat, boss within. Walls and glow by race.
+  // Strongholds: the race's walled seat, boss within. Walls and glow by race; the Hive's walls
+  // and the wild's are heaped rather than built.
   buildFort(camp) {
     const { x, z } = camp;
     const look = {
-      goblin: { wall: C.steel, glow: FORGE, cap: C.metalDark, fire: 'barrel' },
-      hollow: { wall: C.grave, glow: VOID, cap: C.graveDark, fire: 'void' },
-      construct: { wall: 0x6a7280, glow: ARC, cap: C.metalDark, fire: 'barrel' },
-      beast: { wall: C.stoneDark, glow: 0xffb030, cap: C.stone, fire: 'barrel' },
+      scav: { wall: C.steel, glow: FORGE, cap: C.metalDark, fire: 'barrel' },
+      hive: { wall: C.resin, glow: HIVE, cap: C.resinDark, fire: 'node', heaped: true, spires: true },
+      synth: { wall: 0x6a7280, glow: ARC, cap: C.metalDark, fire: 'barrel' },
+      fauna: { wall: C.stoneDark, glow: 0xffb030, cap: C.stone, fire: 'barrel', heaped: true },
     }[camp.race] ?? { wall: C.steel, glow: FORGE, cap: C.metalDark, fire: 'barrel' };
     const half = 15;
     const gate = 4;
@@ -1186,8 +1338,9 @@ export class World {
         const horizontal = Math.abs(bz - az) < 0.1;
         const sx = horizontal ? seg + 0.05 : 1.6;
         const sz = horizontal ? 1.6 : seg + 0.05;
-        if (camp.race === 'beast') {
+        if (look.heaped) {
           piece(g, G.dodeca(1.9), i % 2 ? look.wall : shade(look.wall, 1.1), { pos: [px, h * 0.3, pz], rot: [i, i * 1.7, 0], scale: [1, h / 3, 1] });
+          if (look.spires && i % 2 === 0) piece(g, G.cone(0.3, 1.6, 5), C.chitin, { pos: [px, h * 0.75, pz], rot: [0.2 * Math.sin(i), 0, 0.2 * Math.cos(i)], outline: 0.02 });
         } else {
           piece(g, G.box(sx, h + 2, sz), i % 2 ? look.wall : shade(look.wall, 0.9), { pos: [px, h / 2 - 1, pz], outline: 0.05 });
           piece(g, G.box(horizontal ? seg * 0.7 : 1.65, 0.12, horizontal ? 1.65 : seg * 0.7), look.glow, { pos: [px, h * 0.55, pz], glow: true, outline: 0 });
@@ -1199,11 +1352,16 @@ export class World {
         }
       }
     }
-    // Corner towers
+    // Corner towers (chitin spires for the Hive).
     for (const [cx, cz] of [[-half, -half], [half, -half], [-half, half], [half, half]]) {
-      piece(g, G.cyl(2.2, 2.5, 8, 12), look.wall, { pos: [cx, 3, cz], outline: 0.06 });
-      piece(g, G.dome(2.0, 12, 6), look.cap, { pos: [cx, 7, cz], outline: 0.05 });
-      piece(g, G.torus(2.25, 0.08, Math.PI * 2, 4, 24), look.glow, { pos: [cx, 6.2, cz], rot: [Math.PI / 2, 0, 0], glow: true, outline: 0 });
+      if (look.spires) {
+        piece(g, G.cone(2.4, 6, 7), look.cap, { pos: [cx, 2, cz], outline: 0.06 });
+        piece(g, G.cone(1.3, 6.5, 6), C.chitin, { pos: [cx, 6.5, cz], rot: [0.15 * Math.sign(cz), 0, -0.15 * Math.sign(cx)], outline: 0.05 });
+      } else {
+        piece(g, G.cyl(2.2, 2.5, 8, 12), look.wall, { pos: [cx, 3, cz], outline: 0.06 });
+        piece(g, G.dome(2.0, 12, 6), look.cap, { pos: [cx, 7, cz], outline: 0.05 });
+      }
+      piece(g, G.torus(2.25, 0.08, Math.PI * 2, 4, 24), look.glow, { pos: [cx, look.spires ? 3.6 : 6.2, cz], rot: [Math.PI / 2, 0, 0], scale: look.spires ? 0.62 : 1, glow: true, outline: 0 });
       this.addCollider(x + cx, z + cz, 2.5, 7, y0);
     }
     // Gate frame

@@ -312,7 +312,7 @@ export class Encounters {
       } else if (!pack.enemies.some((e) => e.engaged)) {
         // Drift the pack's home along its heading so it wanders the wilds.
         pack.home.addScaledVector(pack.dir, dt * 1.1);
-        if (w.zoneAt(pack.home.x, pack.home.z) || w.isWater(pack.home.x, pack.home.z) || Math.hypot(pack.home.x, pack.home.z) < 45) pack.dir.negate();
+        if (w.zoneAt(pack.home.x, pack.home.z, 30) || w.isWater(pack.home.x, pack.home.z) || Math.hypot(pack.home.x, pack.home.z) < 45) pack.dir.negate();
         for (const e of pack.enemies) e.home.set(pack.home.x + e.offset.x, 0, pack.home.z + e.offset.z);
       }
     }
@@ -329,7 +329,7 @@ export class Encounters {
       const r = 60 + Math.random() * 25;
       const x = p.x + Math.cos(a) * r;
       const z = p.z + Math.sin(a) * r;
-      if (w.zoneAt(x, z) || w.isWater(x, z) || Math.hypot(x, z) < 45) continue;
+      if (w.zoneAt(x, z, 30) || w.isWater(x, z) || Math.hypot(x, z) < 45) continue;
       if (w.slopeAt(x, z) > 0.6) continue;
       if (this.nearest(x, z) < 50) continue; // not on top of someone else
       this.spawnRoamers(x, z);

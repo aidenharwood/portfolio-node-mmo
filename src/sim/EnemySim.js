@@ -704,10 +704,8 @@ export class EnemySim {
     const y = this.position.y;
     if (this.hover) return out.copy(this.position).setY(y + this.height * 0.5).addScaledVector(_fwd, 0.45);
     if (t.rig !== 'biped') return out.copy(this.position).setY(y + this.height * 0.75).addScaledVector(_fwd, this.radius + 0.25);
-    const m = t.model;
-    if (m.startsWith('goblin:sha') || m === 'goblin:spark') return out.copy(this.position).setY(y + this.height * 0.85).addScaledVector(_fwd, 0.9);
-    if (m.startsWith('construct:') && m !== 'construct:stalker') return out.copy(this.position).setY(y + this.height * 0.95).addScaledVector(_fwd, -0.3);
-    return out.copy(this.position).addScaledVector(_fwd, 0.6).setY(y + this.height * 0.72);
+    const m = t.muzzle;
+    return out.copy(this.position).addScaledVector(_fwd, m?.f ?? 0.6).setY(y + this.height * (m?.y ?? 0.72));
   }
 
   // Aim at the target's chest, leading their motion a little; `spread` in metres.
@@ -733,11 +731,9 @@ export class EnemySim {
   }
 
   fireArrow(L, p) {
-    this.forward(_fwd);
-    const origin = _o.copy(this.position).addScaledVector(_fwd, 0.6);
-    origin.y += this.height * 0.75;
+    const origin = this.muzzle(_o);
     this.aimAt(origin, L.speed, L.pierce ? 0.4 : 1.2, _aim);
-    this.shoot({ ...L, proj: 'arrow' }, origin, _aim, { m: 1 });
+    this.shoot(L, origin, _aim, { m: 1 });
     void p;
   }
 
@@ -803,8 +799,8 @@ export class EnemySim {
   summon(L) {
     const n = Math.min(L.count, L.maxMinions - this.minions.filter((m) => m.alive).length);
     this.minions = this.minions.filter((m) => m.alive);
-    // Beasts come running in from the edge; the rest rise or are deployed beside the summoner.
-    const far = this.type.race === 'beast' ? 11 : 3.2;
+    // The pack comes running in from the edge; the rest hatch or are deployed beside the summoner.
+    const far = this.type.race === 'fauna' ? 11 : 3.2;
     for (let i = 0; i < n; i++) {
       const a = this.facing + Math.PI + (i - (n - 1) / 2) * 0.9;
       const x = this.position.x + Math.sin(a) * far;
@@ -892,7 +888,7 @@ export class EnemySim {
     this.ward = null;
     const burst = this.type.deathBurst;
     if (burst) {
-      // Bloated husks burst a moment after they drop.
+      // Bloaters burst a moment after they drop.
       const pos = this.position.clone();
       const dmg = Math.round(burst.damage * Math.pow(1.11, this.level - 1));
       this.sim.emit({ k: 'tele', at: pos, p: r3(pos), r: burst.radius, t: 0.6, el: burst.element, fuse: 1 });
