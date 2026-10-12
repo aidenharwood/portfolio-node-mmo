@@ -77,7 +77,7 @@ Setting it up, once:
    - Set `ADMINS` on the realm StatefulSet to your account name.
    - Push. Argo CD creates Postgres, the services and the ingress straight away. The gateway and
      realm pods wait for the first image.
-4. **The first build**: push to `main` (or run the workflow by hand). CI builds the image and bumps
+4. **The first build**: push to `master` (or run the workflow by hand). CI builds the image and bumps
    it in the chart, and Argo CD rolls it out.
 5. **DNS**: point `celblade.aidenharwood.uk` at the cluster like the other subdomains.
    WebSockets need nothing special (the realm pings every 20 s, well inside Cloudflare's and
