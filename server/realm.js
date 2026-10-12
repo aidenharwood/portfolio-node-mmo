@@ -121,6 +121,18 @@ function cleanFx(fx) {
   return out;
 }
 
+export function normalizeCharacterSaveData(data) {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return null;
+  const out = {};
+  if (typeof data.discovery === 'string' || Array.isArray(data.discovery) || (data.discovery && typeof data.discovery === 'object')) {
+    out.discovery = data.discovery;
+  }
+  if (data.marker === null || (data.marker && Number.isFinite(data.marker.x) && Number.isFinite(data.marker.z))) {
+    out.marker = data.marker ? { x: data.marker.x, z: data.marker.z } : null;
+  }
+  return out;
+}
+
 const cleanText = (t) => String(t ?? '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, MAX_CHAT);
 
 class Session {
@@ -441,10 +453,11 @@ export class Realm {
       case 'save': {
         // Only what's this screen's own: the character itself lives here.
         const data = msg.data;
-        if (!data || typeof data !== 'object' || Array.isArray(data)) return;
+        const save = normalizeCharacterSaveData(data);
+        if (!save) return;
         if (JSON.stringify(data).length > MAX_SAVE) { s.send({ t: 'error', error: 'Save too large.' }); return; }
-        if (data.discovery && typeof data.discovery === 'object') s.extras.discovery = data.discovery;
-        if (data.marker === null || (data.marker && Number.isFinite(data.marker.x) && Number.isFinite(data.marker.z))) s.extras.marker = data.marker ? { x: data.marker.x, z: data.marker.z } : null;
+        if (save.discovery !== undefined) s.extras.discovery = save.discovery;
+        if (save.marker !== undefined) s.extras.marker = save.marker;
         if (s.state) s.extras.pos = s.state.p;
         s.dirty = true;
         break;
