@@ -19,6 +19,7 @@ import { MODELS, bindAny } from '../models/Creatures.js';
 import { applyComic } from '../render/Toon.js';
 import { Animator, makeAnimState } from '../anim/Animator.js';
 import { LegAnimator, makeLegState, HoverAnimator, makeHoverState } from '../anim/LegAnimator.js';
+import { AFFIXES, RALLY } from '../sim/affixes.js';
 
 export { ENEMY_TYPES };
 
@@ -110,6 +111,7 @@ export function prewarmRace(race) {
 }
 
 const WARD_GEO = new THREE.SphereGeometry(1, 20, 14);
+const AURA_GEO = new THREE.RingGeometry(0.78, 1, 40).rotateX(-Math.PI / 2);
 
 export class Enemy extends Character {
   // `src`: the EnemySim (offline) or EnemyReplica (online) this view follows; `layer` reports hits.
@@ -124,7 +126,13 @@ export class Enemy extends Character {
     this.variant = type.variant;
     this.level = src.level;
     this.elite = src.elite;
-    this.summoned = !!src.summoner;
+    this.champion = !!src.champion;
+    this.horde = !!(src.horde ?? src.camp?.horde);
+    this.affixes = src.affixes ?? [];
+    this.shieldMax = src.shieldMax ?? 0;
+    this.shield = this.shieldMax;
+    this.rallied = false;
+    this.summoned = !!(src.summoner || src.split);
     this.displayName = src.displayName;
     this.isBoss = !!type.boss;
     this.attacks = src.attacks;
@@ -180,6 +188,15 @@ export class Enemy extends Character {
     this.root.rotation.y = this.facing;
     // A summoned minion arrives in a ring of its race's colour.
     if (this.summoned) game.effects.spawnRing(this.position, 1.6, RACE_GLOW[type.race] ?? 0xffffff);
+    // An elite's affixes show as an aura at its feet, in the first one's colour (a champion's wider).
+    if (this.affixes.length) {
+      this.aura = new THREE.Mesh(AURA_GEO, new THREE.MeshBasicMaterial({
+        color: AFFIXES[this.affixes[0]]?.color ?? 0xffd23f, transparent: true, opacity: 0.5, depthWrite: false, blending: THREE.AdditiveBlending,
+      }));
+      this.aura.scale.setScalar(this.radius * (this.champion ? 2.6 : 2));
+      this.aura.position.y = 0.06;
+      this.root.add(this.aura);
+    }
   }
 
   get behavior() { return this.type.behavior; }
@@ -201,8 +218,10 @@ export class Enemy extends Character {
       // Hits from other players show as a flash too.
       if (s.hp < this.hp - 0.5 && s.alive) this.flashTimer = Math.max(this.flashTimer, 0.08);
       this.hp = s.hp;
+      this.shield = s.shield ?? 0;
       this.alive = s.alive;
     } else if (!s.alive) this.alive = false;
+    this.rallied = s.rallied === true || s.rallied > 0;
     this.state = s.state;
     this.stateTime = s.stateTime;
     this.cur = s.cur;
@@ -267,7 +286,7 @@ export class Enemy extends Character {
       }
       if (a.kind === 'pounce' && s === 'recover') {
         // The landing reaches a little further than the leap.
-        this.strikeOnce(liveAttack(a, this.frenzy > 0), 360, this.radius + 1.2);
+        this.strikeOnce(liveAttack(a, this.frenzy > 0, this.rallied), 360, this.radius + 1.2);
         g.effects.spawnPuff(this.position, { size: 1.2, life: 0.5 });
         g.audio.stomp?.(this.position, 0.6);
       }
@@ -279,7 +298,7 @@ export class Enemy extends Character {
   strike(dt) {
     const a = this.cur;
     if (!a) return;
-    const L = liveAttack(a, this.frenzy > 0);
+    const L = liveAttack(a, this.frenzy > 0, this.rallied);
     switch (a.kind) {
       case 'swing': case 'combo': case 'bite': case 'bash':
         this.strikeOnce(L, L.arc, L.range);
@@ -317,13 +336,19 @@ export class Enemy extends Character {
     if (this.tint.r + this.tint.g + this.tint.b < 0.05) {
       if (this.frenzy > 0) this.tint.copy(FRENZY);
       else if (this.elite) this.tint.setRGB(0.22, 0.16, 0.02);
+      else if (this.rallied) this.tint.setRGB(0.1, 0.075, 0);
+    }
+    if (this.aura) {
+      this.aura.visible = this.alive && this.state !== 'spawn';
+      this.aura.material.opacity = 0.45 + 0.2 * Math.sin(this.stateTime * 3 + this.id);
+      this.aura.position.y = 0.15 - (this.src.hover ? this.alt : 0); // on the ground under floaters too
     }
     if (this.state === 'windup' && this.cur && !SUPPORT_KINDS.has(this.cur.kind)) {
       const T = this.hitIndex > 0 ? this.cur.windup * 0.45 : this.cur.windup;
       const k = this.stateTime / T;
       this.tint.copy(TELEGRAPH).multiplyScalar(0.15 + 0.55 * k * (0.6 + 0.4 * Math.sin(this.stateTime * 40)));
     }
-    if (this.ward || this.wardMesh) this.updateWard();
+    if (this.ward || this.shield > 0 || this.wardMesh) this.updateWard();
     void dt;
   }
 
@@ -363,6 +388,7 @@ export class Enemy extends Character {
       }
     }
     if (this.ward && hit.source !== 'status') hit.damage = Math.max(1, Math.round(hit.damage * (1 - this.ward.reduce)));
+    if (this.rallied && hit.source !== 'status') hit.damage = Math.max(1, Math.round(hit.damage * RALLY.taken));
     if (hit.source !== 'status') this.flashTimer = 0.1;
     this.layer.reportHit(this, hit);
     return true;
@@ -374,14 +400,16 @@ export class Enemy extends Character {
     this.layer.reportStatus(this, element, potency);
   }
 
+  // The bubble of a tech's ward, or of a Shielded elite's shield.
   updateWard() {
-    if (this.ward && !this.wardMesh) {
+    const up = this.ward || this.shield > 0;
+    if (up && !this.wardMesh) {
       const mat = new THREE.MeshBasicMaterial({ color: WARD, transparent: true, opacity: 0.22, depthWrite: false, blending: THREE.AdditiveBlending });
       this.wardMesh = new THREE.Mesh(WARD_GEO, mat);
       this.root.add(this.wardMesh);
     }
     const m = this.wardMesh;
-    if (!this.ward || !this.alive) {
+    if (!up || !this.alive) {
       m.visible = false;
       return;
     }
@@ -389,7 +417,7 @@ export class Enemy extends Character {
     const r = Math.max(this.radius * 1.5, this.height * 0.62);
     m.scale.set(r, this.height * 0.65, r);
     m.position.y = this.height * 0.5;
-    const left = this.ward.time ?? 2;
+    const left = this.ward ? this.ward.time ?? 2 : 2;
     m.material.opacity = 0.16 + 0.06 * Math.sin(this.stateTime * 6) + (left < 1 ? -0.1 * (1 - left) : 0);
   }
 
@@ -400,6 +428,7 @@ export class Enemy extends Character {
     this.rig.materials.length = 0;
     this.rig.skeleton?.dispose();
     this.wardMesh?.material.dispose();
+    this.aura?.material.dispose();
   }
 
   // ================================================================ animation

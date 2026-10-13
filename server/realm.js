@@ -46,6 +46,8 @@ import { Trades } from './trade.js';
 import { Social } from './social.js';
 import { Admin } from './admin.js';
 import { Grid, metrics, log } from './ops.js';
+import { ABILITIES, cooldownOf } from '../src/combat/abilities.js';
+import { ACHIEVEMENT } from '../src/rpg/achievements.js';
 
 const TICK_MS = 50;
 const AOI = 160;           // metres: players further apart than this don't see each other
@@ -60,7 +62,7 @@ const STATES = new Set(['move', 'attack', 'dodge', 'slide', 'airdash', 'slam', '
 const FX_KINDS = new Set(['shot', 'rune', 'muzzle']);
 
 // Token bucket per message type: `rate` per second, holding up to `burst`.
-const LIMITS = { s: [30, 45], profile: [2, 6], fx: [30, 60], chat: [1.2, 5], save: [1, 4], ping: [3, 6], hit: [60, 120], st: [30, 60], op: [20, 40], resync: [0.5, 2], party: [2, 6], trade: [6, 12], mail: [2, 6] };
+const LIMITS = { s: [30, 45], profile: [2, 6], fx: [30, 60], chat: [1.2, 5], save: [1, 4], ping: [3, 6], hit: [60, 120], st: [30, 60], op: [20, 40], resync: [0.5, 2], party: [2, 6], trade: [6, 12], mail: [2, 6], ab: [2, 6], dun: [4, 10] };
 const SLOW_CLIENT = 1 << 20;   // bytes queued: past this, snapshots for that player are skipped...
 const DEAD_CLIENT = 8 << 20;   // ...and past this, the connection is dropped
 const SAVE_EVERY = 30_000;  // ms: characters are written back this often (and when they leave)
@@ -130,6 +132,8 @@ export function normalizeCharacterSaveData(data) {
   if (data.marker === null || (data.marker && Number.isFinite(data.marker.x) && Number.isFinite(data.marker.z))) {
     out.marker = data.marker ? { x: data.marker.x, z: data.marker.z } : null;
   }
+  // The quest the HUD, the compass and the maps follow first (an id; null for none).
+  if (data.tracked === null || (typeof data.tracked === 'string' && data.tracked.length <= 80)) out.tracked = data.tracked;
   return out;
 }
 
@@ -192,8 +196,11 @@ class Session {
   get position() { return this.state?.p ?? null; }
 
   profile() {
-    return { id: this.id, lv: this.level, w: this.weapon, a: this.armor, gt: this.tag };
+    return { id: this.id, lv: this.level, w: this.weapon, a: this.armor, gt: this.tag, ti: this.title };
   }
+
+  // The title worn (an achievement's), as the server's copy of the character has it.
+  get title() { return ACHIEVEMENT[this.core?.settings.title]?.title ?? null; }
 }
 
 export class Realm {
@@ -222,6 +229,7 @@ export class Realm {
     metrics.gauges = () => ({
       layer: this.layer, players: this.sessions.size, enemies: this.simhost.enemyCount, parties: this.parties.parties.size,
       world_colliders: this.simhost.world.colliders.size, world_chunks: this.simhost.world.chunks.size,
+      dungeon_runs: this.simhost.dungeons.runs.size,
     });
     metrics.ready = () => !this.draining;
     this.timer = setInterval(() => this.tick(), TICK_MS);
@@ -417,7 +425,9 @@ export class Realm {
           s.dirty = true;
           s.level = s.core.stats.level;
         }
-        s.send({ t: 'opr', seq: msg.seq, ok: r.ok, roll: r.roll, h: s.core.hash() });
+        // (Refused at a dungeon's way in: the instance manager says why.)
+        const err = !r.ok && msg.op?.op === 'enter' ? this.simhost.dungeons.error ?? undefined : undefined;
+        s.send({ t: 'opr', seq: msg.seq, ok: r.ok, roll: r.roll, h: s.core.hash(), err });
         break;
       }
       case 'resync': s.send({ t: 'char', data: characterData(s.core, s.extras), ground: groundList(s.core) }); break;
@@ -426,6 +436,8 @@ export class Realm {
       case 'mail': this.social.mail(s, msg); break;
       case 'hit': this.simhost.hit(s, msg); break;
       case 'st': this.simhost.status(s, msg); break;
+      case 'dun': if (s.proxy?.placed && typeof msg.id === 'string') this.simhost.dungeons.use(s.id, msg.id.slice(0, 12), s.proxy.position, s.name); break;
+      case 'ab': this.ability(s, msg); break;
       case 'profile': {
         s.level = s.core.stats.level;
         s.weapon = cleanRecipe(msg.w);
@@ -458,6 +470,7 @@ export class Realm {
         if (JSON.stringify(data).length > MAX_SAVE) { s.send({ t: 'error', error: 'Save too large.' }); return; }
         if (save.discovery !== undefined) s.extras.discovery = save.discovery;
         if (save.marker !== undefined) s.extras.marker = save.marker;
+        if (save.tracked !== undefined) s.extras.tracked = save.tracked;
         if (s.state) s.extras.pos = s.state.p;
         s.dirty = true;
         break;
@@ -496,7 +509,7 @@ export class Realm {
     }
     const say = /^\/s\s+(.+)$/i.exec(text);
     if (say) {
-      const msg = { t: 'chat', ch: 'say', from: s.name, text: say[1] };
+      const msg = { t: 'chat', ch: 'say', from: s.name, ti: s.title ?? undefined, text: say[1] };
       for (const o of this.sessions.values()) if ((o === s || this.distance(o, s) <= SAY_RANGE) && !this.social.ignores(o, s)) o.send(msg);
       return;
     }
@@ -504,7 +517,7 @@ export class Realm {
       s.send({ t: 'chat', ch: 'system', text: 'Commands: /s nearby · /w Name whisper · /p party · /g guild · /invite /accept /decline /leave /kick /promote (party) · /trade Name · /friend /unfriend /ignore /unignore Name · /guild · /report Name reason · /who' });
       return;
     }
-    this.bus.publish('all', { k: 'chat', from: s.name, fromChar: s.charId, text });
+    this.bus.publish('all', { k: 'chat', from: s.name, ti: s.title ?? undefined, fromChar: s.charId, text });
   }
 
   async who(s) {
@@ -531,7 +544,7 @@ export class Realm {
   onBus(m) {
     switch (m.k) {
       case 'chat': {
-        const msg = { t: 'chat', ch: 'world', from: m.from, text: m.text };
+        const msg = { t: 'chat', ch: 'world', from: m.from, ti: m.ti, text: m.text };
         for (const o of this.sessions.values()) if (!o.ignoring?.has(m.fromChar)) o.send(msg);
         return;
       }
@@ -645,6 +658,29 @@ export class Realm {
     }
     this.simhost.endTick();
     metrics.tick(performance.now() - t0);
+  }
+
+  // An ability used (src/combat/abilities.js): it has to be unlocked, slotted and off cooldown (with
+  // half a second's allowance for lag). Then everyone who can see the user is shown it — with the
+  // user's upgrade as the server knows it — and a decoy goes into the sim.
+  ability(s, m) {
+    const id = String(m.id ?? '');
+    const A = ABILITIES[id];
+    const st = s.core?.stats;
+    if (!A || !st || !s.proxy?.alive || !st.slots.includes(id) || !st.talent.abilities.includes(id)) return;
+    const now = this.simhost.sim.time;
+    s.abilityAt ??= {};
+    if (now < (s.abilityAt[id] ?? -Infinity) + cooldownOf(id, st.talent.upgrades) - 0.5) { s.strikes++; return; }
+    s.abilityAt[id] = now;
+    const fx = { k: 'ab', id, u: st.talent.upgrades.has(Object.keys(A.upgrades)[0]) };
+    const at = s.proxy.position;
+    const p = vec3(m.p, 1e6);
+    if (p && Math.hypot(p[0] - at.x, p[2] - at.z) <= 45) fx.p = p.map((v) => round(v, 100));
+    const o = vec3(m.o, 1e6);
+    const d = vec3(m.d, 2);
+    if (o && d && Math.hypot(o[0] - at.x, o[2] - at.z) <= 5) { fx.o = o.map((v) => round(v, 100)); fx.d = d.map((v) => round(v)); }
+    for (const other of this.sessions.values()) if (other !== s && other.known.has(s)) other.fxOut.push([s.id, fx]);
+    if (id === 'decoy' && fx.p) this.simhost.addDecoy(s, fx.p, A.duration);
   }
 
   // Drops connections that stopped answering pings (closed laptops, dead networks).

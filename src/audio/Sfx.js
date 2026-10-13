@@ -12,6 +12,7 @@ import * as THREE from 'three';
 import { Engine } from './Engine.js';
 import { WEIGHT } from '../anim/WeaponMotion.js';
 import { WEAPON_TYPES } from '../items/weaponTypes.js';
+import { MANUFACTURERS } from '../items/manufacturers.js';
 
 const rnd = (a, b) => a + Math.random() * (b - a);
 const vary = (v, amt = 0.06) => v * (1 + (Math.random() * 2 - 1) * amt);
@@ -352,12 +353,13 @@ export class Sfx {
     } else if (el === 'corrosive') {
       for (let i = 0; i < 5; i++) E.tone(o, t + rnd(0.02, 0.25), { f: rnd(300, 700), f2: rnd(900, 1500), dur: 0.05, peak: 0.07 * scale });
     } else {
-      const m = w.manufacturer;
-      if (m === 'kessler') E.tone(o, t, { f: 2800, f2: 700, dur: 0.07, peak: 0.07 * scale });
-      else if (m === 'voltaic') E.tone(o, t, { wave: 'sawtooth', f: 1400, f2: 300, dur: 0.06, peak: 0.05 * scale, lp: 2500 });
-      else if (m === 'rattlecap') for (let i = 0; i < 3; i++) E.burst(o, t + rnd(0.04, 0.14), { filter: 'bandpass', f: rnd(2000, 3500), q: 4, dur: 0.015, peak: 0.16 * scale });
-      else if (m === 'rime') E.fm(o, t, { f: 3200, ratio: 2.7, index: 0.8, dur: 0.2, peak: 0.05 * scale });
-      else if (m === 'aether' || m === 'hollow') E.fm(o, t, { f: m === 'hollow' ? 220 : 660, ratio: 1.5, index: 1.5, dur: 0.35, peak: 0.06 * scale });
+      // No element: the maker's voice (items/manufacturers.js).
+      const v = MANUFACTURERS[w.manufacturer]?.voice;
+      if (v === 'military') E.tone(o, t, { f: 2800, f2: 700, dur: 0.07, peak: 0.07 * scale });
+      else if (v === 'arc') E.tone(o, t, { wave: 'sawtooth', f: 1400, f2: 300, dur: 0.06, peak: 0.05 * scale, lp: 2500 });
+      else if (v === 'junk') for (let i = 0; i < 3; i++) E.burst(o, t + rnd(0.04, 0.14), { filter: 'bandpass', f: rnd(2000, 3500), q: 4, dur: 0.015, peak: 0.16 * scale });
+      else if (v === 'heavy') E.burst(o, t, { color: 'brown', filter: 'lowpass', f: 300, dur: 0.18, attack: 0.005, peak: 0.2 * scale });
+      else if (v === 'psi' || v === 'bio') E.fm(o, t, { f: v === 'bio' ? 220 : 660, ratio: 1.5, index: 1.5, dur: 0.35, peak: 0.06 * scale });
     }
   }
 
@@ -553,7 +555,7 @@ export class Sfx {
     if (v) {
       E.burst(v.in, v.t, { color: 'white', filter: 'bandpass', f: 2600, f2: 900, q: 1.5, dur: 0.18, attack: 0.002, peak: 0.5 });
       E.tone(v.in, v.t, { wave: 'triangle', f: 600, f2: 180, dur: 0.15, peak: 0.25 });
-      this.tint({ element, manufacturer: 'aether' }, v.t, v.in, 0.7);
+      this.tint({ element, manufacturer: 'maker' }, v.t, v.in, 0.7);
     }
     this.tick(crit);
   }
@@ -601,7 +603,7 @@ export class Sfx {
       E.tone(o, t, { f: 240, f2: 160, dur: 0.06, peak: 0.35 });
     } else {
       E.burst(o, t, { color: 'white', filter: 'bandpass', f: 2000, f2: 700, q: 1.2, dur: 0.2, peak: 0.4 });
-      this.tint({ element, manufacturer: 'aether' }, t, o, 0.6);
+      this.tint({ element, manufacturer: 'maker' }, t, o, 0.6);
     }
   }
 
@@ -835,6 +837,14 @@ export class Sfx {
   }
 
   // Wards and mending: a bright shimmer.
+  // A health cell taken: a quick rising chime.
+  cell(pos) {
+    const E = this.E;
+    const v = E.voice({ pos, gain: 0.3, wet: 0.3, dur: 0.6, reach: 14 });
+    if (!v) return;
+    for (const [i, f] of [784, 1046, 1318].entries()) E.fm(v.in, v.t + i * 0.045, { f, ratio: 2.01, index: 0.4, dur: 0.3, peak: 0.12 });
+  }
+
   ward(pos, heal = false) {
     const E = this.E;
     const v = E.voice({ pos, gain: 0.35, wet: 0.45, dur: 1.2, reach: 18 });

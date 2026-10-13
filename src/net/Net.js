@@ -46,7 +46,11 @@ export class Net {
       const res = await fetch('/api/status', { signal: ctl.signal, cache: 'no-store' });
       clearTimeout(timer);
       const json = res.ok ? await res.json() : null;
-      this.mode = json?.online ? 'online' : 'offline';
+      // A server running older code than the game files it hands out (changed since it started, or
+      // from before it could tell) would disagree with this client about the world and its rules:
+      // stay offline until it restarts.
+      this.outdated = !!json?.online && (!json.build || json.stale === true);
+      this.mode = json?.online && !this.outdated ? 'online' : 'offline';
       this.status = json;
     } catch {
       this.mode = 'offline';
@@ -165,6 +169,7 @@ export class Net {
       case 'look': g.remotes.look(msg); break;
       case 'snap': g.remotes.snap(msg); g.enemyLayer.onSnap(msg); break;
       case 'camp': g.enemyLayer.onCamp(msg); break;
+      case 'dun': g.dungeonView.onState(msg); break;
       case 'party': g.partyUI.set(msg.party); break;
       case 'invite': g.partyUI.invited(msg); break;
       case 'pp': g.partyUI.positions(msg.pp); break;
@@ -245,7 +250,7 @@ export class Net {
     const w = inv.current?.recipe ?? null;
     const a = {};
     for (const [slot, item] of Object.entries(inv.armor)) if (item) a[slot] = item.recipe;
-    const msg = { t: 'profile', lv: g.stats.level, w, a };
+    const msg = { t: 'profile', lv: g.stats.level, w, a, ti: g.settings.title ?? null };
     const key = JSON.stringify(msg);
     if (key === this.profileKey) return;
     this.profileKey = key;
@@ -270,6 +275,15 @@ export class Net {
     if (o.tracerScale) fx.ts = o.tracerScale;
     if (o.accel) { fx.ac = o.accel; fx.ms = o.maxSpeed; }
     this.fx.push(fx);
+  }
+
+  // An ability used (entities/AbilityKit.js): the server checks it and shows it to everyone near.
+  // `at`: where it went (a point), or a grenade's [origin, direction].
+  ability(id, at) {
+    if (!this.inWorld) return;
+    const msg = { t: 'ab', id };
+    if (Array.isArray(at)) { msg.o = vec(at[0]); msg.d = vec(at[1]); } else if (at?.isVector3) msg.p = vec(at);
+    this.send(msg);
   }
 
   runeFx(pos, radius, color, delay) {

@@ -3,13 +3,18 @@
 // collision and placement query the game makes.
 //   chunks     64 m terrain squares at three levels of detail, a 2 m height grid near the player,
 //              scenery (trees, rocks, grass, glowing flora) packed into shared instanced meshes
-//   POIs       the hub, friendly settlements, landmarks (world/Landmarks.js), camps and
-//              strongholds (one style per race), towers, ruins, mesas with their floating shards,
-//              waystones and chests — built when within reach, disposed when left far behind,
-//              each owning its colliders
+//   POIs       the hub (Brightwater, a town), villages, hamlets, towns, the cities district by
+//              district (world/Towns.js), landmarks (world/Landmarks.js), camps and strongholds
+//              (one style per race), towers, ruins, mesas with their floating shards, waystones
+//              and chests — built when within reach, disposed when left far behind, each owning
+//              its colliders
 //   sky        the fog and sky take on the colour (and the fog its depth) of the biome you're in
 //   roads      ribbons draped over the terrain between waystones, camps and landmarks
-//   colliders  a spatial hash with ownership, so streamed-out content takes its colliders with it
+//   colliders  a spatial hash with ownership, so streamed-out content takes its colliders with it:
+//              round ones (trees, rocks, posts, folk) and boxes (a dungeon's walls and doors)
+//   pockets    dungeons (world/Interior.js) are built far out east, past anywhere the land goes:
+//              there the ground is their floors, nothing of the land streams in, and no place of
+//              the world stands
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { instancedToon, toonMaterial, disposeObject, noInk } from '../render/Toon.js';
@@ -19,6 +24,11 @@ import { WorldGen, REGION, WATER_LEVEL, HUB } from './Gen.js';
 import { Chunk, CHUNK, RES0 } from './Chunks.js';
 import { C, HEARTH, FORGE, HIVE, ARC, CARGO, RUNE } from './palette.js';
 import { LANDMARK_BUILDERS, SETTLEMENT_BUILDERS } from './Landmarks.js';
+import { HAMLET_BUILDERS, DISTRICT_BUILDERS, buildTown, buildCity, buildCityWall, buildBrightwater, serviceProps } from './Towns.js';
+import { STORY_BUILDERS, foundryYard, placeObjects, objectProps } from './StorySites.js';
+import { NPCS } from './mapData.js';
+import { inPocket, POCKET } from './dungeons.js';
+import { storyPlaces } from './story.js';
 
 const GRID = 8;
 const TAU = Math.PI * 2;
@@ -40,8 +50,13 @@ const DETAIL_DIST = 120;   // grass, flowers and glowing flora
 const COLLIDE_DIST = 150;  // tree and rock colliders
 const POI_LOAD = 300;
 const POI_UNLOAD = 360;
-const LANDMARK_LOAD = 420; // landmarks are big: built before they loom out of the fog
+const LANDMARK_LOAD = 420; // landmarks and cities are big: built before they loom out of the fog
 const LANDMARK_UNLOAD = 480;
+const BIG = new Set(['landmark', 'city', 'district', 'citywall']);
+// Settlements of every size: what counts as one (a safe place), and how far its ground reaches.
+const PLACES = new Set(['settlement', 'hamlet', 'town', 'city']);
+const placeReach = (p) => (p.type === 'city' ? p.wall : p.type === 'hub' ? p.radius : p.r);
+const FOLK = new Map(NPCS.map((n) => [n.id, n]));
 const ROAD_LOAD = 420;
 const ROAD_UNLOAD = 520;
 const BUDGET_MS = 5;
@@ -172,6 +187,35 @@ const _v = new THREE.Vector3();
 const _s = new THREE.Vector3();
 const _col = new THREE.Color();
 
+// Pushes a circle (`pos`, `radius`) out of box collider `c`: away from the box's nearest point, or
+// (its centre inside) out by the shortest way.
+function pushOutOfBox(pos, radius, c) {
+  const angle = c.ry ?? 0;
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  const dx = pos.x - c.x;
+  const dz = pos.z - c.z;
+  const local = { x: cos * dx - sin * dz, z: sin * dx + cos * dz };
+  const qx = Math.min(c.hx, Math.max(-c.hx, local.x));
+  const qz = Math.min(c.hz, Math.max(-c.hz, local.z));
+  const ox = local.x - qx;
+  const oz = local.z - qz;
+  const d2 = ox * ox + oz * oz;
+  if (d2 >= radius * radius) return;
+  if (d2 > 1e-10) {
+    const d = Math.sqrt(d2);
+    local.x = qx + (ox / d) * radius;
+    local.z = qz + (oz / d) * radius;
+  } else {
+    const px = c.hx - Math.abs(local.x) + radius;
+    const pz = c.hz - Math.abs(local.z) + radius;
+    if (px < pz) local.x += Math.sign(local.x || 1) * px;
+    else local.z += Math.sign(local.z || 1) * pz;
+  }
+  pos.x = c.x + cos * local.x + sin * local.z;
+  pos.z = c.z - sin * local.x + cos * local.z;
+}
+
 export class World {
   constructor(scene, seed = 1) {
     this.scene = scene;
@@ -182,6 +226,8 @@ export class World {
     this.flames = [];
     this.shards = [];
     this.spinners = [];         // turning parts (wind turbines)
+    this.objectParts = new Map(); // a quest object's id → its { on, off } parts (shown as used or not)
+    this.interiors = new Map();   // dungeons built in their pockets: id → world/Interior.js
     this.onPoiLoad = null;      // (poi, owner) hooks: the game dresses settlements with their folk
     this.onPoiUnload = null;
     this.skyBiome = 'meadow';
@@ -208,6 +254,7 @@ export class World {
 
   // ------------------------------------------------------------ queries
   groundHeight(x, z) {
+    if (inPocket(x)) return this.pocketGround(x, z);
     const ch = this.chunks.get(ckey(Math.floor(x / CHUNK), Math.floor(z / CHUNK)));
     if (ch) {
       if (ch.heights) return ch.heightAt(x, z);
@@ -246,6 +293,45 @@ export class World {
     return Math.hypot(dx, dz) / (2 * e);
   }
 
+  // ------------------------------------------------------------ pockets (dungeons)
+  interiorAt(x, z) {
+    if (!inPocket(x)) return null;
+    for (const it of this.interiors.values()) if (it.contains(x, z)) return it;
+    return null;
+  }
+  // In a pocket the ground is a dungeon's floor, and outside its rooms far below them.
+  pocketGround(x, z) {
+    const it = this.interiorAt(x, z);
+    return it ? it.floorAt(x, z) : POCKET.y - 40;
+  }
+  // The ceiling over (x, z): a dungeon's, else the open sky.
+  ceilingAt(x, z) { return inPocket(x) ? this.interiorAt(x, z)?.ceilingAt(x, z) ?? Infinity : Infinity; }
+  // Somewhere an enemy may be put (a blink, a summons): dry land, or a dungeon's floor.
+  standable(x, z) { return inPocket(x) ? !!this.interiorAt(x, z)?.standable(x, z) : !this.isWater(x, z); }
+  addInterior(it) {
+    this.interiors.get(it.id)?.detach();
+    this.interiors.set(it.id, it);
+    it.attach(this);
+    return it;
+  }
+  removeInterior(id) {
+    const it = this.interiors.get(id);
+    if (!it) return;
+    it.detach();
+    this.interiors.delete(id);
+  }
+  // A story place's point of interest by its key (world/story.js): 'foundry', 'vault'…
+  storyPlace(key) {
+    const S = storyPlaces(this.gen)[key];
+    return S ? this.gen.region(S.rx, S.rz).pois.find((p) => p.story === key) ?? null : null;
+  }
+  // The encounters near (x, z) for the world sim: the land's camps, or a dungeon's rooms.
+  campsNear(x, z, r) {
+    if (!inPocket(x)) return this.poisNear(x, z, r, ['camp']);
+    const it = this.interiorAt(x, z);
+    return it ? it.camps.filter((c) => Math.hypot(c.x - x, c.z - z) <= r + c.radius) : [];
+  }
+
   biomeAt(x, z) { return this.gen.biomeAt(x, z); }
   regionAt(x, z) { return this.gen.regionAt(x, z); }
   isWater(x, z) { return this.groundHeight(x, z) < WATER_LEVEL - 0.15; }
@@ -273,6 +359,20 @@ export class World {
   }
 
   cellKey(ix, iz) { return (ix + 40000) * 80000 + (iz + 40000); }
+
+  // An axis-aligned box (a wall, a door): `hx` and `hz` its half sizes; `r` bounds it for the grid.
+  addBox(x, z, hx, hz, h = 3, y = this.groundHeight(x, z)) {
+    return this.addOrientedBox(x, z, hx, hz, 0, h, y);
+  }
+
+  addOrientedBox(x, z, hx, hz, ry, h = 3, y = this.groundHeight(x, z)) {
+    const c = this.addCollider(x, z, Math.hypot(hx, hz), h, y);
+    c.box = true;
+    c.hx = hx;
+    c.hz = hz;
+    c.ry = ry;
+    return c;
+  }
 
   addCollider(x, z, r, h = 3, y = this.groundHeight(x, z)) {
     const c = { x, z, r, h, y, cells: [] };
@@ -331,7 +431,10 @@ export class World {
       if (top <= h || top > maxY) continue;
       const dx = x - c.x;
       const dz = z - c.z;
-      if (dx * dx + dz * dz < c.r * c.r) h = top;
+      const angle = c.ry ?? 0;
+      const lx = Math.cos(angle) * dx - Math.sin(angle) * dz;
+      const lz = Math.sin(angle) * dx + Math.cos(angle) * dz;
+      if (c.box ? Math.abs(lx) < c.hx && Math.abs(lz) < c.hz : dx * dx + dz * dz < c.r * c.r) h = top;
     }
     return h;
   }
@@ -341,6 +444,7 @@ export class World {
   resolve(pos, radius, stepUp = 0, height = 1.8) {
     for (const c of this.collidersNear(pos.x, pos.z, radius)) {
       if (pos.y + stepUp >= c.y + c.h || pos.y + height <= c.y) continue;
+      if (c.box) { pushOutOfBox(pos, radius, c); continue; }
       const dx = pos.x - c.x;
       const dz = pos.z - c.z;
       const min = c.r + radius;
@@ -356,28 +460,101 @@ export class World {
     for (const c of this.collidersNear(pos.x, pos.z)) {
       const dx = pos.x - c.x;
       const dz = pos.z - c.z;
-      if (dx * dx + dz * dz < c.r * c.r && pos.y >= c.y && pos.y <= c.y + c.h) return true;
+      const angle = c.ry ?? 0;
+      const lx = Math.cos(angle) * dx - Math.sin(angle) * dz;
+      const lz = Math.sin(angle) * dx + Math.cos(angle) * dz;
+      const inside = c.box ? Math.abs(lx) < c.hx && Math.abs(lz) < c.hz : dx * dx + dz * dz < c.r * c.r;
+      if (inside && pos.y >= c.y && pos.y <= c.y + c.h) return true;
     }
     return false;
   }
 
-  inBounds(pos) { return pos.y < 260 && pos.y > -60 && Math.hypot(pos.x - this.focus.x, pos.z - this.focus.z) < 600; }
+  inBounds(pos) {
+    const yLimit = inPocket(pos.x) || inPocket(this.focus.x) ? 800 : 260;
+    if (pos.y >= yLimit || pos.y <= -60) return false;
+    const d2 = Math.hypot(pos.x - this.focus.x, pos.z - this.focus.z);
+    // Pocket spaces are local maps (the whole dungeon sits far away from the overworld), so the
+    // regular 600 m world cull would prune shots and abilities before they do anything useful.
+    if (inPocket(pos.x) || inPocket(this.focus.x)) return d2 < 2000;
+    return d2 < 600;
+  }
 
-  // The hub, a settlement or a camp at (x, z) (for banners, footsteps and scatter), else null.
-  // `pad` widens the safe places (the hub and settlements) — roaming packs keep further off.
+  // The hub, a settlement (a hamlet, village, town or city) or a camp at (x, z) (for banners,
+  // footsteps and scatter), else null. `pad` widens the safe places — roaming packs keep further
+  // off.
   zoneAt(x, z, pad = 0) {
+    if (inPocket(x)) return null;
     if (Math.hypot(x - HUB.x, z - HUB.z) < HUB.radius + 4 + pad) return HUB;
     for (const r of this.gen.regionsNear(x, z, this._zr ??= [])) {
       for (const p of r.pois) {
         if (p.type === 'camp' && Math.hypot(x - p.x, z - p.z) < p.radius + 8) return p;
-        if (p.type === 'settlement' && Math.hypot(x - p.x, z - p.z) < p.r + 6 + pad) return p;
+        if (PLACES.has(p.type) && Math.hypot(x - p.x, z - p.z) < placeReach(p) + 6 + pad) return p;
       }
     }
     return null;
   }
 
+  // The district of a city you're in, if you are.
+  districtAt(x, z) {
+    if (inPocket(x)) return null;
+    for (const r of this.gen.regionsNear(x, z, this._dr ??= [])) {
+      for (const p of r.pois) if (p.type === 'district' && Math.hypot(x - p.x, z - p.z) < p.r + 2) return p;
+    }
+    return null;
+  }
+
+  // One of the folk (or a service that stands where folk would: a board, a gate) by id: the hub's
+  // hand-placed ones (world/mapData.js), or a place's, wherever Gen put them — loaded or not. A
+  // board's job slots ("…#1") are the board. `near` (a position): only look in the regions round
+  // it (the server asks on a player's behalf).
+  npcById(id, near = null) {
+    if (typeof id !== 'string' || id.length > 40) return null;
+    id = id.split('#')[0];
+    const fixed = FOLK.get(id);
+    if (fixed) return fixed;
+    const [kind, key] = id.split(':');
+    if (kind !== 'n' || !key) return null;
+    const [rx, rz] = key.split(',').map(Number);
+    if (!Number.isInteger(rx) || !Number.isInteger(rz)) return null;
+    if (near) {
+      const [cx, cz] = this.gen.cellOf(near.x, near.z);
+      if (Math.abs(rx - cx) > 2 || Math.abs(rz - cz) > 2) return null;
+    }
+    for (const p of this.gen.region(rx, rz).pois) {
+      const n = p.npcs?.find((m) => m.id === id);
+      if (n) {
+        n.place ??= p.id;
+        return n;
+      }
+    }
+    return null;
+  }
+
+  // The place one of the folk belongs to (a village, a town, a city's district…).
+  placeOf(npc) {
+    if (!npc?.place) return npc && FOLK.has(npc.id) ? this.poiById('hub') : null;
+    return this.poiById(npc.place);
+  }
+
+  // Folk of a role within `reach` of (x, z) — traders, innkeepers, smiths — the hub's and every
+  // place's, from the generator (a place's folk stand within its radius, so the regions round
+  // (x, z) hold them).
+  folkNear(x, z, reach, role) {
+    const out = [];
+    if (inPocket(x)) return out;
+    for (const n of NPCS) if (n.role === role && Math.hypot(n.x - x, n.z - z) <= reach) out.push(n);
+    for (const r of this.gen.regionsNear(x, z, this._fr ??= [])) {
+      for (const p of r.pois) {
+        if (!p.npcs || Math.hypot(p.x - x, p.z - z) > reach + 40) continue;
+        for (const n of p.npcs) if (n.role === role && Math.hypot(n.x - x, n.z - z) <= reach) out.push(n);
+      }
+    }
+    return out;
+  }
+
   // The landmark you're at (within sight of its foot), else null.
   landmarkAt(x, z) {
+    if (inPocket(x)) return null;
     for (const r of this.gen.regionsNear(x, z, this._lr ??= [])) {
       for (const p of r.pois) if (p.type === 'landmark' && Math.hypot(x - p.x, z - p.z) < p.r + 14) return p;
     }
@@ -387,6 +564,7 @@ export class World {
   // Every POI of the given types within `radius` of (x, z), from the generator (loaded or not).
   poisNear(x, z, radius, types = null) {
     const out = [];
+    if (inPocket(x)) return out;
     const span = Math.ceil(radius / REGION) + 1;
     const [cx, cz] = this.gen.cellOf(x, z);
     for (let dx = -span; dx <= span; dx++) {
@@ -417,8 +595,10 @@ export class World {
     this.sun.position.set(fx + 18, focus.y + 34, fz + 12);
     this.sun.target.position.set(fx, focus.y, fz);
     this.water.position.set(Math.round(focus.x / CHUNK) * CHUNK, WATER_LEVEL, Math.round(focus.z / CHUNK) * CHUNK);
-    if (this.planned.distanceTo(focus) > 10) this.plan(focus);
-    this.work(BUDGET_MS);
+    // Down in a dungeon the land stays as it was left (nothing of it streams in out there).
+    const below = inPocket(focus.x);
+    if (!below && this.planned.distanceTo(focus) > 10) this.plan(focus);
+    if (!below) this.work(BUDGET_MS);
     for (const f of this.flames) {
       const k = 1 + Math.sin(time * 13 + f.seed) * 0.08 + Math.sin(time * 7.3 + f.seed) * 0.06;
       f.group.scale.set(k, 1 + (k - 1) * 2.5, k);
@@ -429,7 +609,7 @@ export class World {
       s.group.position.y = s.base + Math.sin(time * 0.8 + s.seed) * 0.5;
     }
     for (const s of this.spinners) s.group.rotation.z = time * s.speed;
-    this.updateSky(dt, focus);
+    if (!below) this.updateSky(dt, focus);
     for (const w of this.waystones.values()) {
       w.crystal.rotation.y = time * 1.2;
       w.ring.rotation.z = time * (w.active ? 2.4 : 0.4);
@@ -473,6 +653,7 @@ export class World {
   // Loads everything around `focus` immediately (new game, fast travel).
   prime(focus) {
     this.focus.copy(focus);
+    if (inPocket(focus.x)) return;
     this.plan(focus);
     this.work(Infinity);
   }
@@ -518,13 +699,13 @@ export class World {
         const r = this.gen.region(rcx + dx, rcz + dz);
         for (const p of r.pois) {
           const d = Math.hypot(p.x - focus.x, p.z - focus.z);
-          if (d < (p.type === 'landmark' ? LANDMARK_LOAD : POI_LOAD) && !this.pois.has(p.id)) jobs.push({ d, run: () => this.loadPoi(p) });
+          if (d < (BIG.has(p.type) ? LANDMARK_LOAD : POI_LOAD) && !this.pois.has(p.id)) jobs.push({ d, run: () => this.loadPoi(p) });
         }
         const rd = Math.hypot(r.x - focus.x, r.z - focus.z);
         if (rd < ROAD_LOAD && r.roads.length && !this.roads.has(r.key)) jobs.push({ d: rd, run: () => this.loadRoads(r) });
       }
     }
-    for (const [id, o] of this.pois) if (Math.hypot(o.poi.x - focus.x, o.poi.z - focus.z) > (o.poi.type === 'landmark' ? LANDMARK_UNLOAD : POI_UNLOAD)) this.unload(o, this.pois, id);
+    for (const [id, o] of this.pois) if (Math.hypot(o.poi.x - focus.x, o.poi.z - focus.z) > (BIG.has(o.poi.type) ? LANDMARK_UNLOAD : POI_UNLOAD)) this.unload(o, this.pois, id);
     for (const [k, o] of this.roads) if (Math.hypot(o.region.x - focus.x, o.region.z - focus.z) > ROAD_UNLOAD) this.unload(o, this.roads, k);
     jobs.sort((a, b) => a.d - b.d);
     this.jobs = jobs;
@@ -587,6 +768,7 @@ export class World {
     this.flames = this.flames.filter((f) => f.owner !== o);
     this.shards = this.shards.filter((s) => s.owner !== o);
     this.spinners = this.spinners.filter((s) => s.owner !== o);
+    for (const [id, pr] of this.objectParts) if (pr.owner === o) this.objectParts.delete(id);
     if (o.waystone) this.waystones.delete(o.waystone);
     if (o.chest) this.chests.delete(o.chest);
     map.delete(id);
@@ -647,8 +829,8 @@ export class World {
     const blocked = (x, z) => {
       for (const p of pois) {
         const pad = p.type === 'hub' ? HUB.radius + 6 : p.type === 'camp' ? p.radius + (p.stronghold ? 12 : 5)
-          : p.type === 'settlement' ? p.r + 6 : p.type === 'landmark' ? p.r + 3
-            : p.type === 'tower' ? 6 : p.type === 'ruin' ? p.r + 4 : p.type === 'mesa' ? 0 : 3;
+          : PLACES.has(p.type) ? placeReach(p) + 6 : ['district', 'citywall', 'hubtown'].includes(p.type) ? 0 : p.type === 'landmark' ? p.r + 3
+            : p.type === 'story' ? p.r + 6 : p.type === 'tower' ? 6 : p.type === 'ruin' ? p.r + 4 : p.type === 'mesa' ? 0 : 3;
         if (pad && Math.hypot(x - p.x, z - p.z) < pad) return true;
       }
       return gen.nearRoad(x, z);
@@ -821,8 +1003,18 @@ export class World {
       case 'waystone': this.buildWaystone(p); break;
       case 'chest': this.buildChest(p); break;
       case 'landmark': LANDMARK_BUILDERS[p.kind]?.(this, p); break;
-      case 'settlement': SETTLEMENT_BUILDERS[p.kind]?.(this, p); break;
+      case 'settlement': SETTLEMENT_BUILDERS[p.kind]?.(this, p); serviceProps(this, p); placeObjects(this, p); break;
+      case 'hamlet': HAMLET_BUILDERS[p.kind]?.(this, p); break;
+      case 'town': buildTown(this, p); break;
+      case 'hubtown': buildBrightwater(this, this.poiById('hub')); break;
+      case 'city': buildCity(this, p); break;
+      case 'citywall': buildCityWall(this, p); break;
+      case 'district': DISTRICT_BUILDERS[p.kind]?.(this, p); break;
+      case 'story': STORY_BUILDERS[p.kind]?.(this, p); break;
     }
+    // The story's own touches on a camp or a landmark, and the objects quests use there.
+    if (p.story === 'foundry') foundryYard(this, p);
+    if (p.story && p.type !== 'story') placeObjects(this, p);
     this.onPoiLoad?.(p, o);
     this.own = null;
     this.rnd = Math.random;
@@ -849,7 +1041,8 @@ export class World {
     const s = this.scene;
     s.background = new THREE.Color(0xa6d8f2);
     s.fog = new THREE.Fog(0xa6d8f2, 80, 240);
-    s.add(new THREE.HemisphereLight(0xdff1ff, 0x6a8f5a, 0.7));
+    this.hemi = new THREE.HemisphereLight(0xdff1ff, 0x6a8f5a, 0.7);
+    s.add(this.hemi);
     const sun = (this.sun = new THREE.DirectionalLight(0xfff4e0, 2.6));
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
@@ -1057,6 +1250,8 @@ export class World {
   }
 
   // ------------------------------------------------------------ hub
+  // Brightwater: the old camp (reactor, habs, Tobbin's kiosk, the comm mast) is its plaza; the
+  // town round it ('hubtown', a part of its own) is world/Towns.js's.
   buildHub() {
     const H = HUB;
     this.campfire(H.x, H.z, { style: 'reactor' });
@@ -1090,45 +1285,6 @@ export class World {
     this.barrel(H.x + 3.2, H.z - 7.2);
     this.barrel(H.x - 7.5, H.z + 2.5);
     this.crate(H.x - 2.5, H.z + 9.8, 0.4);
-
-    // Energy fence: pylons with light beams, gaps where roads leave camp.
-    const R = 16;
-    const gaps = [];
-    for (const r of this.gen.regionsNear(0, 0, [])) {
-      for (const road of r.roads) {
-        for (let i = 1; i < road.length; i++) {
-          const [ax, az] = road[i - 1];
-          const [bx, bz] = road[i];
-          if ((Math.hypot(ax, az) - R) * (Math.hypot(bx, bz) - R) <= 0) gaps.push(Math.atan2(bz, bx));
-        }
-      }
-    }
-    gaps.push(Math.PI / 2); // the hub waystone path
-    const inGap = (a) => gaps.some((g) => Math.abs(Math.atan2(Math.sin(a - g), Math.cos(a - g))) < 0.2);
-    const fence = this.anchor(H.x, H.z);
-    const step = 0.26;
-    for (let a = 0; a < Math.PI * 2 - 0.01; a += step) {
-      if (inGap(a)) continue;
-      const x = Math.cos(a) * R;
-      const z = Math.sin(a) * R;
-      const y = this.groundHeight(H.x + x, H.z + z) - fence.position.y;
-      piece(fence, G.box(0.22, 2.2, 0.22), C.metalDark, { pos: [x, y + 1.1, z], rot: [0, -a, 0] });
-      piece(fence, G.sphere(0.09, 6, 4), HEARTH, { pos: [x, y + 2.28, z], glow: true, outline: 0.008 });
-      const nb = a + step;
-      if (!inGap(nb) && nb < Math.PI * 2 + 0.01) {
-        const nx = Math.cos(nb) * R;
-        const nz = Math.sin(nb) * R;
-        const len = Math.hypot(nx - x, nz - z);
-        const mid = [(x + nx) / 2, (z + nz) / 2];
-        const yaw = Math.atan2(nz - z, nx - x);
-        for (const hy of [0.7, 1.5]) piece(fence, G.box(len, 0.05, 0.05), HEARTH, { pos: [mid[0], y + hy, mid[1]], rot: [0, -yaw, 0], glow: true, outline: 0 });
-        for (let k = 0; k <= 3; k++) {
-          const t = k / 3;
-          this.addCollider(H.x + x + (nx - x) * t, H.z + z + (nz - z) * t, 0.5, 2.2);
-        }
-      }
-    }
-    this.finish(fence);
 
     // Shard posts and the hub's floating crystal.
     for (const [x, z] of [[-11, -9], [11, 8], [9, -11], [-12, 9]]) {

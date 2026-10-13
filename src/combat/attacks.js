@@ -51,10 +51,11 @@ export const WHIRLWIND = {
 // direction) that eases out into the run, invulnerable for most of it; ~4 m.
 export const DODGE = { duration: 0.24, iframes: 0.2, speed: 26, stamina: 20 };
 
-// Bakes weapon stats into a move: scaled timings, reach, arc, knockback and damage.
-export function resolveMeleeAttack(def, weapon) {
+// Bakes weapon stats into a move: scaled timings, reach, arc, knockback and damage. `rate`
+// speeds it up further (Overclock).
+export function resolveMeleeAttack(def, weapon, rate = 1) {
   const s = weapon.stats;
-  const t = 1 / s.attackSpeed;
+  const t = 1 / (s.attackSpeed * rate);
   return {
     ...def,
     duration: def.duration * t,

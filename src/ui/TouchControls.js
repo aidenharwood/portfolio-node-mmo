@@ -11,6 +11,10 @@
 //   then jump for a bullet jump), Reload, quick melee.
 //   The HUD's own prompts are buttons too: the interaction prompt (E), the loot card (tap to pick
 //   up, hold to swap) and the weapon slots (switch weapon).
+//   Abilities: a button for each filled slot over the cluster (X, G, T), its cooldown sweeping round.
+import { ABILITIES, cooldownOf } from '../combat/abilities.js';
+import { TREES } from '../rpg/talents.js';
+
 const STICK_R = 52;        // px: full deflection
 const DEAD = 0.12;         // stick dead zone (fraction of full deflection)
 const SPRINT_PUSH = 0.9;   // deflection that counts as "right out"...
@@ -60,6 +64,9 @@ export class TouchControls {
         <button class="tc-btn tc-slide tc-sm" data-toggle="KeyC">Slide</button>
         <button class="tc-btn tc-reload tc-sm" data-code="KeyR">Reload</button>
         <button class="tc-btn tc-melee tc-sm" data-code="KeyQ">Melee</button>
+        <button class="tc-btn tc-ab tc-ab0 tc-sm hidden" data-code="KeyX"></button>
+        <button class="tc-btn tc-ab tc-ab1 tc-sm hidden" data-code="KeyG"></button>
+        <button class="tc-btn tc-ab tc-ab2 tc-sm hidden" data-code="KeyT"></button>
       </div>`;
     // Under the HUD (whose prompts take touches of their own), over the game view.
     document.getElementById('hud').before(el);
@@ -134,6 +141,22 @@ export class TouchControls {
       if (cls === 'melee') this.toggle('Mouse2', false); // a held heavy attack isn't a thing
     }
     this.el.querySelector('[data-act="chat"]').classList.toggle('hidden', !this.game.net.inWorld);
+    // The ability buttons: what's in each slot, its cooldown sweeping round it.
+    const s = this.game.stats;
+    const kit = this.game.player.abilities;
+    this.abBtns ??= [...this.el.querySelectorAll('.tc-ab')];
+    s.slots.forEach((id, i) => {
+      const b = this.abBtns[i];
+      const A = id && ABILITIES[id];
+      b.classList.toggle('hidden', !A);
+      if (!A) return;
+      if (b.dataset.id !== id) {
+        b.dataset.id = id;
+        b.textContent = A.short;
+        b.style.setProperty('--tree', TREES[A.tree].color);
+      }
+      b.style.setProperty('--cd', (kit.cooldownLeft(id) / cooldownOf(id, s.talent.upgrades)).toFixed(3));
+    });
     // Sprinting: the stick held right out for a moment, until it eases off.
     const stick = this.input.stick;
     if (stick) {

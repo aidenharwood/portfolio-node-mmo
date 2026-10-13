@@ -4,7 +4,7 @@
 //   ads   — tight over-shoulder zoom (hold RMB with ranged/magic)
 // The view direction always equals the orbit direction, so screen centre = aim ray.
 import * as THREE from 'three';
-import { rayCylinder } from '../combat/Aim.js';
+import { rayCollider } from '../combat/Aim.js';
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
@@ -110,7 +110,7 @@ export class CameraRig {
     if (world) {
       this._back.copy(this._offset);
       for (const c of world.collidersAlongRay(pivot, this._back, dist)) {
-        const t = rayCylinder(pivot, this._back, c.x, c.z, c.r + 0.25, c.y - 0.5, c.y + c.h + 0.3);
+        const t = rayCollider(pivot, this._back, c, 0.25, 0.5, 0.3);
         if (t < allowed) allowed = Math.max(0.6, t - 0.2);
       }
       const tg = world.raycastGround(pivot, this._back, dist);
@@ -122,6 +122,9 @@ export class CameraRig {
     this.camera.position.copy(pivot).addScaledVector(this._offset, this.blockedDist);
     const floor = (world ? world.groundHeight(this.camera.position.x, this.camera.position.z) : 0) + 0.35;
     if (this.camera.position.y < floor) this.camera.position.y = floor;
+    // Indoors the view stays under the ceiling.
+    const ceil = (world?.ceilingAt?.(this.camera.position.x, this.camera.position.z) ?? Infinity) - 0.45;
+    if (this.camera.position.y > ceil) this.camera.position.y = Math.max(floor, ceil);
     this.camera.lookAt(this.camera.position.x - this._offset.x, this.camera.position.y - this._offset.y, this.camera.position.z - this._offset.z);
     this.applyShake(dt);
   }

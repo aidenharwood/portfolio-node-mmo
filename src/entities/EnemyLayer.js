@@ -6,6 +6,7 @@
 // effects (and, for shots and blasts, into danger for the local player).
 import * as THREE from 'three';
 import { WorldSim } from '../sim/WorldSim.js';
+import { Dungeons } from '../sim/Dungeons.js';
 import { EnemyReplica } from '../net/EnemyReplica.js';
 import { Enemy, prewarmRace, RACE_GLOW } from './Enemy.js';
 import { ELEMENTS } from '../items/elements.js';
@@ -21,6 +22,8 @@ const PROJ = {
   web: { kind: 'web', color: 0xe8f0c0, size: 1 },
   bomb: { kind: 'bomb', color: 0xffb030, size: 1 },
 };
+// What a warband of each race is called when it's sighted.
+const WARBAND = { scav: 'Scav warband', hive: 'Hive swarm', synth: 'Synth battlegroup', fauna: 'Great pack' };
 const INTERP_DELAY = 100; // ms: server enemies are shown this far in the past (two ticks)
 const EVENT_STALE = 400;  // ms: events this far behind when a frame comes round are dropped
 const _o = new THREE.Vector3();
@@ -33,6 +36,7 @@ export class EnemyLayer {
     this.game = game;
     this.views = new Map();  // enemy id → view
     this.sim = null;         // offline: the local world sim
+    this.dungeons = null;    // offline: the local instance manager (sim/Dungeons.js)
     this.myId = 0;
     this.warmTimer = 0;
     this.warmed = new Set();
@@ -74,8 +78,19 @@ export class EnemyLayer {
       onRemove: (e) => this.removeView(e.id),
       onKilled: (e) => g.onEnemyKilled(this.views.get(e.id) ?? e),
       onCampCleared: (camp) => g.onCampCleared(camp),
+      onHordeBroken: (pack, last) => g.onHordeBroken(pack, last),
+      onDefended: (d) => g.onDefended(d),
+      onRoomCleared: (camp) => this.dungeons?.onRoomCleared(camp),
+      onRoomRestored: (camp) => this.dungeons?.onRoomRestored(camp),
     });
     this.sim.setPlayers([me]);
+    // The dungeons' copies, as the server keeps them online: this one player's.
+    this.dungeons = new Dungeons({
+      world: g.world, sim: this.sim,
+      send: (id, msg) => g.dungeonView.onState(msg),
+      positionOf: () => g.player.position,
+      cleared: (run) => g.onDungeonCleared(run),
+    });
     // Hitstop holds the enemies in the exchange (the sim runs them at a crawl for the beat).
     this.sim.slow = (e) => {
       const v = this.views.get(e.id);
@@ -88,6 +103,8 @@ export class EnemyLayer {
 
   clear() {
     for (const id of [...this.views.keys()]) this.removeView(id);
+    for (const run of [...(this.dungeons?.runs.values() ?? [])]) this.dungeons.close(run);
+    this.dungeons = null;
     this.sim = null;
     this.replicas = null;
     this.pending.length = 0;
@@ -155,6 +172,7 @@ export class EnemyLayer {
     const g = this.game;
     if (this.sim) {
       this.sim.freezeAI = !!g.dev?.flags.freezeAI;
+      this.dungeons?.tick(dt);
       this.sim.update(dt);
     } else if (this.replicas) {
       // Shown a little in the past; events play when the render time reaches them, in step with
@@ -192,7 +210,9 @@ export class EnemyLayer {
     // Online: reported to the server, and shown at once (a kill too) — the server's word follows.
     const r = (v) => Math.round(v * 100) / 100;
     this.game.net.send({ t: 'hit', id: view.id, d: msg.damage, src: msg.source, po: msg.poise, kb: msg.knockback, dx: r(msg.dir.x), dz: r(msg.dir.z) });
-    view.hp = Math.max(0, view.hp - msg.damage);
+    const soak = Math.min(view.shield ?? 0, msg.damage);
+    view.shield -= soak;
+    view.hp = Math.max(0, view.hp - (msg.damage - soak));
     view.predicted = 0.6;
     if (view.hp <= 0) view.alive = false;
   }
@@ -204,7 +224,7 @@ export class EnemyLayer {
 
   // Dev: kill outright.
   kill(view) {
-    if (this.sim) this.sim.applyHit(view.id, { by: this.myId, damage: view.src.hp + 1, source: 'status', dir: { x: 0, z: 1 } });
+    if (this.sim) this.sim.applyHit(view.id, { by: this.myId, damage: view.src.hp + (view.src.shield ?? 0) + 1, source: 'status', dir: { x: 0, z: 1 } });
   }
 
   // ---------------------------------------------------------------- the sim's events
@@ -272,11 +292,46 @@ export class EnemyLayer {
           g.effects.damageNumber(_p, ev.n, '', ELEMENTS[ev.el]?.css ?? null);
         }
         break;
+      case 'horde':
+        g.hud.banner(`${WARBAND[ev.race] ?? 'Warband'} sighted`, `${ev.n} strong and on the move — break it for a bonus`);
+        _p.set(ev.p[0], g.player.position.y, ev.p[1]);
+        g.audio.howl?.(_p, true);
+        break;
+      case 'alarm':
+        g.hud.banner(ev.name, 'The alarm is raised — reinforcements are coming');
+        _p.set(ev.p[0], g.player.position.y, ev.p[1]);
+        g.audio.roar?.(_p, 3);
+        break;
+      case 'wave':
+        g.hud.toast(ev.of ? `Wave ${ev.wave} of ${ev.of}: ${ev.n} coming for ${ev.name}` : `Reinforcements: ${ev.n} more from ${ev.name}`);
+        break;
+      case 'defend':
+        g.hud.banner(`Hold ${ev.name}`, `${ev.waves} waves are coming`);
+        break;
+      case 'held':
+        g.hud.banner(`${ev.name} held`, 'The last of them are down');
+        break;
+      case 'shield':
+        // A Shielded elite's shield breaking (or coming back).
+        if (v) {
+          _p.copy(v.position).setY(v.position.y + v.height * 0.55);
+          if (ev.up) g.effects.spawnRing(v.position, v.radius * 2.5, 0x7fd8ff);
+          else {
+            g.effects.spawnSparks(_p, 0x9fe8ff, 18);
+            g.effects.glow(_p, 0x7fd8ff, { size: v.height * 1.4, grow: 0.8, life: 0.3 });
+            g.audio.block?.(_p);
+          }
+          g.audio.ward?.(_p);
+        }
+        break;
       case 'poof':
         if (v) g.effects.spawnPuff(v.position, { size: 1.4, life: 0.6, color: 0x3a3440 });
         break;
       case 'die':
-        if (v) g.audio.kill(v.position, !!(v.type.boss || v.elite));
+        if (v) {
+          g.audio.kill(v.position, !!(v.type.boss || v.elite));
+          g.pickups.onKill(v);
+        }
         break;
     }
   }

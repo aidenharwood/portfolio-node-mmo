@@ -20,7 +20,7 @@ function sentry(kind) {
   const arc = kind === 'arc';
   const shell = arc ? 0xe6f2fa : SHELL;
   const glow = arc ? 0xbff4ff : SYNTH_GLOW;
-  const rig = hoverSkeleton({ bodyY: 0.5, height: 1.0, spin: [{ at: [0, 0, 0], rate: 3 }, { at: [0, -0.04, 0], rate: -5 }] });
+  const rig = hoverSkeleton({ bodyY: 0.5, height: 1.0, spin: [{ at: [0, 0, 0], rate: 3 }, { at: [0, -0.14, 0], rate: -5 }] });
   const { body, spin } = rig;
   piece(body, G.sphere(0.23, 14, 10), FRAME, { outline: 0.012 });
   piece(body, G.dome(0.3, 16, 6, 0.42), shell, { pos: [0, 0.035, 0], scale: [1, 0.85, 1.05], outline: 0.016 });
@@ -42,8 +42,9 @@ function sentry(kind) {
   piece(body, G.sphere(0.022, 6, 4), 0xff4a3a, { pos: [0, 0.38, -0.16], glow: true, outline: 0 });
   piece(body, G.cone(0.13, 0.16, 10), FRAME, { pos: [0, -0.27, 0], rot: [Math.PI, 0, 0], outline: 0.012 });
   piece(body, G.cone(0.08, 0.2, 10), glow, { pos: [0, -0.4, 0], rot: [Math.PI, 0, 0], glow: true, outline: 0 });
-  piece(spin[0], G.torus(0.44, 0.03, Math.PI * 2, 5, 28), shell, { rot: [Math.PI / 2, 0, 0], outline: 0.01 });
-  for (let i = 0; i < 3; i++) piece(spin[0], G.box(0.1, 0.05, 0.1), glow, { pos: [Math.cos(i * 2.09) * 0.44, 0, Math.sin(i * 2.09) * 0.44], glow: true, outline: 0 });
+  // The stabiliser ring turns clear of the gun pods (their muzzles reach 0.45 out).
+  piece(spin[0], G.torus(0.53, 0.03, Math.PI * 2, 5, 30), shell, { rot: [Math.PI / 2, 0, 0], outline: 0.01 });
+  for (let i = 0; i < 3; i++) piece(spin[0], G.box(0.1, 0.05, 0.1), glow, { pos: [Math.cos(i * 2.09) * 0.53, 0, Math.sin(i * 2.09) * 0.53], glow: true, outline: 0 });
   piece(spin[1], G.torus(0.34, 0.016, Math.PI * 2, 4, 24), glow, { rot: [Math.PI / 2, 0, 0], glow: true, outline: 0 });
   if (arc) {
     // Tesla coils on top.
@@ -166,8 +167,9 @@ function heavy(kind) {
   for (const s of tubes) {
     const x = (tubes.length > 1 ? 0.26 * s : 0.22) * k;
     piece(chest, G.cyl(0.16 * k, 0.2 * k, 0.75 * k, 12), FRAME, { pos: [x, 0.72 * k, -0.4 * k], rot: [-0.45, 0, 0], outline: 0.022 });
-    piece(chest, G.torus(0.165 * k, 0.03 * k, Math.PI * 2, 5, 16), G_, { pos: [x, 1.04 * k, -0.25 * k], rot: [Math.PI / 2 - 0.45, 0, 0], glow: true, outline: 0 });
-    piece(chest, G.torus(0.2 * k, 0.03 * k, Math.PI * 2, 4, 16), trim, { pos: [x, 0.5 * k, -0.5 * k], rot: [Math.PI / 2 - 0.45, 0, 0], outline: 0.008 });
+    // The tube leans back 0.45 rad: its muzzle is 0.375k up its axis (0, 0.9, -0.44).
+    piece(chest, G.torus(0.165 * k, 0.03 * k, Math.PI * 2, 5, 16), G_, { pos: [x, 1.05 * k, -0.555 * k], rot: [Math.PI / 2 - 0.45, 0, 0], glow: true, outline: 0 });
+    piece(chest, G.torus(0.205 * k, 0.03 * k, Math.PI * 2, 4, 16), trim, { pos: [x, 0.6 * k, -0.34 * k], rot: [Math.PI / 2 - 0.45, 0, 0], outline: 0.008 });
   }
   piece(chest, G.cyl(0.2 * k, 0.2 * k, 0.3 * k, 12), JOINT, { pos: [tubes.length > 1 ? 0 : -0.22 * k, 0.42 * k, -0.48 * k], rot: [0, 0, Math.PI / 2], outline: 0.016 });
   if (boss) {

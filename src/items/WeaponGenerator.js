@@ -1,16 +1,19 @@
-// Procedural weapon generation: type → rarity → manufacturer → parts → element → perks → stats → name.
+// Procedural weapon generation: type → rarity → maker → parts → element → perks → stats → name.
 // Fully deterministic for a given (seed, options), so weapons can be saved as just their recipe.
+// The maker is one of those whose line includes the type (items/manufacturers.js), leaning to the
+// drop's `theme` (maker ids, items/sets.js); the recipe records it.
 import { mulberry32, randomSeed, pick, weightedPick } from '../core/rng.js';
 import { WEAPON_TYPES, typesForClass } from './weaponTypes.js';
 import { RARITY, rollRarity } from './rarity.js';
-import { MANUFACTURERS, manufacturersFor } from './manufacturers.js';
+import { MANUFACTURERS, makersOfType } from './manufacturers.js';
+import { pickMaker } from './sets.js';
 import { PARTS } from './parts.js';
 import { ELEMENTS, ELEMENT_IDS } from './elements.js';
 import { PERKS, perksFor } from './perks.js';
 import { formIds } from './forms.js';
 import { weaponName } from './names.js';
+import { GROWTH, scale } from '../rpg/balance.js';
 
-const LEVEL_GROWTH = 1.13;
 let nextUid = 1;
 
 function applyMods(stats, mods) {
@@ -19,7 +22,7 @@ function applyMods(stats, mods) {
   for (const [k, v] of Object.entries(mods.add ?? {})) stats[k] = (stats[k] ?? 0) + v;
 }
 
-export function generateWeapon({ seed = randomSeed(), level = 1, cls, type, rarity, luck = 0, minTier = 0 } = {}) {
+export function generateWeapon({ seed = randomSeed(), level = 1, cls, type, rarity, maker, luck = 0, minTier = 0, theme = null } = {}) {
   const rng = mulberry32(seed);
   // Always consume the same draws so a recipe with resolved type/rarity regenerates identically.
   const rolledType = pick(rng, typesForClass(cls));
@@ -27,9 +30,11 @@ export function generateWeapon({ seed = randomSeed(), level = 1, cls, type, rari
   const typeId = type ?? rolledType;
   const def = WEAPON_TYPES[typeId];
   const rar = rarity ? RARITY[rarity] : rolledRarity;
-  const recipe = { kind: 'weapon', seed, level, type: typeId, rarity: rar.id };
-  const mfrId = pick(rng, manufacturersFor(def.cls));
+  const makers = makersOfType(typeId);
+  const rolledMaker = pickMaker(rng, makers, theme);
+  const mfrId = makers.includes(maker) ? maker : rolledMaker;
   const mfr = MANUFACTURERS[mfrId];
+  const recipe = { kind: 'weapon', seed, level, type: typeId, rarity: rar.id, maker: mfrId };
 
   // Parts: higher rarity unlocks gated parts and leans toward them.
   const parts = {};
@@ -64,7 +69,7 @@ export function generateWeapon({ seed = randomSeed(), level = 1, cls, type, rari
   applyMods(stats, mfr.mods);
   for (const p of Object.values(parts)) applyMods(stats, p.mods);
   for (const p of perks) applyMods(stats, p.mods);
-  stats.damage *= Math.pow(LEVEL_GROWTH, level - 1) * rar.statMult * (0.92 + rng() * 0.16);
+  stats.damage *= scale(GROWTH.weapon, level) * rar.statMult * (0.92 + rng() * 0.16);
   stats.elementChance = element === 'none' ? 0 : Math.min(1, 0.18 + stats.elementChance);
   stats.critChance = Math.min(0.75, stats.critChance);
   if ('magSize' in stats) stats.magSize = Math.max(1, Math.round(stats.magSize));

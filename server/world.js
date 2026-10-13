@@ -5,6 +5,7 @@
 // colliders of points of interest (camps, forts, towers...) a little further out.
 import { World } from '../src/world/World.js';
 import { Chunk, CHUNK } from '../src/world/Chunks.js';
+import { inPocket } from '../src/world/dungeons.js';
 
 const CHUNK_LOAD = 150;    // scenery colliders within this of any player
 const CHUNK_UNLOAD = 200;
@@ -21,6 +22,7 @@ export class HeadlessWorld extends World {
     this.wantChunks = new Set();
     this.queue = [];
     this.heightTiles = new Map();
+    this.objectParts = null; // quest objects' looks are each screen's business
   }
 
   // Nothing to light, flood or draw.
@@ -29,8 +31,9 @@ export class HeadlessWorld extends World {
   buildScenerySets() { this.sets = {}; }
   packScenery() { this.sceneryDirty = false; }
 
-  // Heights straight from the generator, on the same triangles the clients' terrain uses.
-  groundHeight(x, z) { return this.analyticHeight(x, z); }
+  // Heights straight from the generator, on the same triangles the clients' terrain uses (in a
+  // pocket, a dungeon's floors).
+  groundHeight(x, z) { return inPocket(x) ? this.pocketGround(x, z) : this.analyticHeight(x, z); }
 
   // The generator's heights at the grid's vertices, kept in tiles: every step an enemy takes asks
   // for the ground under it, and the noise behind a height is the costliest thing the sim does.
@@ -51,6 +54,8 @@ export class HeadlessWorld extends World {
 
   // Keeps colliders loaded around `foci` (player positions); builds new ones within a time budget.
   track(foci) {
+    // Players down in a dungeon need nothing of the land round them.
+    foci = foci.filter((f) => !inPocket(f.x));
     const want = new Set();
     const jobs = [];
     for (const f of foci) {

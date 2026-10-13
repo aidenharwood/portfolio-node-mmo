@@ -1,9 +1,20 @@
 // Enemy races (factions): who lives in a camp and who roams the wilds, by race and level.
-//   campUnits(campDef, rng) → [{ type, opts: { variant?, elite?, boss? } }]
-//   roamPack(race, level, rng) → same
-// Rosters grow with level: tougher mob types join, sub-types (variants) start to appear, and
-// strongholds put a race boss on the throne with an honour guard.
+//   campUnits(campDef, rng) → [{ type, opts: { variant?, elite?, champion?, boss? } }]
+//   roamPack(race, level, rng) · roamHorde(race, level, rng) · strongholdWave(def, rng) → same
+// Rosters grow with level: tougher mob types join, sub-types (variants) start to appear, camps
+// grow into hordes led by named elites and champions (HORDE), and strongholds put a race boss on
+// the throne with an honour guard and reinforcements to call.
 import { ENEMY_TYPES } from './bestiary.js';
+
+// Camp size by level: [from level, size [min, max], elites [min, max], chance of a champion].
+const HORDE = [
+  [18, [10, 16], [2, 3], 1],
+  [10, [8, 12], [1, 2], 0.3],
+  [5, [6, 9], [0, 1], 0],
+  [1, [4, 6], [0, 0], 0],
+];
+const bandOf = (level) => HORDE.find(([min]) => level >= min);
+const between = (rng, [a, b]) => a + Math.floor(rng() * (b - a + 1));
 
 const pick = (rng, list) => list[Math.floor(rng() * list.length)];
 
@@ -40,29 +51,44 @@ function opts(type, level, rng, extra = {}) {
   return extra;
 }
 
-export function campUnits(def, rng) {
-  const level = def.level;
-  const table = def.race === 'fauna' ? DENS[Math.floor(rng() * DENS.length)] : def.style === 'salvage' ? [['cutter', 3, 1], ['juggernaut', 2, 1], ['grenadier', 1, 2]] : CAMP[def.race] ?? CAMP.scav;
+const SALVAGE = [['cutter', 3, 1], ['juggernaut', 2, 1], ['grenadier', 1, 2]];
+const guardsOf = (race) => (race === 'fauna' ? DENS[0] : CAMP[race] ?? CAMP.scav);
+
+// `n` units off a roster, the first `elites` of them named elites (the very first a champion if
+// `champion`).
+function band(table, level, rng, n, elites, champion) {
   const out = [];
-  if (def.stronghold) {
-    out.push({ type: BOSS[def.race], opts: { boss: true } });
-    const guard = def.race === 'fauna' ? DENS[0] : CAMP[def.race];
-    for (let i = 0; i < 6; i++) {
-      const t = rollUnit(guard, level, rng);
-      out.push({ type: t, opts: opts(t, level, rng) });
-    }
-    return out;
-  }
-  // Hounds and crawlers come in bigger groups; juggernaut yards in smaller ones.
-  const base = table === DENS[0] || table === DENS[1] ? 5 : def.style === 'salvage' ? 3 : 4;
-  const n = base + Math.floor(rng() * 3) + Math.min(2, Math.floor(level / 4));
   for (let i = 0; i < n; i++) {
     const t = rollUnit(table, level, rng);
-    out.push({ type: t, opts: opts(t, level, rng) });
+    const lead = i === 0 && champion ? { elite: true, champion: true } : i < elites + (champion ? 1 : 0) ? { elite: true } : {};
+    out.push({ type: t, opts: opts(t, level, rng, lead) });
   }
-  // A named elite leads some camps further out.
-  if (level >= 4 && rng() < 0.3) out[0].opts = { ...out[0].opts, elite: true };
   return out;
+}
+
+export function campUnits(def, rng) {
+  const level = def.level;
+  // A stronghold: the boss, an honour guard of 10–14 (with elites from level 10), and more to
+  // call when the alarm goes up (strongholdWave).
+  if (def.stronghold) {
+    const n = 10 + Math.floor(rng() * 5);
+    const elites = level >= 18 ? 2 : level >= 10 ? 1 : 0;
+    return [{ type: BOSS[def.race], opts: { boss: true } }, ...band(guardsOf(def.race), level, rng, n, elites, false)];
+  }
+  const table = def.race === 'fauna' ? DENS[Math.floor(rng() * DENS.length)] : def.style === 'salvage' ? SALVAGE : CAMP[def.race] ?? CAMP.scav;
+  const [, size, eliteRange, championChance] = bandOf(level);
+  // Hounds and crawlers come in bigger groups; juggernaut yards in smaller ones.
+  const extra = table === DENS[0] || table === DENS[1] ? 1 : def.style === 'salvage' ? -2 : 0;
+  const n = Math.max(3, between(rng, size) + extra);
+  const champion = rng() < championChance;
+  const elites = Math.min(n - 1, between(rng, eliteRange));
+  return band(table, level, rng, n, elites, champion);
+}
+
+// Reinforcements for a stronghold under attack: a squad from its guard roster.
+export function strongholdWave(def, rng) {
+  const n = 4 + Math.floor(rng() * 3) + (def.level >= 10 ? 1 : 0);
+  return band(guardsOf(def.race), def.level, rng, n, def.level >= 14 ? 1 : 0, false);
 }
 
 const ROAM = {
@@ -83,4 +109,18 @@ export function roamPack(race, level, rng) {
   });
 }
 
+// A warband on the move (regions of level 10 and up): 10–20 of a race's own, led by elites —
+// and a champion further out.
+export function roamHorde(race, level, rng) {
+  const table = race === 'fauna' ? ROAM.fauna : CAMP[race] ?? CAMP.scav;
+  const n = 10 + Math.floor(rng() * 11);
+  return band(table, level, rng, n, level >= 18 ? 2 : 1, level >= 16);
+}
+
 export const RACE_OF = Object.fromEntries(Object.entries(ENEMY_TYPES).map(([k, v]) => [k, v.race]));
+
+// A dungeon room's residents (world/DungeonGen.js): `n` off the race's camp roster (the wild's
+// roaming kinds), the first `elites` of them named elites.
+export function roomUnits(race, level, rng, n, elites = 0) {
+  return band(race === 'fauna' ? ROAM.fauna : CAMP[race] ?? CAMP.scav, level, rng, n, elites, false);
+}

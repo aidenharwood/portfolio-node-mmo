@@ -4,7 +4,9 @@
 //   onHit(c)        after a hit lands
 //   onKill(c)       after a hit kills
 //   pierce          extra enemies a projectile passes through
-// c = { game, attacker, target, weapon, damage, crit, source }
+// c = { game, attacker, target, weapon (null for a weaponless hit), damage, crit, source }
+// Armour set bonuses (items/sets.js) can grant these too: their hooks then run on every hit the
+// wearer lands. `gear` perks come only that way, never rolled onto a weapon.
 import { chainLightning } from '../combat/Status.js';
 
 export const PERKS = {
@@ -19,7 +21,7 @@ export const PERKS = {
   volatile: {
     name: 'Volatile', desc: 'Kills detonate for 40% of the killing blow.',
     onKill: (c) => c.game.explode(c.target.position, 2.8, c.damage * 0.4, c.attacker, null,
-      { color: 0xffb347, scaled: true, element: c.weapon.element }),
+      { color: 0xffb347, scaled: true, element: c.weapon?.element ?? 'fire' }),
   },
   bloodrush: {
     name: 'Bloodrush', desc: 'Kills restore 15 stamina and mana.',
@@ -40,6 +42,14 @@ export const PERKS = {
   brutal: {
     name: 'Brutal', desc: '+40% knockback.',
     mods: { mul: { knockback: 1.4 } },
+  },
+  devour: {
+    gear: true, name: 'Devour', desc: 'Kills restore 2% of your health.',
+    onKill: (c) => c.attacker.heal(c.attacker.maxHp * 0.02),
+  },
+  overload: {
+    gear: true, name: 'Overload', desc: 'Critical hits arc lightning to two nearby foes.',
+    onHit: (c) => { if (c.crit && c.source !== 'status') chainLightning(c.game, c.target, 2, c.damage * 0.4, c.attacker); },
   },
 
   // ---- legendary (one per legendary weapon; `title` replaces the generated name) ----
@@ -63,6 +73,6 @@ export const PERKS = {
 export function perksFor(cls, legendary) {
   return Object.keys(PERKS).filter((id) => {
     const p = PERKS[id];
-    return !!p.legendary === legendary && (!p.classes || p.classes.includes(cls));
+    return !p.gear && !!p.legendary === legendary && (!p.classes || p.classes.includes(cls));
   });
 }

@@ -3,6 +3,11 @@
 import * as THREE from 'three';
 import { RARITY } from '../items/rarity.js';
 import { esc } from './cards.js';
+import { AFFIXES } from '../sim/affixes.js';
+
+const css = (hex) => `#${(hex ?? 0xffd23f).toString(16).padStart(6, '0')}`;
+// A marker's look: '!' (gold) a quest to take, '?' one to hand in, '…' someone a quest wants.
+const MARK = { '?': 'turnin', '…': 'talk' };
 
 const _v = new THREE.Vector3();
 
@@ -64,27 +69,34 @@ export class WorldLabels {
         if (d > 34 || (!e.engaged && d > 20 && e.hp >= e.maxHp)) continue;
         const el = this.el(e, 'plate');
         seen.add(e);
-        const key = `${e.level}|${p.alive}`;
+        const key = `${e.level}|${p.alive}|${game.stats.level}`;
         if (el._key !== key) {
           el._key = key;
-          el.innerHTML = `<div class="np-name" style="color:${levelColor(e.level - game.stats.level)}">Lv ${e.level} ${esc(e.displayName)}</div><div class="np-bar"><div></div></div>`;
+          // An elite's affixes (and whether it's a champion) under its name, in their colours.
+          const tags = [...(e.champion ? ['<b>Champion</b>'] : []), ...e.affixes.map((id) => `<span style="color:${css(AFFIXES[id]?.color)}">${AFFIXES[id]?.name ?? id}</span>`)];
+          el.innerHTML = `<div class="np-name" style="color:${levelColor(e.level - game.stats.level)}">Lv ${e.level} ${esc(e.displayName)}</div>`
+            + `${tags.length ? `<div class="np-affix">${tags.join(' · ')}</div>` : ''}<div class="np-bar"><div></div>${e.shieldMax ? '<i></i>' : ''}</div>`;
           el._bar = el.querySelector('.np-bar div');
+          el._shield = el.querySelector('.np-bar i');
         }
         el._bar.style.width = `${(e.hp / e.maxHp) * 100}%`;
+        if (el._shield) el._shield.style.width = `${Math.max(0, e.shield / e.shieldMax) * 100}%`;
         el.classList.toggle('targeted', game.aim.target === e);
         this.place(el, this.project(e.position, e.height + 0.35, w, h));
       }
 
-      for (const n of game.npcs) {
+      for (const n of [...game.npcs, ...(game.props?.values() ?? [])]) {
         const d = n.position.distanceTo(p.position);
-        if (d > 26) continue;
+        if (d > (n.role === 'flavor' ? 12 : 26)) continue;
         const el = this.el(n, 'npc-label');
         seen.add(n);
         const marker = n.marker;
-        const key = marker ?? '';
+        // What they call out as you come near (main.js updateBarks), for a few seconds.
+        const say = n.bark && n.bark.until > game.time ? n.bark.text : '';
+        const key = `${marker ?? ''}|${say}`;
         if (el._key !== key) {
           el._key = key;
-          el.innerHTML = `${marker ? `<div class="marker">${marker}</div>` : ''}<div class="np-name">${esc(n.name)}</div><div class="np-title">${esc(n.title)}</div>`;
+          el.innerHTML = `${say ? `<div class="np-say">${esc(say)}</div>` : ''}${marker ? `<div class="marker ${MARK[marker] ?? ''}">${marker}</div>` : ''}<div class="np-name">${esc(n.name)}</div><div class="np-title">${esc(n.title)}</div>`;
         }
         this.place(el, this.project(n.position, n.height + 0.3, w, h));
       }
@@ -96,10 +108,10 @@ export class WorldLabels {
         const el = this.el(r, 'player-label');
         el.classList.toggle('party', !!game.partyUI?.isMate(r.netId));
         seen.add(r);
-        const key = `${r.name}|${r.level}|${r.tag}`;
+        const key = `${r.name}|${r.level}|${r.tag}|${r.title}`;
         if (el._key !== key) {
           el._key = key;
-          el.innerHTML = `<div class="np-name"><span class="np-lv">${r.level}</span>${esc(r.name)}${r.tag ? ` <small class="np-tag">[${esc(r.tag)}]</small>` : ''}</div><div class="np-bar"><div></div></div>`;
+          el.innerHTML = `<div class="np-name"><span class="np-lv">${r.level}</span>${esc(r.name)}${r.tag ? ` <small class="np-tag">[${esc(r.tag)}]</small>` : ''}</div>${r.title ? `<div class="np-title">${esc(r.title)}</div>` : ''}<div class="np-bar"><div></div></div>`;
           el._bar = el.querySelector('.np-bar div');
         }
         el._bar.style.width = `${r.hpFrac * 100}%`;

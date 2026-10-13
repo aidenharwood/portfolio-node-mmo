@@ -3,7 +3,7 @@ export { HUB, WATER_LEVEL } from './Gen.js';
 
 export const NPCS = [
   {
-    id: 'warden', name: 'Warden Maren', title: 'Camp Warden', role: 'quest', x: -4, z: -3, facing: 0.4,
+    id: 'warden', name: 'Warden Maren', title: 'Brightwater Warden', role: 'quest', x: -4, z: -3, facing: 0.4,
     look: { skin: 0xe0b48a, hair: 0x8a8a8a, hairStyle: 'bun', top: 0x3a6a4a, topDark: 0x2a4a34, trim: 0xd0d0d0, pants: 0x3a3a3a, boots: 0x3a2a1a, leather: 0x5a3a26, metal: 0xc9d1dc, pauldrons: true, cape: 0x2a4a34, hat: 'helmet', glow: 0x7aff9a },
   },
   {

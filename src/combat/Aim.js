@@ -25,6 +25,44 @@ export function rayCylinder(o, d, cx, cz, r, y0, y1) {
   return Infinity;
 }
 
+// Ray vs axis-aligned box (a dungeon's wall or door): distance along the ray, 0 starting inside,
+// or Infinity.
+export function rayBox(o, d, x0, x1, y0, y1, z0, z1) {
+  let tmin = 0;
+  let tmax = Infinity;
+  let t1;
+  let t2;
+  if (Math.abs(d.x) < 1e-9) { if (o.x < x0 || o.x > x1) return Infinity; } else {
+    t1 = (x0 - o.x) / d.x; t2 = (x1 - o.x) / d.x;
+    if (t1 > t2) [t1, t2] = [t2, t1];
+    if (t1 > tmin) tmin = t1;
+    if (t2 < tmax) tmax = t2;
+    if (tmin > tmax) return Infinity;
+  }
+  if (Math.abs(d.y) < 1e-9) { if (o.y < y0 || o.y > y1) return Infinity; } else {
+    t1 = (y0 - o.y) / d.y; t2 = (y1 - o.y) / d.y;
+    if (t1 > t2) [t1, t2] = [t2, t1];
+    if (t1 > tmin) tmin = t1;
+    if (t2 < tmax) tmax = t2;
+    if (tmin > tmax) return Infinity;
+  }
+  if (Math.abs(d.z) < 1e-9) { if (o.z < z0 || o.z > z1) return Infinity; } else {
+    t1 = (z0 - o.z) / d.z; t2 = (z1 - o.z) / d.z;
+    if (t1 > t2) [t1, t2] = [t2, t1];
+    if (t1 > tmin) tmin = t1;
+    if (t2 < tmax) tmax = t2;
+    if (tmin > tmax) return Infinity;
+  }
+  return tmin;
+}
+
+// A ray against any world collider (a round one's side, or a box), widened by `pad` and stretched
+// `below`/`above` its bottom and top.
+export function rayCollider(o, d, c, pad = 0, below = 0, above = 0) {
+  if (c.box) return rayBox(o, d, c.x - c.hx - pad, c.x + c.hx + pad, c.y - below, c.y + c.h + above, c.z - c.hz - pad, c.z + c.hz + pad);
+  return rayCylinder(o, d, c.x, c.z, c.r + pad, c.y - below, c.y + c.h + above);
+}
+
 export class Aim {
   constructor() {
     this.point = new THREE.Vector3();
@@ -61,7 +99,12 @@ export class Aim {
       if (t > minEnemyT && t < best) { best = t; target = e; }
     }
     for (const c of game.world.collidersAlongRay(_o, _d, best)) {
-      const t = rayCylinder(_o, _d, c.x, c.z, c.r, c.y, c.y + c.h);
+      const t = rayCollider(_o, _d, c);
+      if (t > minT && t < best) { best = t; target = null; }
+    }
+    // Indoors, the ceiling.
+    if (_d.y > 1e-4) {
+      const t = (game.world.ceilingAt(_o.x, _o.z) - _o.y) / _d.y;
       if (t > minT && t < best) { best = t; target = null; }
     }
     const tg = game.world.raycastGround(_o, _d, best);

@@ -35,6 +35,10 @@ function frame(w, p) {
       const [x, z] = toWorld(p, lx, lz);
       w.addCollider(x, z, r, h, base === null ? w.groundHeight(x, z) : y0 + base);
     },
+    colBox: (lx, lz, hx, hz, ry, h, base = null) => {
+      const [x, z] = toWorld(p, lx, lz);
+      w.addOrientedBox(x, z, hx, hz, p.rot + ry, h, base === null ? w.groundHeight(x, z) : y0 + base);
+    },
   };
 }
 
@@ -156,7 +160,7 @@ export const LANDMARK_BUILDERS = {
   // A precursor gate: a great ring held between two pillars on a stepped plinth, its inner rim
   // alight, a crystal turning at its heart.
   ring(w, p) {
-    const { g, y0, col } = frame(w, p);
+    const { g, y0, col, colBox } = frame(w, p);
     const R = 8.2;
     const cy = 9.6;
     piece(g, G.box(19, 1.2, 4.4), C.stoneDark, { pos: [0, 0.4, 0], outline: 0.05 });
@@ -175,14 +179,14 @@ export const LANDMARK_BUILDERS = {
     w.finish(g);
     const [cx, cz] = toWorld(p, 0, 0);
     w.floatingShard(cx, y0 + cy + R * 0.18, cz, 0.8);
-    for (const s of [-1, 1]) col(7.6 * s, 0, 1.5, cy);
-    for (let x = -8; x <= 8; x += 3.2) col(x, 0, 1.7, 1.0);
+    for (const s of [-1, 1]) colBox(7.6 * s, 0, 1.3, 1.3, 0, 9.5);
+    colBox(0, 0, 9.5, 2.2, 0, 1.2, -0.2);
   },
 
   // A war machine taller than a house, down on one knee long ago: one fist on the ground, the
   // other arm across its raised knee, its visor dark.
   titan(w, p) {
-    const { g, col } = frame(w, p);
+    const { g, col, colBox } = frame(w, p);
     const snow = w.gen.biomeAt(p.x, p.z) === 'snow';
     const plate = C.steel;
     const rust = C.rust;
@@ -214,7 +218,8 @@ export const LANDMARK_BUILDERS = {
     beam(g, [-2.6, 4.6, 3.2], [-2.6, 0.9, 3.4], 1.0, rust);
     piece(g, G.box(2.4, 1.4, 3.4), plate, { pos: [-2.6, 0.6, 4.2], outline: 0.04 });
     w.finish(g);
-    col(0, 0, 3.4, 13);
+    colBox(0, 0, 3.1, 2.1, 0, 6.2, 6.4);
+    colBox(0, 1.4, 1.3, 1.3, 0, 3.2, 12.5);
     col(4.6, 3.8, 1.4, 2.2);
     col(-2.6, 4.2, 1.6, 5);
     col(2.6, -4.2, 1.6, 1.4);
@@ -223,7 +228,7 @@ export const LANDMARK_BUILDERS = {
 
   // A circle of standing stones with glowing glyphs round an altar and a turning rune crystal.
   monoliths(w, p) {
-    const { g, y0, rnd, gy, col } = frame(w, p);
+    const { g, y0, rnd, gy, col, colBox } = frame(w, p);
     const n = 10;
     for (let i = 0; i < n; i++) {
       if (i === 0) continue; // the way in, facing the front
@@ -234,7 +239,7 @@ export const LANDMARK_BUILDERS = {
       piece(g, G.box(1.5, h, 0.9), i % 3 ? C.stoneDark : shade(C.stoneDark, 0.9), { pos: [lx, y + h / 2 - 0.3, lz], rot: [-0.05 + (rnd() - 0.5) * 0.08, a, (rnd() - 0.5) * 0.1], outline: 0.05 });
       piece(g, G.box(0.18, h * 0.55, 0.06), RUNE, { pos: [lx - Math.sin(a) * 0.48, y + h * 0.5, lz - Math.cos(a) * 0.48], rot: [0, a, 0], glow: true, outline: 0 });
       if (i % 3 === 1) piece(g, G.box(2.2, 0.6, 1.1), C.stone, { pos: [lx, y + h + 0.1, lz], rot: [0, a, 0.08], outline: 0.04 });
-      col(lx, lz, 0.85, h);
+      colBox(lx, lz, 0.75, 0.45, a, h, y - 0.3);
     }
     piece(g, G.cyl(1.3, 1.5, 1.0, 8), C.stone, { pos: [0, 0.5, -2.8], outline: 0.04 });
     piece(g, G.box(2.6, 0.3, 1.6), shade(C.stone, 1.08), { pos: [0, 1.1, -2.8], outline: 0.03 });
@@ -542,17 +547,122 @@ const ringSlot = (p, k, n, d) => {
   return { a, at: polar(a, d) };
 };
 
-// A house: walls, a pitched roof, a door and a lit window (local to group g, facing +z).
-function house(g, x, y, z, ry, { wd = 6, dp = 5, ht = 3.2, wall = C.hab, roof = C.rust, trim = C.metalDark } = {}) {
+// Procedural village house, local to group g with its entry facing +z.
+function house(g, x, y, z, ry, { wd = 6, dp = 5, ht = 3.2, wall = C.hab, roof = C.rust, trim = C.metalDark, variant = 0.5, barn = false, porch = true, chimney = false } = {}) {
   const h = new THREE.Group();
   h.position.set(x, y, z);
   h.rotation.y = ry;
   g.add(h);
-  piece(h, G.box(wd, ht, dp), wall, { pos: [0, ht / 2, 0], outline: 0.04 });
-  for (const s of [-1, 1]) piece(h, G.box(wd + 0.6, 0.18, dp * 0.62), roof, { pos: [0, ht + dp * 0.18, s * dp * 0.26], rot: [s * 0.6, 0, 0], outline: 0.03 });
-  piece(h, G.box(wd + 0.1, 0.2, 0.2), trim, { pos: [0, ht + dp * 0.36, 0], outline: 0.02 });
-  piece(h, G.box(1.1, 2.0, 0.1), 0x3a2a20, { pos: [-wd * 0.22, 1.0, dp / 2 + 0.03], outline: 0.01 });
-  piece(h, G.box(1.0, 0.8, 0.08), LAMP, { pos: [wd * 0.22, 1.7, dp / 2 + 0.03], glow: true, outline: 0.01 });
+  const rise = dp * 0.36;
+  const base = 0.42;
+  const variationId = Math.abs(Math.floor(variant * 4)) % 4;
+  const doorW = barn ? wd * 0.44 : 1.1;
+  const doorH = barn ? ht * 0.68 : 2.05;
+  const doorX = barn ? 0 : -wd * 0.22;
+  const window = (wx, wy, frontZ) => {
+    const ww = variationId === 2 ? 0.72 : 0.9;
+    const wh = variationId === 1 ? 1.0 : 0.82;
+    piece(h, G.box(ww + 0.3, wh + 0.28, 0.14), trim, { pos: [wx, wy, frontZ], outline: 0.018 });
+    piece(h, G.box(ww, wh, 0.06), 0x182530, { pos: [wx, wy, frontZ + 0.09], outline: 0 });
+    piece(h, G.box(ww * 0.82, wh * 0.78, 0.035), LAMP, { pos: [wx, wy, frontZ + 0.14], glow: true, outline: 0 });
+    piece(h, G.box(0.06, wh * 0.92, 0.035), trim, { pos: [wx, wy, frontZ + 0.17], outline: 0 });
+    piece(h, G.box(ww * 0.94, 0.06, 0.035), trim, { pos: [wx, wy, frontZ + 0.17], outline: 0 });
+    if (variationId === 2) for (const s of [-1, 1]) piece(h, G.box(0.16, wh + 0.2, 0.12), roof, { pos: [wx + s * (ww / 2 + 0.15), wy, frontZ + 0.05], outline: 0.01 });
+  };
+
+  piece(h, G.box(wd + 0.7, 0.48, dp + 0.7), trim, { pos: [0, 0.24, 0], outline: 0.03 });
+  piece(h, G.box(wd + 0.1, 0.18, dp + 0.1), shade(trim, 0.82), { pos: [0, 0.53, 0], outline: 0.015 });
+  piece(h, G.box(wd, ht, dp), wall, { pos: [0, base + ht / 2, 0], outline: 0.045 });
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+    piece(h, G.box(0.2, ht, 0.2), trim, { pos: [sx * (wd / 2 - 0.1), base + ht / 2, sz * (dp / 2 - 0.1)], outline: 0.018 });
+  }
+  for (const sx of [-1, 1]) {
+    for (let zpos = -dp / 2 + 0.8; zpos < dp / 2; zpos += 1.15) {
+      piece(h, G.box(0.14, ht - 0.12, 0.12), trim, { pos: [sx * (wd / 2 + 0.045), base + ht / 2, zpos], outline: 0.01 });
+    }
+    for (let level = 1; level < ht; level += 0.9) piece(h, G.box(0.12, 0.08, dp - 0.2), trim, { pos: [sx * (wd / 2 + 0.06), base + level, 0], outline: 0.008 });
+  }
+  for (let level = 1; level < ht; level += 0.9) {
+    piece(h, G.box(wd * 0.94, 0.07, 0.09), trim, { pos: [0, base + level, dp / 2 + 0.04], outline: 0.008 });
+  }
+  for (const s of [-1, 1]) piece(h, G.box(wd + 0.65, 0.18, dp * 0.62), roof, { pos: [0, base + ht + dp * 0.18, s * dp * 0.26], rot: [s * 0.6, 0, 0], outline: 0.035 });
+  const gable = G.extrude(G.shape([[-wd / 2, 0], [wd / 2, 0], [0, rise]]), 0.16, 0.012);
+  for (const s of [-1, 1]) piece(h, gable.clone(), wall, { pos: [0, base + ht, s * (dp / 2 - 0.05)], outline: 0.035 });
+  piece(h, G.box(wd + 0.8, 0.24, 0.32), trim, { pos: [0, base + ht + rise, 0], outline: 0.025 });
+  for (const s of [-1, 1]) piece(h, G.box(wd + 0.5, 0.2, 0.18), trim, { pos: [0, base + ht + 0.06, s * dp * 0.52], outline: 0.018 });
+
+  const roofRows = Math.max(3, Math.floor(dp / 1.6));
+  const roofCols = Math.max(4, Math.ceil(wd / 2.4));
+  const tileW = (wd + 0.35) / roofCols;
+  const tileDepth = dp * 0.57 / roofRows;
+  for (const s of [-1, 1]) for (let row = 0; row < roofRows; row++) {
+    const t = (row + 0.5) / roofRows;
+    for (let col = 0; col < roofCols; col++) {
+      const tx = -wd / 2 - 0.1 + tileW * (col + 0.5) + (row % 2 ? tileW * 0.14 : 0);
+      const zFactor = 0.57 * t;
+      const tz = s * (dp * zFactor + 0.1 * Math.sin(0.6));
+      const ty = base + ht + dp * 0.18 - Math.sin(0.6) * dp * (zFactor - 0.26) + 0.1 * Math.cos(0.6);
+      const material = (row + col + (s > 0 ? 1 : 0)) % 3 === 0 ? shade(roof, 0.82) : roof;
+      piece(h, G.box(tileW - 0.05, 0.12, tileDepth + 0.08), material, { pos: [tx, ty, tz], rot: [s * 0.6, 0, 0], outline: 0.016 });
+    }
+    for (let rib = 0; rib <= roofCols; rib++) {
+      const rx = -wd / 2 + wd * rib / roofCols;
+      piece(h, G.box(0.09, 0.1, dp * 0.62), trim, { pos: [rx, base + ht + dp * 0.18 + 0.16, s * dp * 0.26], rot: [s * 0.6, 0, 0], outline: 0.01 });
+    }
+  }
+  for (const s of [-1, 1]) {
+    const gableZ = s * (dp / 2 + 0.06);
+    piece(h, G.box(0.16, rise * 0.82, 0.16), trim, { pos: [0, base + ht + rise * 0.43, gableZ], outline: 0.015 });
+    beam(h, [-wd * 0.44, base + ht + 0.12, gableZ], [0, base + ht + rise - 0.08, gableZ], 0.075, trim, { seg: 5, outline: 0.012 });
+    beam(h, [0, base + ht + rise - 0.08, gableZ], [wd * 0.44, base + ht + 0.12, gableZ], 0.075, trim, { seg: 5, outline: 0.012 });
+    piece(h, G.box(wd * 0.72, 0.12, 0.12), trim, { pos: [0, base + ht + 0.28, gableZ], outline: 0.012 });
+  }
+
+  piece(h, G.box(doorW + 0.3, 0.16, 0.16), trim, { pos: [doorX, base + doorH + 0.2, dp / 2 + 0.06], outline: 0.012 });
+  for (const s of [-1, 1]) piece(h, G.box(0.14, doorH, 0.18), trim, { pos: [doorX + s * (doorW / 2 + 0.08), base + doorH / 2, dp / 2 + 0.05], outline: 0.012 });
+  if (barn) {
+    for (const s of [-1, 1]) {
+      const leafX = doorX + s * doorW * 0.25;
+      piece(h, G.box(doorW / 2 - 0.04, doorH, 0.12), C.woodDark, { pos: [leafX, base + doorH / 2, dp / 2 + 0.07], outline: 0.018 });
+      for (let band = 1; band < 4; band++) piece(h, G.box(doorW / 2 - 0.12, 0.09, 0.04), trim, { pos: [leafX, base + doorH * band / 4, dp / 2 + 0.15], outline: 0.008 });
+      piece(h, G.box(0.09, doorH * 0.92, 0.04), trim, { pos: [leafX, base + doorH / 2, dp / 2 + 0.15], outline: 0.008 });
+      beam(h, [leafX - doorW * 0.18, base + 0.12, dp / 2 + 0.18], [leafX + doorW * 0.18, base + doorH - 0.12, dp / 2 + 0.18], 0.045, trim, { seg: 5, outline: 0.008 });
+    }
+    window(0, base + ht + rise * 0.45, dp / 2 + 0.08);
+  } else {
+    piece(h, G.box(doorW, doorH, 0.1), 0x3a2a20, { pos: [doorX, base + doorH / 2, dp / 2 + 0.05], outline: 0.018 });
+    for (const s of [-1, 1]) piece(h, G.box(0.07, doorH * 0.9, 0.035), shade(trim, 0.75), { pos: [doorX + s * doorW * 0.24, base + doorH / 2, dp / 2 + 0.12], outline: 0 });
+    piece(h, G.sphere(0.07, 6, 4), HEARTH, { pos: [doorX + doorW * 0.3, base + 1.0, dp / 2 + 0.14], glow: true, outline: 0 });
+    piece(h, G.box(doorW + 0.9, 0.2, 0.85), trim, { pos: [doorX, 0.1, dp / 2 + 0.46], outline: 0.018 });
+    window(wd * 0.24, base + 1.85, dp / 2 + 0.06);
+    window(-wd * 0.27, base + 1.85, dp / 2 + 0.06);
+  }
+  for (const s of [-1, 1]) {
+    const wx = s * (wd / 2 + 0.05);
+    piece(h, G.box(0.14, 0.98, 1.22), trim, { pos: [wx, base + 1.85, 0], outline: 0.015 });
+    piece(h, G.box(0.08, 0.78, 0.94), 0x182530, { pos: [wx + s * 0.08, base + 1.85, 0], outline: 0 });
+    piece(h, G.box(0.05, 0.62, 0.72), LAMP, { pos: [wx + s * 0.13, base + 1.85, 0], glow: true, outline: 0 });
+    piece(h, G.box(0.05, 0.7, 0.06), trim, { pos: [wx + s * 0.17, base + 1.85, 0], outline: 0 });
+    piece(h, G.box(0.05, 0.06, 0.9), trim, { pos: [wx + s * 0.17, base + 1.85, 0], outline: 0 });
+  }
+  if (!barn && porch) {
+    const porchW = Math.min(wd - 0.8, doorW + 2.4);
+    for (const s of [-1, 1]) piece(h, G.cyl(0.09, 0.12, 2.45, 6), trim, { pos: [doorX + s * porchW * 0.44, 1.28, dp / 2 + 1.15], outline: 0.018 });
+    piece(h, G.box(porchW, 0.16, 1.55), trim, { pos: [doorX, 2.58, dp / 2 + 0.72], outline: 0.018 });
+    piece(h, G.box(porchW + 0.3, 0.12, 1.75), roof, { pos: [doorX, 2.72, dp / 2 + 0.72], rot: [0.08, 0, 0], outline: 0.02 });
+    piece(h, G.box(porchW + 0.25, 0.2, 1.8), trim, { pos: [doorX, 0.1, dp / 2 + 1.0], outline: 0.018 });
+  }
+  if (chimney) {
+    const cx = wd * 0.3;
+    const cz = -dp * 0.18;
+    const cy = base + ht + rise * 0.56;
+    piece(h, G.box(0.82, 2.8, 0.82), trim, { pos: [cx, cy + 1.4, cz], outline: 0.025 });
+    piece(h, G.box(1.08, 0.18, 1.08), C.metalDark, { pos: [cx, cy + 2.82, cz], outline: 0.018 });
+  }
+  if (!barn) {
+    if (variationId === 0) for (const s of [-1, 1]) piece(h, G.box(0.14, ht * 0.58, 0.16), trim, { pos: [s * wd * 0.38, base + ht * 0.32, dp / 2 + 0.1], outline: 0.01 });
+    if (variationId === 1) piece(h, G.cyl(0.28, 0.28, 0.1, 8).rotateX(Math.PI / 2), C.metalDark, { pos: [0, base + ht + rise * 0.45, dp / 2 + 0.09], outline: 0.012 });
+  }
   return h;
 }
 
@@ -584,19 +694,24 @@ export const SETTLEMENT_BUILDERS = {
   // A farm: house and barn, a silo, a wind turbine turning over rows of crops.
   homestead(w, p) {
     const f = frame(w, p);
-    const { g, rnd, gy, col } = f;
+    const { g, rnd, gy, col, colBox } = f;
     const biome = w.gen.biomeAt(p.x, p.z);
     const crop = biome === 'highland' || biome === 'meadow' ? 0xd8b84a : 0x5aa84e;
     const slots = [0, 1, 2, 3].map((k) => ringSlot(p, k, 4, 11.5));
     const [h1, h2, h3, h4] = slots;
-    house(g, h1.at[0], gy(...h1.at), h1.at[1], h1.a + Math.PI, { wd: 7, dp: 5.5, ht: 3.4 });
-    col(...h1.at, 3.6, 4.5);
-    house(g, h2.at[0], gy(...h2.at), h2.at[1], h2.a + Math.PI, { wd: 8, dp: 6, ht: 4.2, wall: 0x9a3a2a, roof: C.metalDark, trim: C.metal });
-    col(...h2.at, 4.2, 5.5);
+    house(g, h1.at[0], gy(...h1.at), h1.at[1], h1.a + Math.PI, { wd: 7, dp: 5.5, ht: 3.4, variant: rnd(), chimney: true });
+    colBox(h1.at[0], h1.at[1], 3.85, 3.1, h1.a + Math.PI, 5.9);
+    house(g, h2.at[0], gy(...h2.at), h2.at[1], h2.a + Math.PI, { wd: 8, dp: 6, ht: 4.2, wall: 0x9a3a2a, roof: C.metalDark, trim: C.metal, variant: rnd(), barn: true });
+    colBox(h2.at[0], h2.at[1], 4.35, 3.35, h2.a + Math.PI, 6.9);
     // Silo
     piece(g, G.cyl(1.6, 1.6, 8, 14), C.hab, { pos: [h3.at[0], gy(...h3.at) + 4, h3.at[1]], outline: 0.04 });
     piece(g, G.dome(1.62, 14, 6), C.metal, { pos: [h3.at[0], gy(...h3.at) + 8, h3.at[1]], outline: 0.03 });
     for (const y of [2, 4.5, 7]) piece(g, G.torus(1.62, 0.06, TAU, 4, 24), C.metalDark, { pos: [h3.at[0], gy(...h3.at) + y, h3.at[1]], rot: [Math.PI / 2, 0, 0], outline: 0 });
+    for (const s of [-1, 1]) beam(g, [h3.at[0] + s * 0.48, gy(...h3.at) + 0.8, h3.at[1] + 1.45], [h3.at[0] + s * 0.48, gy(...h3.at) + 7.3, h3.at[1] + 1.45], 0.045, C.metalDark, { outline: 0.012, seg: 6 });
+    for (let y = 1.1; y < 7.2; y += 0.7) piece(g, G.box(1.0, 0.07, 0.08), C.metalDark, { pos: [h3.at[0], gy(...h3.at) + y, h3.at[1] + 1.48], outline: 0.008 });
+    piece(g, G.box(0.82, 1.15, 0.12), C.metalDark, { pos: [h3.at[0], gy(...h3.at) + 1.25, h3.at[1] + 1.58], outline: 0.02 });
+    piece(g, G.box(0.58, 0.9, 0.06), C.hab, { pos: [h3.at[0], gy(...h3.at) + 1.25, h3.at[1] + 1.67], outline: 0.012 });
+    piece(g, G.cyl(0.16, 0.2, 0.55, 8), C.metalDark, { pos: [h3.at[0], gy(...h3.at) + 8.38, h3.at[1]], outline: 0.015 });
     col(...h3.at, 1.7, 9.6);
     // Wind turbine
     const ty = gy(...h4.at);
@@ -679,7 +794,7 @@ export const SETTLEMENT_BUILDERS = {
   // A mine: a drill rig sunk into a glowing seam, a conveyor up to an ore heap, a crane, huts.
   mining(w, p) {
     const f = frame(w, p);
-    const { g, rnd, gy, col } = f;
+    const { g, rnd, gy, col, colBox } = f;
     const biome = w.gen.biomeAt(p.x, p.z);
     const ore = biome === 'crystal' ? C.crystal : biome === 'ash' ? LAVA : 0x7ab0d8;
     const [rx, rz] = polar(Math.PI, 11);
@@ -712,8 +827,8 @@ export const SETTLEMENT_BUILDERS = {
     // Huts, either side of the rig.
     for (const a of [2.1, -2.1]) {
       const [hx, hz] = polar(a, 13);
-      house(g, hx, gy(hx, hz), hz, a + Math.PI, { wd: 5, dp: 4, ht: 2.8, wall: C.steel, roof: C.metalDark, trim: 0xd9a227 });
-      col(hx, hz, 2.8, 3.8);
+      house(g, hx, gy(hx, hz), hz, a + Math.PI, { wd: 5, dp: 4, ht: 2.8, wall: C.steel, roof: C.metalDark, trim: 0xd9a227, variant: rnd(), porch: false });
+      colBox(hx, hz, 2.9, 2.4, a + Math.PI, 4.8);
     }
     for (const [x, z] of [polar(2.3, 8), polar(-2.3, 8)]) lampPost(g, x, gy(x, z), z);
     traderStall(w, p, f);

@@ -161,20 +161,71 @@ Built beyond the plan:
 - Rewards: every player who damaged an enemy, or was close by, gets the kill's XP and gold. The
   server rolls a separate loot drop for each of them that only they see. Enemy health scales with
   the number of players engaged.
+- Hordes (gameplay phase 1, [GAMEPLAY_PLAN.md](GAMEPLAY_PLAN.md)): bigger camps, warbands and
+  stronghold reinforcement waves all run in `WorldSim`; elite affixes in `EnemySim`.
+  - An enemy's add carries `ch` (a champion), `af` (its affixes) and `hd` (one of a warband); a
+    split half is sent with `su: -1`. A Shielded elite's state carries its shield as an 18th field,
+    and the flags gain `rallied` (a Commander near it). Events gain `shield`, `horde`, `hordeDown`,
+    `alarm` and `wave`.
+  - What the Threat setting does is applied on the player's own screen, where their hits and the
+    hits on them are decided: enemies' damage to them is multiplied, and their damage to enemies
+    divided. The server uses it only for their rewards.
+  - Abilities (gameplay phase 2): `ab { id, p? | o, d }` from the player — the server checks the
+    ability is unlocked, slotted and off its cooldown, then passes it on as an `fx` (`k: 'ab'`, with
+    the user's upgrade as the server knows it) to everyone who can see the user, and puts a
+    holo-decoy into the sim, where enemies near it go for it. Ability damage is reported like any
+    hit; the damage cap allows for the hardest ability. A party member's Rally Cry and Restoration
+    Pulse heal on your own screen (health is each screen's), and their Arc Barrier stops enemy shots
+    there too.
+  - Titles: the profile and world and nearby chat carry `ti`, the title the server's copy wears.
+  - Idle enemies whose camp is more than 40 m from everyone think three times a second rather than
+    every tick. `node tools/loadsim.mjs 150` runs the server's simulation headless with 150
+    stand-in players fighting at camps: about 640 enemies (430 fighting) cost ~8.6 ms a tick, within
+    a quarter of a core.
 
 ### Phase 3 — Authoritative character (built)
 - `rpg/CharacterCore.js` holds the rules for a character's progress, and the server holds the copy
   that counts. Everything that changes a character is an **op**, of three kinds:
-  - **Predicted:** move, select, equip, unequip, scrap, sell, buy, spend, filter, accept, attune
-    and respawn. These apply at once on screen and are confirmed by the server.
+  - **Predicted:** move, select, equip, unequip, scrap, sell, buy, learn, respec, slot, filter,
+    threat, title, feat, accept, use, choose, attune and respawn. These apply at once on screen and are confirmed
+    by the server (Threat is refused in the middle of a fight; a respec at level 10 or more costs
+    gold and needs a smith at a workshop near; a buy needs a trader near whose stock covers the item
+    — the fine stock only a gunsmith's or armourer's; feats are bounded).
   - **Rolled:** pick, drop, chest, turnin, talk, rest and travel. These need dice, so they wait for
     the server's roll.
-  - **From the server:** kill rewards, camp completions, trader stock, trades and mail.
-- Each confirmation carries a hash of the server's copy, and the server sends one every 10 seconds.
-  If the client's copy disagrees, it reloads the server's.
+- The folk who matter to these (gameplay phase 3: traders, innkeepers, smiths, Wardens, hamlet
+  folk, quest boards) are placed by the world generator, so the server finds any of them by id
+  (`World.npcById`, only in the regions round the player) and checks the player stands with them:
+  `talk` (a board answers with its three postings), `accept` and `turnin` with the quest's giver,
+  `rest` at Brightwater's reactor or with an innkeeper (`at`, which also makes that inn the
+  character's home: respawns land there), `respec` with a smith, `buy` with a fitting trader.
+  Talking to someone far away is refused before anything is generated. The story (gameplay phase
+  4) adds `use` (a quest's object — a console, a beacon, a strongbox, the vault door — within 6 m,
+  only while a quest wants it) and `choose` (an answer, with the person asking); `talk` also says
+  their lines for the quest's step. Story folk and objects are the world generator's too, and a
+  quest's references ("city1:warden", "beacon2:fire", "home:camp") resolve the same on both sides
+  (`world/story.js storyRef`).
+  - **From the server:** kill rewards, bonuses (a warband broken, a stronghold stormed), visits
+    (somewhere new: the server checks every player's position every two seconds — biome, region,
+    landmark, and hamlet, village, town or city), camp completions, trader stock (with the fine
+    stock), trades and mail. Rewards are rolled for
+    each character's own level and Threat. Quests (gameplay phase 4): every second the server
+    looks at each player's quests (`rpg/questWatch.js`) — a place a step sends them to, reached
+    (`reach`); a place to hold, where the world's simulation starts the waves
+    (`WorldSim Encounters.defend`: the local faction, wave after wave, given up if everyone leaves)
+    and, once the last is down, `defended`. Quest drops (a raider's orders, a lost patrol's tags)
+    are rolled into the kill's reward.
+- Achievements (gameplay phase 2) are counted from each character's records, which only these
+  operations change, so both copies reach them together; the server's copy is the one saved.
+- Each confirmation carries a hash of the server's copy (quest steps and story flags included), and
+  the server sends one every 10 seconds. If the client's copy disagrees, it reloads the server's.
+- Both sides must run the same rules: `/api/status` names the server's build (a hash of the shared
+  code it loaded — `src/world`, `rpg`, `items`, `combat`, `sim`, `core`) and whether the files have
+  changed since it started (`stale`). A client won't go online against a stale or unnamed build;
+  the title says the server needs a restart and offers single-player meanwhile.
 - Offline, the same ops run locally: roll, apply, save.
 - Quests are offered and generated on the server. Characters are saved every 30 seconds and when
-  they leave. The client saves only its discovery, map markers and position.
+  they leave. The client saves only its discovery, map markers, tracked quest and position.
 - Movement validation: a movement bank allows 50 m/s over 2 seconds, which covers bullet-jump
   chains and bunched-up packets. Waystone travel and respawns are allowed to jump. Anything else
   gets a position correction.

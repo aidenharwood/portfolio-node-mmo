@@ -1,24 +1,32 @@
-// The game menu: a full-screen hub for your character — Character (level, attributes, stats),
-// Inventory (gear and backpack; the trader's shop too), Journal (quests), Map, Social (online:
-// who's around, whispers), Settings and Controls. The world keeps running while it's open (your
-// character stands and stays in danger: the header shows your health); only single-player freezes,
-// and only while the window is in the background.
+// The game menu: a full-screen hub for your character — Character (level, stats, gear, Threat),
+// Talents (ui/TalentsUI.js), Inventory (gear and backpack; the trader's shop too), Journal
+// (quests), Map, Social (online: who's around, whispers), Settings and Controls. The world keeps
+// running while it's open (your character stands and stays in danger: the header shows your
+// health); only single-player freezes, and only while the window is in the background.
 //   Esc opens it (last tab) and closes it · I/Tab inventory · M map · L journal · P character ·
-//   O social · Q/E step through tabs.
+//   N talents · O social · U guild · Q/E step through tabs.
 // Over the title screen it holds just Settings and Controls.
-import { esc } from './cards.js';
+import { esc, setHTML } from './cards.js';
 import { defaultPrefs } from '../core/Prefs.js';
-import { ATTRIBUTES } from '../rpg/Stats.js';
+import { talentsHTML } from './TalentsUI.js';
+import { respecCost, RESPEC_FREE_BELOW } from '../rpg/talents.js';
+import { achievementsHTML, codexHTML } from './JournalUI.js';
+import { ACHIEVEMENT, TITLES } from '../rpg/achievements.js';
+import { ABILITIES } from '../combat/abilities.js';
+import { armorReduction, TIERS, tierOf } from '../rpg/balance.js';
 import { RARITY } from '../items/rarity.js';
 import { ARMOR_SLOTS, ARMOR_SLOT_IDS } from '../items/armorTypes.js';
+import { setInfo } from '../items/describe.js';
+import { ACTS, STORY } from '../rpg/storyline.js';
 
 const TABS = [
   { id: 'character', label: 'Character', key: 'P' },
+  { id: 'talents', label: 'Talents', key: 'N' },
   { id: 'inventory', label: 'Inventory', key: 'I' },
   { id: 'journal', label: 'Journal', key: 'L' },
   { id: 'map', label: 'Map', key: 'M' },
   { id: 'social', label: 'Social', key: 'O', online: true },
-  { id: 'guild', label: 'Guild', key: 'G', online: true },
+  { id: 'guild', label: 'Guild', key: 'U', online: true },
   { id: 'mail', label: 'Mail', online: true },
   { id: 'settings', label: 'Settings' },
   { id: 'controls', label: 'Controls' },
@@ -45,14 +53,15 @@ const CONTROLS = [
     ['Quick melee', 'Q'],
     ['Reload', 'R'],
     ['Weapons', '1 · 2 · 3'],
+    ['Abilities', 'X · G · T (learn them in Talents, N)'],
   ]],
   ['World', [
     ['Interact', 'E'],
     ['Pick up loot', 'F, aiming at it'],
     ['Swap loot for what you use', 'Hold F'],
     ['Game menu', 'Esc'],
-    ['Character · inventory · journal', 'P · I or Tab · L'],
-    ['Map · social · guild', 'M · O · G (online)'],
+    ['Character · talents · inventory · journal', 'P · N · I or Tab · L'],
+    ['Map · social · guild', 'M · O · U (online)'],
     ['Chat (online)', 'Enter · / for commands'],
     ['Dev tools · perf overlay', '` or F1 · F3'],
   ]],
@@ -63,6 +72,7 @@ const CONTROLS = [
     ['Jump · dodge · slide', 'Their buttons (hold Jump for height, Aim in the air to glide) · Slide stays on until tapped or the stick is let go: slide, then Jump to bullet jump'],
     ['Interact · pick up', 'Tap the prompt · tap the loot card (hold to swap)'],
     ['Weapons', 'Tap a weapon slot'],
+    ['Abilities', 'The three buttons over the action cluster'],
     ['Menu · chat · view', 'The buttons at the top'],
   ]],
 ];
@@ -140,7 +150,7 @@ export class GameMenu {
     // Keys typed here (sliders, buttons) must not drive the player; Esc and the menu's own
     // shortcuts still reach main.js.
     el.addEventListener('keydown', (e) => {
-      if (e.code === 'Escape' || (/^Key[QEIMLPOG]$|^Tab$/.test(e.code) && !/INPUT|TEXTAREA|SELECT/.test(e.target.tagName))) return;
+      if (e.code === 'Escape' || (/^Key[QEIMLPNOU]$|^Tab$/.test(e.code) && !/INPUT|TEXTAREA|SELECT/.test(e.target.tagName))) return;
       e.stopPropagation();
     });
   }
@@ -207,7 +217,8 @@ export class GameMenu {
   renderTab(tab = this.page) {
     const su = this.game.socialUI;
     const fn = {
-      character: this.characterHTML, journal: this.journalHTML, social: this.socialHTML, settings: this.settingsHTML, controls: this.controlsHTML,
+      character: this.characterHTML, talents: () => talentsHTML(this.game), journal: this.journalHTML, social: this.socialHTML,
+      settings: this.settingsHTML, controls: this.controlsHTML,
       guild: () => su.guildHTML(), mail: () => su.mailHTML(),
     }[tab];
     this.html.innerHTML = `<div class="gm-tab-${tab}">${fn ? fn.call(this) : ''}</div>`;
@@ -274,12 +285,38 @@ export class GameMenu {
       case 'resume': g.closeMenus(); break;
       case 'quit': g.quitToTitle(); break;
       case 'back': this.back(); break;
-      case 'attr':
-        g.charLink.do({ op: 'spend', a: t.dataset.a });
+      case 'learn':
+        g.charLink.do({ op: 'learn', id: t.dataset.id });
+        this.renderTab();
+        break;
+      case 'slot':
+        g.charLink.do({ op: 'slot', i: Number(t.dataset.i), a: t.dataset.a || null });
+        this.renderTab();
+        break;
+      case 'respec': {
+        // Past the free levels, a smith at a workshop does it (rpg/CharacterCore.js 'respec').
+        const cost = respecCost(g.stats.level);
+        if (cost > 0 && !g.nearRole('smith')) g.hud.toast(`From level ${RESPEC_FREE_BELOW}, talents are reset by a smith at a town's or city's workshop (${cost}g)`);
+        else if (!g.charLink.do({ op: 'respec' })) g.hud.toast(cost ? `Not enough gold (${cost}g)` : 'Nothing to reset');
+        break;
+      }
+        this.renderTab();
+        break;
+      case 'talents': this.open('talents'); break;
+      case 'journal': this.journalPage = t.dataset.v; this.renderTab(); break;
+      case 'qtab': this.questTab = t.dataset.v; this.renderTab(); break;
+      case 'track': g.setTracked(t.dataset.v); this.renderTab(); break;
+      case 'title':
+        g.charLink.do({ op: 'title', id: t.dataset.v || null });
         this.renderTab();
         break;
       case 'filter':
         g.charLink.do({ op: 'filter', v: Number(t.dataset.v) });
+        this.renderTab();
+        break;
+      case 'threat':
+        if (g.inCombat()) g.hud.toast('Not in the middle of a fight');
+        else g.charLink.do({ op: 'threat', v: Number(t.dataset.v) });
         this.renderTab();
         break;
       case 'whisper':
@@ -311,31 +348,42 @@ export class GameMenu {
     const s = g.stats;
     const inv = g.player.inventory;
     const xp = s.xp / s.xpToNext();
-    const attrs = Object.entries(ATTRIBUTES).map(([id, a]) => {
-      const bonus = s.gear[id] ? ` <em>+${s.gear[id]}</em>` : '';
-      return `<div class="attr"><div><b>${a.name}</b> ${s.attr[id]}${bonus}<small>${a.desc}</small></div>
-        <button data-act="attr" data-a="${id}" ${s.points > 0 ? '' : 'disabled'} aria-label="Raise ${a.name}">+</button></div>`;
-    }).join('');
-    const mitigation = Math.round((1 - 100 / (100 + s.armor)) * 100);
+    const abilities = s.slots.map((id, i) => `<li><kbd>${['X', 'G', 'T'][i]}</kbd>${id ? ABILITIES[id].name : '<em>empty</em>'}</li>`).join('');
+    // Titles: those earned (rpg/achievements.js), and none.
+    const earned = TITLES.filter((a) => g.char.achievements[a.id] !== undefined);
+    const wearing = g.settings.title ?? '';
+    const titles = [['', 'None'], ...earned.map((a) => [a.id, a.title])]
+      .map(([id, label]) => `<button class="${wearing === id ? 'on' : ''}" data-act="title" data-v="${id}">${esc(label)}</button>`).join('');
+    const mitigation = Math.round(armorReduction(s.armor, s.level) * 100);
     const gear = (item, label) => item
       ? `<li><span>${label}</span><b style="color:${RARITY[item.rarity].css}">${esc(item.name)}</b><small>Lv ${item.level}</small></li>`
       : `<li class="none"><span>${label}</span><b>—</b></li>`;
     const filter = FILTERS.map((label, i) => `<button class="${g.settings.lootFilter === i ? 'on' : ''}" data-act="filter" data-v="${i}">${label}</button>`).join('');
+    const tier = tierOf(g.settings.threat);
+    const threat = TIERS.map((T, i) => `<button class="${tier === T ? 'on' : ''}" data-act="threat" data-v="${i}" ${g.inCombat() ? 'disabled' : ''}>${T.name}</button>`).join('');
+    const threatText = tier.xp === 1 ? 'Enemies as they come.'
+      : `Enemies hit you ${Math.round((tier.damage - 1) * 100)}% harder and take ${Math.round((1 - 1 / tier.health) * 100)}% less from you. Your kills: +${Math.round((tier.xp - 1) * 100)}% XP, more luck, and nothing below ${['common', 'uncommon', 'rare'][tier.floor]}.`;
+    // Every set worn, most pieces first, with its bonuses lit as they're reached.
+    const sets = Object.entries(s.gearSets).sort((a, b) => b[1] - a[1]).map(([id, n]) => setHTML(setInfo(id, n))).join('');
     return `
       <div class="gm-cols">
         <section class="gm-card">
           <h3>Level</h3>
           <div class="gm-level"><b>${s.level}</b><div><div class="gm-xp"><i style="width:${(xp * 100).toFixed(1)}%"></i></div><small>${s.xp} / ${s.xpToNext()} XP to level ${s.level + 1}</small></div></div>
-          <div class="pm-stats"><span><b>${s.gold}</b>gold</span><span><b>${s.kills}</b>kills</span><span><b>${s.points}</b>points to spend</span></div>
-          <h3>Attributes</h3>
-          ${s.points ? `<div class="pts">${s.points} attribute point${s.points > 1 ? 's' : ''} to spend</div>` : ''}
-          ${attrs}
+          <div class="pm-stats"><span><b>${s.gold}</b>gold</span><span><b>${s.kills}</b>kills</span><span><b>${s.points}</b>talent points</span></div>
+          <h3>Talents &amp; abilities</h3>
+          ${s.points ? `<div class="pts">${s.points} talent point${s.points > 1 ? 's' : ''} to spend</div>` : ''}
+          <ul class="gm-abilities">${abilities}</ul>
+          <button class="gm-btn" data-act="talents">Open talents <kbd>N</kbd></button>
+          <h3>Title</h3>
+          <div class="filter">${titles}</div>
+          <p class="hint">${earned.length ? `Shown under your name and in chat. ${ACHIEVEMENT[wearing]?.name ? `Earned by “${esc(ACHIEVEMENT[wearing].name)}”.` : ''}` : 'Titles come from achievements (Journal › Achievements).'}</p>
         </section>
         <section class="gm-card">
           <h3>Combat</h3>
           <div class="derived">
             <div>Max Health <b>${s.maxHp}</b></div><div>Max Mana <b>${s.maxMana}</b></div>
-            <div>Armour <b>${Math.round(s.armor)} (−${mitigation}%)</b></div><div>Move speed <b>${pct(1 + s.moveSpeed)}</b></div>
+            <div title="Damage your armour stops from enemies of your level">Armour <b>${Math.round(s.armor)} (−${mitigation}%)</b></div><div>Move speed <b>${pct(1 + s.moveSpeed)}</b></div>
             <div>Melee damage <b>${pct(s.damageMult('melee'))}</b></div><div>Ranged damage <b>${pct(s.damageMult('ranged'))}</b></div>
             <div>Magic damage <b>${pct(s.damageMult('magic'))}</b></div><div>Crit bonus <b>+${(s.critBonus * 100).toFixed(1)}%</b></div>
           </div>
@@ -344,6 +392,10 @@ export class GameMenu {
             ${inv.slots.map((w, i) => gear(w, `Weapon ${i + 1}${i === inv.active ? ' ◆' : ''}`)).join('')}
             ${ARMOR_SLOT_IDS.map((sl) => gear(inv.armor[sl], ARMOR_SLOTS[sl].label)).join('')}
           </ul>
+          ${sets ? `<h3>Sets</h3><div class="gm-sets">${sets}</div>` : ''}
+          <h3>Threat</h3>
+          <div class="filter">${threat}</div>
+          <p class="hint">${threatText} It can't change mid-fight.</p>
           <h3>Loot filter</h3>
           <div class="filter">${filter}</div>
           <p class="hint">Drops below the filter are auto-scrapped for gold.</p>
@@ -351,27 +403,94 @@ export class GameMenu {
       </div>`;
   }
 
+  // The Journal: quests, achievements or the codex.
   journalHTML() {
-    const log = this.game.quests;
-    const active = Object.keys(log.active);
-    const giver = { warden: 'Warden Maren', sage: 'Old Ysolde' };
-    const rows = active.map((id) => {
-      const q = log.defs.get(id);
-      if (!q) return '';
-      const prog = log.active[id];
-      const done = log.isComplete(id);
-      const goals = done ? `<li class="done">Ready to turn in to ${esc(giver[q.giver] ?? 'the quest giver')}</li>`
-        : q.objectives.map((o, i) => `<li class="${prog[i] >= o.count ? 'done' : ''}">${esc(o.text)} <b>${Math.min(prog[i], o.count)}/${o.count}</b></li>`).join('');
-      return `<article class="gm-quest ${done ? 'ready' : ''}"><h4>${esc(q.title)}</h4>${giver[q.giver] ? `<small>From ${giver[q.giver]}</small>` : ''}<ul>${goals}</ul></article>`;
+    const page = this.journalPage ?? 'quests';
+    const tabs = [['quests', 'Quests'], ['achievements', 'Achievements'], ['codex', 'Codex']]
+      .map(([id, label]) => `<button class="${page === id ? 'on' : ''}" data-act="journal" data-v="${id}">${label}</button>`).join('');
+    const body = page === 'achievements' ? achievementsHTML(this.game) : page === 'codex' ? codexHTML(this.game) : this.questsHTML();
+    return `<div class="filter jr-tabs">${tabs}</div>${body}`;
+  }
+
+  // The quest log in three tabs: the Story (what's under way, and the acts so far), Side (village
+  // chains, hamlets' errands, Old Ysolde's) and Contracts (the Wardens', hunts, the boards'). Each
+  // quest at its step, with what's left and who it goes back to; one can be tracked, to lead the
+  // HUD, the compass and the maps.
+  questsHTML() {
+    const g = this.game;
+    const log = g.quests;
+    const TABS = [['story', 'Story'], ['side', 'Side'], ['contracts', 'Contracts']];
+    const tab = this.questTab ?? TABS.map(([id]) => id).find((id) => log.activeIds(id).length) ?? 'story';
+    const tabs = TABS.map(([id, label]) => {
+      const n = log.activeIds(id).length;
+      return `<button class="${tab === id ? 'on' : ''}" data-act="qtab" data-v="${id}">${label}${n ? ` <small>${n}</small>` : ''}</button>`;
     }).join('');
+    const cards = log.activeIds(tab).sort((a, b) => (b === g.tracked) - (a === g.tracked)).map((id) => this.questCard(id)).join('');
+    const empty = {
+      story: this.storyNext(),
+      side: 'No side quests. Every village has a story of its own to tell, hamlets have errands, and Old Ysolde has her own.',
+      contracts: 'No contracts. Every Warden pays bounties, and every town and city has a quest board.',
+    }[tab];
     return `
       <div class="gm-cols">
         <section class="gm-card gm-wide">
-          <h3>Active quests</h3>
-          ${rows || '<p class="pm-empty">No active quests. Warden Maren and Old Ysolde at Brightwater always have work.</p>'}
-          <p class="hint">${log.completed.size} quest${log.completed.size === 1 ? '' : 's'} completed.</p>
+          <div class="filter qtabs">${tabs}</div>
+          ${cards || `<p class="pm-empty">${empty}</p>`}
+          ${tab === 'story' ? `<h3>The story so far</h3>${this.storyHTML()}` : ''}
+          <p class="hint">${log.completed.size} quest${log.completed.size === 1 ? '' : 's'} completed. A tracked quest leads the HUD, the compass and the maps.</p>
         </section>
       </div>`;
+  }
+
+  questCard(id) {
+    const g = this.game;
+    const log = g.quests;
+    const q = log.defs.get(id);
+    if (!q) return '';
+    const prog = log.active[id];
+    const done = log.isComplete(id);
+    const stages = log.stagesOf(q);
+    const at = Math.min(log.stage[id] ?? 0, stages.length - 1);
+    const goals = done ? `<li class="done">${q.returnTo === null ? 'Done' : `Ready to hand in to ${esc(log.returnTo(q))}`}</li>`
+      : log.objectivesOf(id).map((o, i) => {
+        const n = o.count ?? 1;
+        return `<li class="${prog[i] >= n ? 'done' : ''}">${esc(log.fill(o.text, q))}${n > 1 ? ` <b>${Math.min(prog[i], n)}/${n}</b>` : ''}</li>`;
+      }).join('');
+    const act = q.kind === 'story' ? ACTS.find((A) => A.act === q.act) : null;
+    const meta = [act && `${act.title}: ${act.sub}`, q.level && `Level ${q.level}`, stages.length > 1 && `Step ${at + 1} of ${stages.length}`,
+      !done && q.returnTo !== null && `Back to ${log.returnTo(q)}`].filter(Boolean).join(' · ');
+    const text = done ? '' : log.fill(stages[at]?.text ?? '', q);
+    const tracked = g.tracked === id;
+    return `<article class="gm-quest ${done ? 'ready' : ''} ${tracked ? 'tracked' : ''}">
+      <h4><span>${esc(q.title)}</span><button class="gm-btn" data-act="track" data-v="${esc(id)}">${tracked ? 'Untrack' : 'Track'}</button></h4>
+      <small>${esc(meta)}</small>${text ? `<p>${esc(text)}</p>` : ''}<ul>${goals}</ul></article>`;
+  }
+
+  // Where the story goes next, when nothing of it is under way.
+  storyNext() {
+    const log = this.game.quests;
+    const q = STORY.find((s) => !log.completed.has(s.id) && !log.active[s.id] && log.requirementsMet(s));
+    if (q) return `Next: <b>${esc(q.title)}</b> — ${esc(log.giverName(log.giverId(q)))} has it.`;
+    return STORY.every((s) => log.completed.has(s.id)) ? 'The story so far is told. Act II comes in a later update.' : 'Finish what\'s under way to go on.';
+  }
+
+  // The story act by act: quests done, the one under way, the next, and how many more to come.
+  storyHTML() {
+    const log = this.game.quests;
+    return ACTS.map((A) => {
+      const qs = STORY.filter((q) => q.act === A.act);
+      const done = qs.filter((q) => log.completed.has(q.id)).length;
+      let more = 0;
+      const rows = qs.map((q) => {
+        if (log.completed.has(q.id)) return `<li class="done">${esc(q.title)}</li>`;
+        if (log.active[q.id]) return `<li class="now">${esc(q.title)} <small>under way</small></li>`;
+        if (log.requirementsMet(q)) return `<li class="next">${esc(q.title)} <small>${esc(log.giverName(log.giverId(q)))}</small></li>`;
+        more++;
+        return '';
+      }).join('');
+      return `<div class="gm-story ${done === qs.length ? 'done' : ''}"><h4>${esc(A.title)} · ${esc(A.sub)}<small>Levels ${esc(A.levels)} · ${done} / ${qs.length}</small></h4>
+        <ul>${rows}${more ? `<li class="locked">${more} more to come</li>` : ''}</ul></div>`;
+    }).join('');
   }
 
   socialHTML() {

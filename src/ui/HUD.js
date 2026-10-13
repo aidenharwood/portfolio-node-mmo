@@ -7,6 +7,9 @@ import { ELEMENTS } from '../items/elements.js';
 import { WEAPON_TYPES } from '../items/weaponTypes.js';
 import { itemCardHTML, esc } from './cards.js';
 import { isArmor } from '../items/items.js';
+import { ABILITIES, cooldownOf } from '../combat/abilities.js';
+import { TREES } from '../rpg/talents.js';
+import { ABILITY_KEY_LABELS } from '../entities/AbilityKit.js';
 
 const $ = (id) => document.getElementById(id);
 const TAU = Math.PI * 2;
@@ -18,7 +21,7 @@ export class HUD {
     this.thumbs = thumbs;
     this.el = {
       lvl: $('lvl'), hpFill: $('hp-fill'), hpLag: $('hp-lag'), hpText: $('hp-text'),
-      stFill: $('st-fill'), mpFill: $('mp-fill'), xpFill: $('xp-fill'), gold: $('gold'), points: $('points'),
+      stFill: $('st-fill'), mpFill: $('mp-fill'), xpFill: $('xp-fill'), gold: $('gold'), points: $('points'), abilities: $('abilities'),
       zone: $('zone'), banner: $('banner'), toast: $('toast'), prompt: $('prompt'),
       slots: $('slots'), ammo: $('ammo'), loot: $('loot-card'), quests: $('quests'),
       combo: $('combo'), comboMult: $('combo-mult'), comboCount: $('combo-count'), comboTimer: $('combo-timer'),
@@ -33,6 +36,7 @@ export class HUD {
     this.buildCompass();
     this.hpLag = 1;
     this.bannerTime = 0;
+    this.bannerQueue = [];
     this.toastTime = 0;
     this.hitTime = 0;
     this.keys = {};
@@ -68,10 +72,11 @@ export class HUD {
     e.lvl.textContent = s.level;
     e.gold.textContent = `${s.gold}g`;
     e.points.style.display = s.points > 0 ? '' : 'none';
-    e.points.textContent = `+${s.points} attribute points — press P`;
+    e.points.textContent = `+${s.points} talent point${s.points > 1 ? 's' : ''} — press N`;
 
     this.renderSlots(p);
     this.renderWeapon(p);
+    this.renderAbilities(game);
 
     const showCombo = p.combo > 0;
     e.combo.style.display = showCombo ? '' : 'none';
@@ -79,13 +84,14 @@ export class HUD {
       e.comboMult.textContent = `×${p.comboMult.toFixed(1)}`;
       e.comboCount.textContent = `COMBO ${p.combo}`;
       e.comboTimer.style.width = `${Math.max(0, p.comboTimer / 3) * 100}%`;
-      e.combo.classList.toggle('hot', p.comboMult >= 2);
+      e.combo.classList.toggle('hot', p.comboMult >= 1.7);
     }
     this.renderQuests(game);
     this.renderBoss(game);
     this.renderReticle(dt, game);
 
     this.bannerTime -= dt;
+    if (this.bannerTime <= 0 && this.bannerQueue.length) this.showBanner(...this.bannerQueue.shift());
     e.banner.style.opacity = Math.max(0, Math.min(1, this.bannerTime));
     this.toastTime -= dt;
     e.toast.style.opacity = Math.max(0, Math.min(1, this.toastTime * 2));
@@ -188,6 +194,32 @@ export class HUD {
     }
   }
 
+  // The three ability slots over the XP bar: the key, the ability, its cooldown sweeping round.
+  renderAbilities(game) {
+    const s = game.stats;
+    const kit = game.player.abilities;
+    const key = s.slots.join(',');
+    if (key !== this.abilityKey) {
+      this.abilityKey = key;
+      this.el.abilities.innerHTML = s.slots.map((id, i) => {
+        const A = id && ABILITIES[id];
+        return `<div class="ab ${A ? '' : 'empty'}" style="--tree:${A ? TREES[A.tree].color : 'transparent'}"><kbd>${ABILITY_KEY_LABELS[i]}</kbd><b>${A ? A.short : ''}</b><i class="cd"></i><em></em></div>`;
+      }).join('');
+      this.abilityEls = [...this.el.abilities.children];
+      this.el.abilities.style.display = s.slots.some(Boolean) ? '' : 'none';
+    }
+    s.slots.forEach((id, i) => {
+      const el = this.abilityEls[i];
+      if (!id || !el) return;
+      const left = kit.cooldownLeft(id);
+      const frac = left > 0 ? left / cooldownOf(id, s.talent.upgrades) : 0;
+      el.style.setProperty('--cd', frac.toFixed(3));
+      el.classList.toggle('ready', left <= 0);
+      el.lastChild.textContent = left > 0 ? Math.ceil(left) : '';
+    });
+    this.el.abilities.classList.toggle('flash', kit.flash > 0);
+  }
+
   renderSlots(p) {
     const inv = p.inventory;
     const key = inv.slots.map((w) => w?.uid ?? '-').join(',') + `|${inv.active}`;
@@ -201,18 +233,28 @@ export class HUD {
     }).join(''));
   }
 
+  // The quest tracker: the tracked quest, then the story's, then the rest (three at most), each
+  // at its current step — what's left of it, or who it goes back to. The first one's step says
+  // what's going on; it's the one the compass and the maps point to.
   renderQuests(game) {
     const log = game.quests;
-    const key = JSON.stringify(log.active);
-    this.setHTML('quests', key, () => Object.entries(log.active).map(([id, prog]) => {
+    const ids = game.trackedOrder(3);
+    const more = Object.keys(log.active).length - ids.length;
+    const key = JSON.stringify([ids, ids.map((id) => [log.stage[id] ?? 0, log.active[id]]), game.tracked, more]);
+    this.setHTML('quests', key, () => ids.map((id, k) => {
       const q = log.defs.get(id);
       if (!q) return '';
+      const prog = log.active[id];
       const done = log.isComplete(id);
       const objectives = done
-        ? `<li class="done">Return to ${esc(game.npcs.find((n) => n.id === q.giver)?.name ?? 'camp')}</li>`
-        : q.objectives.map((o, i) => `<li class="${prog[i] >= o.count ? 'done' : ''}">${esc(o.text)} ${Math.min(prog[i], o.count)}/${o.count}</li>`).join('');
-      return `<div class="quest"><b>${esc(q.title)}</b><ul>${objectives}</ul></div>`;
-    }).join(''));
+        ? `<li class="done">${q.returnTo === null ? 'Done' : `Return to ${esc(log.returnTo(q))}`}</li>`
+        : log.objectivesOf(id).map((o, i) => {
+          const n = o.count ?? 1;
+          return `<li class="${prog[i] >= n ? 'done' : ''}">${esc(log.fill(o.text, q))}${n > 1 ? ` ${Math.min(prog[i], n)}/${n}` : ''}</li>`;
+        }).join('');
+      const step = !done && k === 0 && log.stagesOf(q).length > 1 ? log.fill(log.stageOf(id)?.text ?? '', q) : '';
+      return `<div class="quest ${q.kind === 'story' ? 'story' : ''} ${game.tracked === id ? 'tracked' : ''}"><b>${esc(q.title)}</b>${step ? `<p>${esc(step)}</p>` : ''}<ul>${objectives}</ul></div>`;
+    }).join('') + (more > 0 ? `<div class="quest more">+${more} more · Journal (L)</div>` : ''));
   }
 
   renderBoss(game) {
@@ -226,10 +268,8 @@ export class HUD {
   renderReticle(dt, game) {
     const p = game.player;
     const e = this.el;
-    // Melee shows a centre dot when there's loot in reach to aim at, or in first person.
     const melee = p.weaponClass === 'melee';
-    // Aiming down a sight in first person, the sight itself is the reticle.
-    const show = game.state === 'playing' && p.alive && (!melee || game.lootNear || game.firstPerson) && !(game.firstPerson && game.viewModel?.sighted);
+    const show = game.state === 'playing' && p.alive && !(game.firstPerson && game.viewModel?.sighted);
     e.reticle.style.display = show ? '' : 'none';
     e.reticle.classList.toggle('dot', melee);
     e.reticle.classList.toggle('on-loot', !!game.focusedDrop);
@@ -240,7 +280,10 @@ export class HUD {
     const gap = 5 + (p.weaponClass === 'ranged' ? p.spread * ppr : 3);
     e.reticle.style.setProperty('--gap', `${Math.min(gap, 120)}px`);
     e.reticle.classList.toggle('on-enemy', !!game.aim.target);
-    const charge = p.chargeFraction;
+
+    const w = p.weapon;
+    const reload = w?.cls === 'ranged' && p.reloadTimer > 0 ? 1 - p.reloadTimer / w.stats.reloadTime : 0;
+    const charge = reload > 0 ? reload : p.chargeFraction;
     e.charge.style.display = charge > 0 ? '' : 'none';
     e.charge.style.setProperty('--p', `${charge * 360}deg`);
     e.charge.classList.toggle('full', charge >= 1);
@@ -260,10 +303,11 @@ export class HUD {
     this.el.prompt.style.display = text ? '' : 'none';
   }
 
-  // Focused loot card (looking at a drop), compared against the equipped weapon.
-  setLoot(weapon, current, backpackFull, armorSlots = {}) {
+  // Focused loot card (looking at a drop), compared against the equipped weapon (or the armour in
+  // its slot); `sets` counts the set pieces worn, for the card's set bonuses.
+  setLoot(weapon, current, backpackFull, armorSlots = {}, sets = {}) {
     if (weapon && isArmor(weapon)) current = armorSlots[weapon.slot];
-    const key = weapon ? `${weapon.uid}|${current?.uid}|${backpackFull}` : '';
+    const key = weapon ? `${weapon.uid}|${current?.uid}|${backpackFull}|${weapon.set ? sets[weapon.set] ?? 0 : ''}` : '';
     if (this.keys.loot === key) return;
     this.keys.loot = key;
     const el = this.el.loot;
@@ -271,7 +315,7 @@ export class HUD {
     const hold = current ? `Swap for ${esc(current.name)}` : 'Equip now';
     const footer = `<div class="lc-prompt"><kbd>F</kbd> ${backpackFull ? 'Pick up (swaps with equipped)' : 'Pick up'}</div>`
       + `<div class="lc-prompt lc-hold"><kbd>Hold F</kbd> ${hold}<i></i></div>`;
-    el.innerHTML = itemCardHTML(weapon, { compare: current, thumb: this.thumbs.get(weapon), footer });
+    el.innerHTML = itemCardHTML(weapon, { compare: current, thumb: this.thumbs.get(weapon), footer, sets });
     el.classList.remove('hidden');
   }
 
@@ -283,7 +327,18 @@ export class HUD {
     this.el.loot.style.setProperty('--hold', v);
   }
 
+  // A banner across the screen; one that comes while another is still up waits its turn (a few at
+  // most: a level-up on the same kill as a broken warband shows after it).
   banner(text, sub = '') {
+    if (this.bannerTime > 0.8 && this.bannerText !== text) {
+      if (this.bannerQueue.length < 3 && !this.bannerQueue.some(([t]) => t === text)) this.bannerQueue.push([text, sub]);
+      return;
+    }
+    this.showBanner(text, sub);
+  }
+
+  showBanner(text, sub) {
+    this.bannerText = text;
     this.el.banner.innerHTML = `${esc(text)}${sub ? `<small>${esc(sub)}</small>` : ''}`;
     this.bannerTime = 2.6;
   }
@@ -313,6 +368,7 @@ export class HUD {
   reset() {
     this.hpLag = 1;
     this.keys = {};
+    this.bannerQueue = [];
     this.hurtFlash = 0;
     for (const a of this.arcs) a.el.remove();
     this.arcs = [];

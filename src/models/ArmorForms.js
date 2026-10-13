@@ -1,11 +1,13 @@
-// Armour visual forms. Each slot kind has several shapes; manufacturers choose from their own
-// subset (manufacturers.js → forms.armorHead/Chest/Hands/Legs). Forms build onto the humanoid's
-// bones (skull, torso, forearm/hand, thigh/shin/foot) so armour reshapes the silhouette and moves
-// with the joints. Helms are modelled round a head of radius ~0.23 and leg forms for a 0.42 thigh
-// and 0.40 shin; applyArmor fits them to the body (Human.headwear, stretched leg groups).
+// Armour visual forms. Each slot kind has several shapes; every armour set (items/sets.js) picks
+// its own per slot and paints them in its maker's colours, so a set's pieces match. Forms build
+// onto the humanoid's bones (skull, torso, forearm/hand, thigh/shin/foot) so armour reshapes the
+// silhouette and moves with the joints. Helms are modelled round a head of radius ~0.23 and leg
+// forms for a 0.42 thigh and 0.40 shin; applyArmor fits them to the body (Human.headwear,
+// stretched leg groups). Back pieces are capes (cloth on bone chains) or rigid kit on the chest.
 import * as THREE from 'three';
 import { piece, bakeTree, shade, G } from '../render/ModelKit.js';
 import { MANUFACTURERS } from '../items/manufacturers.js';
+import { GEAR_SETS } from '../items/sets.js';
 import { RARITY } from '../items/rarity.js';
 import { PART_INDEX } from '../items/parts.js';
 import { ARMOR_SLOTS } from '../items/armorTypes.js';
@@ -19,21 +21,16 @@ const BONE = 0xe4e8ef;
 const DARK = 0x2a2a30;
 
 
-const MATERIAL_COLOR = {
-  cloth: (p) => p.secondary,
-  leather: (p) => p.secondary,
-  chain: (p) => shade(p.metal, 0.75),
-  plate: (p) => p.metal,
-};
-
+// A piece's colours are its set maker's: main surfaces in the primary, details in the secondary
+// and metal, lights in the signature energy colour.
 export function armorContext(item) {
-  const mfr = MANUFACTURERS[item.manufacturer];
+  const set = GEAR_SETS[item.set] ?? GEAR_SETS.pathfinder;
+  const mfr = MANUFACTURERS[item.manufacturer] ?? MANUFACTURERS[set.maker];
   const rar = RARITY[item.rarity];
   const part = (slot) => PART_INDEX[item.parts[slot]]?.visual ?? {};
-  const mat = part('material').material ?? 'leather';
   return {
-    item, pal: mfr.palette, rar, tier: rar.tier, mat,
-    main: MATERIAL_COLOR[mat](mfr.palette),
+    item, set, pal: mfr.palette, rar, tier: rar.tier,
+    main: mfr.palette.primary,
     accent: mfr.palette.energy,
     rarityColor: rar.color,
     showAccent: true,
@@ -94,6 +91,89 @@ export const ARMOR_HEAD = {
       piece(g, G.torus(0.25, 0.016, Math.PI * 2, 5, 24), c.trim.gilded ? GOLD : c.pal.metal, { pos: [0, 0.1, 0], rot: [Math.PI / 2 - 0.15, 0, 0], outline: 0.008 });
       piece(g, G.octa(0.045), c.accent, { pos: [0, 0.14, 0.25], scale: [1, 1.4, 0.5], glow: true, outline: 0.008 });
       piece(g, G.torus(0.2, 0.012, Math.PI * 2, 4, 24), c.accent, { pos: [0, 0.42, -0.04], rot: [Math.PI / 2 - 0.3, 0, 0], glow: true, outline: 0 });
+    },
+  },
+  ranger: {
+    name: 'Frontier Hat', hidesHair: true,
+    build: (g, c) => {
+      piece(g, G.cyl(0.2, 0.25, 0.22, 16), c.main, { pos: [0, 0.26, -0.01], scale: [1, 1, 1.05] });
+      piece(g, G.dome(0.2, 14, 6, 0.5), c.main, { pos: [0, 0.37, -0.01], scale: [1, 0.35, 1.05] });
+      piece(g, G.box(0.05, 0.06, 0.32), shade(c.main, 0.85), { pos: [0, 0.4, -0.01], outline: 0 });
+      // A wide brim, tipped down a little at the front.
+      piece(g, G.cyl(0.5, 0.5, 0.025, 28), c.main, { pos: [0, 0.16, 0.0], rot: [0.08, 0, 0], scale: [1, 1, 1.1], outline: 0.012 });
+      piece(g, G.cyl(0.256, 0.256, 0.06, 18), c.pal.secondary, { pos: [0, 0.19, -0.01], scale: [1, 1, 1.05], outline: 0.008 });
+      // Goggles pushed up on the band.
+      for (const s of [-1, 1]) {
+        piece(g, G.cylZ(0.055, 0.055, 0.05, 12), c.pal.metal, { pos: [0.075 * s, 0.24, 0.24], rot: [-0.25, 0, 0], outline: 0.01 });
+        piece(g, G.cylZ(0.042, 0.042, 0.02, 12), c.accent, { pos: [0.075 * s, 0.248, 0.266], rot: [-0.25, 0, 0], glow: true, outline: 0 });
+      }
+    },
+  },
+  raider: {
+    name: 'Raider Mask', hidesHair: true, hidesFace: true,
+    build: (g, c) => {
+      piece(g, G.dome(0.262, 16, 8, 0.55), c.pal.secondary, { pos: [0, 0.0, -0.01], outline: 0.014 });
+      // Rebreather over the mouth and nose: a muzzle, a filter, two side canisters.
+      piece(g, G.sphere(0.13, 12, 8), c.main, { pos: [0, -0.12, 0.17], scale: [1.1, 0.95, 0.9] });
+      piece(g, G.cylZ(0.06, 0.07, 0.08, 10), DARK, { pos: [0, -0.15, 0.27], rot: [0.25, 0, 0], outline: 0.01 });
+      piece(g, G.cylZ(0.04, 0.04, 0.02, 10), c.accent, { pos: [0, -0.165, 0.31], rot: [0.25, 0, 0], glow: true, outline: 0 });
+      for (const s of [-1, 1]) piece(g, G.cyl(0.045, 0.045, 0.12, 8), DARK, { pos: [0.15 * s, -0.16, 0.16], rot: [0.4, 0, 0.6 * s], outline: 0.008 });
+      // Goggles and their strap.
+      for (const s of [-1, 1]) {
+        piece(g, G.cylZ(0.06, 0.055, 0.06, 12), DARK, { pos: [0.085 * s, 0.035, 0.2], rot: [-0.1, 0.12 * s, 0], outline: 0.01 });
+        piece(g, G.cylZ(0.048, 0.048, 0.02, 12), c.accent, { pos: [0.087 * s, 0.035, 0.232], rot: [-0.1, 0.12 * s, 0], glow: true, outline: 0 });
+      }
+      piece(g, G.torus(0.25, 0.018, Math.PI * 2, 4, 18), DARK, { pos: [0, 0.04, -0.02], rot: [Math.PI / 2 - 0.1, 0, 0], scale: [1.02, 1.1, 1], outline: 0 });
+      // A crest of salvaged fins.
+      for (let i = 0; i < 6; i++) {
+        const a = 0.7 - i * 0.42;
+        const h = 0.17 - Math.abs(i - 1.5) * 0.02;
+        piece(g, G.cone(0.045, h, 4), c.main, { pos: [0, Math.cos(a) * 0.27, -0.01 + Math.sin(a) * 0.27], rot: [a, 0, 0], scale: [0.35, 1, 1.4], outline: 0.008 });
+      }
+    },
+  },
+  hardhat: {
+    name: 'Mining Helm', hidesHair: true, hidesFace: true,
+    build: (g, c) => {
+      // A hard hat with a brim and a ridge, a headlamp, ear defenders, a dark face shield over
+      // the eyes and a respirator under it.
+      piece(g, G.dome(0.29, 16, 8, 0.55), c.pal.secondary, { pos: [0, 0.02, -0.01], outline: 0.014 });
+      piece(g, G.cyl(0.33, 0.33, 0.03, 20), c.pal.secondary, { pos: [0, 0.04, 0.02], scale: [1, 1, 1.12], outline: 0.012 });
+      piece(g, G.box(0.06, 0.05, 0.5), shade(c.pal.secondary, 0.85), { pos: [0, 0.28, -0.02], outline: 0.008 });
+      piece(g, G.cylZ(0.07, 0.08, 0.08, 14), c.main, { pos: [0, 0.18, 0.27], rot: [-0.3, 0, 0], outline: 0.01 });
+      piece(g, G.cylZ(0.055, 0.055, 0.02, 14), 0xfff4c0, { pos: [0, 0.19, 0.31], rot: [-0.3, 0, 0], glow: true, outline: 0 });
+      piece(g, G.box(0.42, 0.14, 0.04), DARK, { pos: [0, 0.0, 0.25], rot: [-0.1, 0, 0], outline: 0.01 });
+      piece(g, G.box(0.38, 0.03, 0.02), c.accent, { pos: [0, 0.02, 0.275], glow: true, outline: 0 });
+      piece(g, G.cylZ(0.07, 0.08, 0.1, 10), c.main, { pos: [0, -0.15, 0.22], rot: [0.3, 0, 0], outline: 0.01 });
+      for (const s of [-1, 1]) {
+        piece(g, G.cyl(0.05, 0.05, 0.08, 10), DARK, { pos: [0.16 * s, -0.14, 0.17], rot: [0.3, 0, 0.7 * s], outline: 0.008 });
+        piece(g, G.cyl(0.09, 0.09, 0.06, 12), c.main, { pos: [0.26 * s, -0.02, 0.0], rot: [0, 0, Math.PI / 2], outline: 0.01 });
+      }
+    },
+  },
+  carapace: {
+    name: 'Chitin Crest', hidesHair: true, hidesFace: true,
+    build: (g, c) => {
+      piece(g, G.sphere(0.28, 16, 12), c.main, { pos: [0, 0.02, -0.02], scale: [1, 1, 1.08] });
+      for (let i = 0; i < 3; i++) piece(g, G.dome(0.24 - i * 0.03, 12, 6, 0.5), c.pal.secondary, { pos: [0, 0.18 - i * 0.07, -0.08 - i * 0.12], rot: [-0.6 - i * 0.35, 0, 0], scale: [1, 0.6, 1], outline: 0.012 });
+      piece(g, G.cone(0.08, 0.46, 5), c.pal.secondary, { pos: [0, 0.3, -0.27], rot: [-1.1, 0, 0], scale: [0.5, 1, 1], outline: 0.012 });
+      // Compound eyes, a plate over the mouth, mandibles hooked down to the chin.
+      for (const s of [-1, 1]) {
+        piece(g, G.sphere(1, 12, 8), c.accent, { pos: [0.13 * s, 0.05, 0.21], rot: [0, 0.45 * s, 0], scale: [0.07, 0.09, 0.05], glow: true, outline: 0.008 });
+        piece(g, G.cone(0.05, 0.26, 5), c.pal.metal, { pos: [0.11 * s, -0.17, 0.2], rot: [Math.PI - 0.5, 0, -0.45 * s], outline: 0.01 });
+      }
+      piece(g, G.box(0.16, 0.12, 0.06), c.pal.secondary, { pos: [0, -0.1, 0.27], rot: [0.2, 0, 0], outline: 0.01 });
+    },
+  },
+  synth: {
+    name: 'Synth Faceplate', hidesHair: true, hidesFace: true,
+    build: (g, c) => {
+      piece(g, G.sphere(0.285, 18, 12), c.main, { pos: [0, 0.02, 0], scale: [1, 1.02, 1.08] });
+      piece(g, G.box(0.42, 0.075, 0.08), c.pal.secondary, { pos: [0, 0.03, 0.26], outline: 0.01 });
+      piece(g, G.box(0.38, 0.022, 0.02), c.accent, { pos: [0, 0.035, 0.3], glow: true, outline: 0 });
+      for (const s of [-1, 1]) piece(g, G.box(0.03, 0.22, 0.3), c.pal.metal, { pos: [0.27 * s, 0.1, -0.08], rot: [-0.5, 0, 0.12 * s], outline: 0.01 });
+      piece(g, G.box(0.05, 0.2, 0.05), c.pal.secondary, { pos: [0, -0.16, 0.26], outline: 0.008 });
+      for (let i = 0; i < 3; i++) piece(g, G.box(0.12, 0.012, 0.02), DARK, { pos: [0, -0.12 - i * 0.04, 0.285], outline: 0 });
     },
   },
   wizard: {
@@ -251,6 +331,58 @@ export const ARMOR_CHEST = {
       }
     },
   },
+  scrap: {
+    name: 'Scrap Plates',
+    build: (g, c) => {
+      const { chest: C, spine: S } = BODY;
+      plate(g.chest, C, -0.1, 0.27, c.pal.secondary, { inflate: 0.024, steps: 5 });
+      plate(g.spine, S, -0.05, 0.22, c.pal.secondary, { inflate: 0.026 });
+      // Salvaged plates bolted on askew: a big one over the left chest, a smaller one right.
+      plate(g.chest, C, 0.0, 0.26, c.main, { inflate: 0.042, arc: [-0.1, 1.3], steps: 3 });
+      plate(g.chest, C, -0.08, 0.12, shade(c.main, 0.85), { inflate: 0.045, arc: [-1.2, 0.95], steps: 3 });
+      plate(g.spine, S, 0.02, 0.15, shade(c.pal.metal, 0.7), { inflate: 0.034, arc: [-0.9, 1.6], steps: 2, outline: 0.012 });
+      for (const [y, t] of [[0.23, 0.15], [0.23, 1.05], [0.03, 0.15], [0.1, -0.35], [-0.05, -1.1]]) onPlate(g.chest, C, y, t, 0.05, G.cylZ(0.012, 0.014, 0.012, 6), c.pal.metal, { outline: 0 });
+      // Hazard-striped panel and a glowing scav tube.
+      for (let i = 0; i < 3; i++) onPlate(g.chest, C, 0.02, -0.85 + i * 0.12, 0.052, G.box(0.04, 0.09, 0.01), i % 2 ? DARK : 0xd9a227, { roll: 0.5, outline: 0 });
+      onPlate(g.chest, C, 0.16, -0.62, 0.06, G.cyl(0.018, 0.018, 0.14, 8), c.accent, { roll: 0.3, glow: true, outline: 0.006 });
+      // A cross-strap, a spiked shoulder plate on the left.
+      strap(g.chest, C, [[0.55, 0.26], [0.2, 0.15], [-0.25, 0.02], [-0.65, -0.08]], 0.05, 0.02, DARK);
+      pauldron(g.armL, c, 1, { size: 1.1, layers: 2, color: c.main });
+      for (let i = 0; i < 3; i++) piece(g.armL, G.cone(0.025, 0.13, 4), c.pal.metal, { pos: [0.1, 0.12 - i * 0.02, -0.06 + i * 0.06], rot: [0, 0, -0.6], outline: 0.008 });
+      if (!c.capeWorn) {
+        const back = onShell(C, 0.08, Math.PI, 0.08).pos;
+        piece(g.chest, G.capsule(0.07, 0.24, 10), shade(c.pal.metal, 0.6), { pos: back, rot: [0, 0, 0.12], outline: 0.012 });
+        piece(g.chest, G.cyl(0.074, 0.074, 0.03, 10), c.accent, { pos: back, rot: [0, 0, 0.12], glow: true, outline: 0 });
+      }
+    },
+  },
+  chitin: {
+    name: 'Chitin Carapace',
+    build: (g, c) => {
+      const { chest: C, spine: S } = BODY;
+      plate(g.chest, C, -0.1, 0.29, c.main, { inflate: 0.034, steps: 6 });
+      // Ribs of chitin across the chest, a keel down the front.
+      for (let i = 0; i < 4; i++) plate(g.chest, C, 0.2 - i * 0.075, 0.222 - i * 0.075, c.pal.secondary, { inflate: 0.05, arc: [-1.3, 2.6], steps: 2, outline: 0.01 });
+      onPlate(g.chest, C, 0.08, 0, 0.06, G.box(0.04, 0.34, 0.05), c.pal.secondary, { outline: 0.01 });
+      // Abdomen in segments, light glowing in the gaps between them.
+      plate(g.spine, S, -0.06, 0.22, c.accent, { inflate: 0.022, glow: true, outline: 0 });
+      for (let i = 0; i < 3; i++) {
+        const y1 = 0.18 - i * 0.075;
+        plate(g.spine, S, y1 - 0.055, y1, i % 2 ? c.pal.secondary : c.main, { inflate: 0.03 + i * 0.004, steps: 3, outline: 0.012 });
+      }
+      // Spurred shoulder shells.
+      for (const s of [-1, 1]) {
+        const arm = g[s > 0 ? 'armL' : 'armR'];
+        piece(arm, G.dome(0.17, 14, 7, 0.5), c.main, { pos: [0.035 * s, 0.03, 0], rot: [0, 0, -0.42 * s], scale: [1, 0.75, 1.1] });
+        for (let i = 0; i < 2; i++) piece(arm, G.cone(0.025, 0.14, 4), c.pal.metal, { pos: [(0.09 + i * 0.03) * s, 0.12 - i * 0.04, -0.04 + i * 0.08], rot: [0, 0, -0.65 * s], outline: 0.008 });
+      }
+      // Spines down the back.
+      if (!c.capeWorn) for (let i = 0; i < 4; i++) {
+        const p = onShell(C, 0.26 - i * 0.09, Math.PI, 0.03).pos;
+        piece(g.chest, G.cone(0.03, 0.15 - i * 0.02, 4), c.pal.metal, { pos: p, rot: [-1.07, 0, 0], outline: 0.008 });
+      }
+    },
+  },
   mantle: {
     name: 'Reactor Mantle',
     build: (g, c) => {
@@ -317,6 +449,29 @@ export const ARMOR_HANDS = {
       fist(g.hand, shade(c.main, 0.7), shade(c.main, 0.7), s, 1.04);
     },
   },
+  powerfist: {
+    name: 'Power Fists',
+    build: (g, c, s) => {
+      ring(g.fore, 0.11, -0.03, shade(c.main, 0.8), false, 0.02);
+      piece(g.fore, G.box(0.17, 0.24, 0.18), c.main, { pos: [0, -0.15, 0], outline: 0.014 });
+      piece(g.fore, G.box(0.03, 0.2, 0.19), c.pal.secondary, { pos: [0.09 * s, -0.15, 0], outline: 0 });
+      piece(g.fore, G.cyl(0.022, 0.022, 0.22, 6), c.pal.metal, { pos: [-0.09 * s, -0.15, 0.06], outline: 0.006 });
+      piece(g.fore, G.box(0.06, 0.05, 0.03), c.accent, { pos: [0, -0.06, 0.095], glow: true, outline: 0 });
+      fist(g.hand, c.main, shade(c.main, 0.8), s, 1.3);
+      piece(g.hand, G.box(0.09, 0.05, 0.14), c.pal.metal, { pos: [0.014 * s, -0.115, 0.006], outline: 0.008 });
+    },
+  },
+  sigil: {
+    name: 'Sigil Gloves',
+    build: (g, c, s) => {
+      piece(g.fore, G.cyl(0.07, 0.062, 0.14, 12), c.main, { pos: [0, -0.2, 0], outline: 0.01 });
+      ring(g.fore, 0.072, -0.14, c.pal.metal, false, 0.01);
+      // Rune rings floating round the forearm.
+      for (const y of [-0.08, -0.17]) piece(g.fore, G.torus(0.105, 0.007, Math.PI * 2, 4, 20), c.accent, { pos: [0, y, 0], rot: [Math.PI / 2 + 0.2 * s, 0, 0.15], glow: true, outline: 0 });
+      fist(g.hand, c.main, shade(c.main, 0.9), s, 1.02);
+      piece(g.hand, G.octa(0.022), c.accent, { pos: [0.034 * s, -0.05, 0.004], scale: [0.6, 1, 1], glow: true, outline: 0 });
+    },
+  },
   claws: {
     name: 'Talon Gauntlets',
     build: (g, c, s) => {
@@ -366,6 +521,44 @@ export const ARMOR_LEGS = {
       bootFoot(g.foot, c.main, s);
       for (let i = 0; i < 3; i++) piece(g.foot, G.box(0.16, 0.05, 0.09), shade(c.main, 1 - i * 0.08), { pos: [0, -0.005 - i * 0.012, 0.07 + i * 0.065], rot: [0.3, 0, 0], outline: 0.008 });
       piece(g.foot, G.box(0.12, 0.08, 0.06), c.pal.metal, { pos: [0, -0.03, -0.09], outline: 0.008 });
+    },
+  },
+  trail: {
+    name: 'Trail Boots',
+    build: (g, c, s) => {
+      piece(g.thigh, G.box(0.04, 0.12, 0.09), c.main, { pos: [0.1 * s, -0.22, 0.01], outline: 0.01 });
+      piece(g.shin, G.sphere(0.07, 10, 8), c.main, { pos: [0, 0.005, 0.07], scale: [1, 1.1, 0.6], outline: 0.01 });
+      piece(g.shin, G.cyl(0.098, 0.09, 0.24, 14), c.pal.secondary, { pos: [0, -0.28, 0] });
+      piece(g.shin, G.cyl(0.104, 0.1, 0.05, 14), c.main, { pos: [0, -0.165, 0], outline: 0.01 });
+      for (const y of [-0.22, -0.3]) {
+        ring(g.shin, 0.1, y, shade(c.pal.secondary, 0.7), false, 0.012);
+        piece(g.shin, G.box(0.02, 0.03, 0.03), c.pal.metal, { pos: [0.1 * s, y, 0.02], outline: 0.006 });
+      }
+      bootFoot(g.foot, c.pal.secondary, s);
+    },
+  },
+  chitin: {
+    name: 'Chitin Greaves',
+    build: (g, c, s) => {
+      piece(g.thigh, G.sphere(1, 10, 8), c.main, { pos: [0.03 * s, -0.2, 0.04], scale: [0.09, 0.2, 0.09], outline: 0.012 });
+      piece(g.shin, G.sphere(0.08, 10, 8), c.pal.secondary, { pos: [0, 0, 0.06], scale: [1, 1.1, 0.7], outline: 0.01 });
+      piece(g.shin, G.cone(0.03, 0.16, 4), c.pal.metal, { pos: [0, 0.06, 0.1], rot: [0.6, 0, 0], outline: 0.008 });
+      for (let i = 0; i < 3; i++) piece(g.shin, G.sphere(1, 10, 8), i % 2 ? c.pal.secondary : c.main, { pos: [0, -0.1 - i * 0.1, 0.03], scale: [0.1, 0.07, 0.1], outline: 0.01 });
+      piece(g.shin, G.cone(0.025, 0.12, 4), c.pal.metal, { pos: [0, -0.3, -0.09], rot: [-2.0, 0, 0], outline: 0.008 });
+      bootFoot(g.foot, c.main, s);
+      for (const x of [-0.035, 0.035]) piece(g.foot, G.coneZ(0.018, 0.07, 4), c.pal.metal, { pos: [x, -0.05, 0.25], outline: 0.006 });
+    },
+  },
+  glide: {
+    name: 'Glide Striders',
+    build: (g, c, s) => {
+      piece(g.shin, G.cyl(0.092, 0.084, 0.3, 14), c.main, { pos: [0, -0.24, 0] });
+      ring(g.shin, 0.094, -0.1, c.pal.metal, false, 0.01);
+      piece(g.shin, G.box(0.03, 0.22, 0.02), c.accent, { pos: [0, -0.22, 0.09], glow: true, outline: 0 });
+      bootFoot(g.foot, c.main, s);
+      // An anti-grav ring floating under the heel.
+      piece(g.foot, G.torus(0.09, 0.008, Math.PI * 2, 4, 20), c.accent, { pos: [0, -0.1, 0.03], rot: [Math.PI / 2, 0, 0], scale: [1, 1.4, 1], glow: true, outline: 0 });
+      piece(g.foot, G.box(0.02, 0.012, 0.18), c.pal.metal, { pos: [0.055 * s, -0.02, 0.05], outline: 0 });
     },
   },
   wraps: {
@@ -491,10 +684,53 @@ export const ARMOR_BACK = {
     trims: [[0.03, 0.06]], lines: true, clasp: 'reactor',
   },
   half: { name: 'Officer Mantle', shape: { len: 0.6, top: 0.3, bottom: 0.36, wrap: 0.17 }, trims: [[0.85, 0.92]], clasp: 'bar' },
+  // Rigid kit on the back instead of cloth: built straight onto the chest bone.
+  pack: {
+    name: 'Power Pack',
+    build: (rig, c) => {
+      const ch = rig.chest;
+      const z = onShell(BODY.chest, 0.1, Math.PI, 0.06).pos[2] - 0.08 - (rig.capeClear ?? 0);
+      piece(ch, G.box(0.38, 0.44, 0.18), c.main, { pos: [0, 0.12, z], outline: 0.016 });
+      piece(ch, G.box(0.4, 0.06, 0.2), c.pal.secondary, { pos: [0, 0.3, z], outline: 0.01 });
+      for (const s of [-1, 1]) {
+        piece(ch, G.cyl(0.045, 0.05, 0.3, 10), DARK, { pos: [0.13 * s, 0.42, z - 0.04], outline: 0.01 });
+        piece(ch, G.cyl(0.04, 0.04, 0.02, 10), c.accent, { pos: [0.13 * s, 0.58, z - 0.04], glow: true, outline: 0 });
+        piece(ch, G.tube([[0.15 * s, 0.25, z + 0.05], [0.2 * s, 0.32, z + 0.14], [0.17 * s, 0.3, 0.08]], 0.015, 10, 4), c.pal.metal, { outline: 0 });
+      }
+      for (let i = 0; i < 4; i++) piece(ch, G.box(0.24, 0.015, 0.01), c.accent, { pos: [0, 0.0 + i * 0.05, z - 0.095], glow: true, outline: 0 });
+    },
+  },
+  wings: {
+    name: 'Chitin Elytra',
+    build: (rig, c) => {
+      const ch = rig.chest;
+      const z = onShell(BODY.chest, 0.15, Math.PI, 0.04).pos[2] - (rig.capeClear ?? 0);
+      for (const s of [-1, 1]) {
+        piece(ch, G.sphere(1, 14, 10), c.main, { pos: [0.11 * s, -0.02, z - 0.05], rot: [0.12, 0, 0.18 * s], scale: [0.13, 0.5, 0.05], outline: 0.014 });
+        piece(ch, G.sphere(1, 12, 8), c.pal.secondary, { pos: [0.11 * s, 0.0, z - 0.075], rot: [0.12, 0, 0.18 * s], scale: [0.08, 0.4, 0.035], outline: 0 });
+        piece(ch, G.box(0.008, 0.6, 0.008), c.accent, { pos: [0.11 * s, -0.02, z - 0.11], rot: [0.12, 0, 0.18 * s], glow: true, outline: 0 });
+      }
+    },
+  },
+  halo: {
+    name: 'Ascendant Halo',
+    build: (rig, c) => {
+      const ch = rig.chest;
+      const z = onShell(BODY.chest, 0.3, Math.PI, 0.04).pos[2] - 0.12 - (rig.capeClear ?? 0);
+      piece(ch, G.torus(0.3, 0.018, TAU, 4, 32), c.pal.metal, { pos: [0, 0.42, z], outline: 0.008 });
+      piece(ch, G.torus(0.26, 0.01, TAU, 4, 32), c.accent, { pos: [0, 0.42, z], glow: true, outline: 0 });
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * TAU;
+        piece(ch, G.cone(0.025, 0.1, 4), c.pal.metal, { pos: [Math.cos(a) * 0.35, 0.42 + Math.sin(a) * 0.35, z], rot: [0, 0, a - Math.PI / 2], outline: 0.006 });
+      }
+      piece(ch, G.octa(0.05), c.accent, { pos: [0, 0.42, z + 0.01], scale: [1, 1.4, 0.5], glow: true, outline: 0.006 });
+      piece(ch, G.box(0.04, 0.22, 0.03), c.pal.secondary, { pos: [0, 0.29, z + 0.07], rot: [0.5, 0, 0], outline: 0.008 });
+    },
+  },
 };
 for (const f of Object.values(ARMOR_BACK)) {
   // Every cape form builds through the same path: bones, cloth, trims, clasp.
-  f.build = (rig, c) => buildCape(rig, c, f);
+  f.build ??= (rig, c) => buildCape(rig, c, f);
 }
 
 // Builds a cape onto a humanoid rig (before baking). `rig` may also be a display stand

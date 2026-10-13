@@ -1,0 +1,498 @@
+# Gameplay plan: progression, scale and story
+
+The core loop works: explore, fight camps and packs, loot, level. What's missing is a sense of
+getting somewhere, and danger that keeps up with you. This plan covers:
+- re-tuning the power curve;
+- larger and harder fights;
+- difficulty tiers;
+- abilities, talents and achievements;
+- settlements of every size;
+- a story with side quests;
+- dungeons, public world events and raids.
+
+It's split into phases that each leave the game playable, tested and documented.
+
+**Decisions from you:**
+- **Dungeons:** both. Open-world sites shared by your layer, plus instanced versions for parties.
+- **Large-scale content:** public world events, plus instanced raids.
+- **Difficulty:** fixed level zones, plus opt-in tiers that raise enemy power for better loot.
+- **Progression systems:** abilities and a talent tree, plus achievements, titles and a codex.
+
+Anything marked *(default)* below is my assumption. Change it when you review.
+
+---
+
+## 1. Where we are
+
+### The power curve is the main problem
+A melee player at each level, all attribute points in Might, gear of their level at a typical
+rarity, against a same-level Scav Cutter (measured with the game's own formulas):
+
+| Level | Gear rarity | Player damage | Enemy health | Swings to kill | Hits to die |
+|---|---|---|---|---|---|
+| 1 | common | 1× | 1× | 2.5 | 25 |
+| 5 | uncommon | 3.6× | 1.8× | 1.3 | 34 |
+| 10 | rare | 12.9× | 3.8× | 0.75 | 45 |
+| 20 | epic | 98× | 17× | 0.43 | 80 |
+| 30 | legendary | 688× | 74× | 0.27 | 199 |
+
+By level 8 everything dies in one hit, and you can stand in a camp for a minute. The causes:
+- **Attributes stack linearly:** 3 points a level at +5% each, so +135% damage by level 10.
+- **A per-level damage bonus** (+3% a level) sits on top of weapon level growth.
+- **Rarity spreads too wide:** a legendary deals 1.55× a common, and maker and part bonuses stack on top.
+- **Armour reduction isn't measured against the attacker's level:** `100 / (100 + armour)` with armour growing 12% a level, so it keeps rising until enemies barely hurt.
+
+### Other gaps
+- **Fights are small:** camps are 4–8 enemies, roaming packs 2–4, and strongholds a boss plus 6.
+- **Settlements are one size:** five kinds, each a few buildings, a few folk and sometimes a trader.
+- **Quests are a handful:** three fixed ones, generated contracts and hunts, and a bounty. There's no story.
+- **No endgame and no goals beyond the next level:** no dungeons, events, raids, achievements or abilities.
+
+---
+
+## 2. Phases at a glance
+
+| # | Phase | What you get | Size |
+|---|---|---|---|
+| 1 | Rebalance, hordes and tiers | Combat stays dangerous at every level; bigger fights; elite affixes; difficulty tiers | M |
+| 2 | Abilities, talents and achievements | Something new to unlock every level; titles and a codex | L |
+| 3 | Settlements of every size | Hamlets to cities with services, quest boards and side quests | M |
+| 4 | Quest system v2 and Story Act I | Story-led play from level 1 to about 8 | L |
+| 5 | Dungeons | Interiors, a generator, open-world and instanced dungeons with tiers | XL |
+| 6 | Public world events | Faction offensives everyone nearby joins | L |
+| 7 | Raids | 8–16 player instances with scripted multi-phase bosses | L |
+| 8 | Story Acts II–IV and the endgame loop | The rest of the story, more dungeons and raids, and the tiered endgame | XL |
+
+**Why this order:**
+- Balance comes first: it fixes "overpowered" straight away, and everything after it is tuned on its numbers.
+- Progression systems come next, so levels mean something.
+- Settlements and the quest system give the story somewhere to live.
+- Dungeons, events and raids come last because they need the interior, encounter and boss-scripting tech built in phases 5–7.
+
+**Each phase ends with:**
+- `npm test`;
+- new Node checks;
+- in-game captures;
+- README updates;
+- a short play report to you.
+
+**Server restarts:** phases that change server code need your 8080 server restarted. I won't restart it myself; I'll tell you when.
+
+---
+
+## 3. Phase 1 — Rebalance, hordes and difficulty tiers
+
+**Status: built** (2026-10-13). `npm test` now runs `tools/powercurve.mjs` (every level 1–30 in
+band) and `tools/hordecheck.mjs` (rosters, every affix, a warband and a stronghold run headless)
+before the smoke test. Where it differs from the plan below:
+- **Elites** have ×3.4 health and ×2.3 damage, so they kill you in 5–7 hits rather than 5–6.
+- **Tiers:** Veteran damage is ×1.45 (not ×1.35) and Elite ×1.85 (not ×1.7), to land Veteran trash
+  at 8–11 hits to die.
+- **Best-in-slot** gear measures 1.5–1.8× on-level rare (stats only), short of "about 2×"; legendary
+  perks and set effects make up some of the rest. It never one-shots trash.
+- **A gentle start:** enemies of levels 1–4 are weaker and reach full strength at 5, and new
+  characters start in the common Pathfinder set; without both, a fresh character died in 5–9 hits.
+- **Healing** (not in the plan, but needed once enemies can kill you): out of a fight health
+  regenerates; the dead drop health cells.
+- **Also changed:** the melee combo multiplier tops out at ×2 (was ×3). Vitality gives a share of
+  health, and Might no longer adds health. Breaking a warband or storming a stronghold pays a bonus.
+- **Affixes** in the open world go by region level and champion; the tiers' extra affixes are kept
+  for instances.
+- **Performance:** every character, not just enemies, bakes to three draw calls. The server load
+  was measured headless (`tools/loadsim.mjs`): 150 stand-in players, ~640 enemies, 8.6 ms a tick.
+  The bot-based test against a running server wasn't run, because it would add accounts to yours.
+
+### 3.1 Power curve (targets first, formulas tuned to hit them)
+Targets at every level, on-level enemies, rare gear, average talent investment:
+
+| | Hits to kill | Hits to die |
+|---|---|---|
+| Trash enemy | 3–4 | 12–16 |
+| Veteran-tier trash | 5–6 | 8–10 |
+| Elite | 10–15 | 5–6 |
+| Boss, solo | 60–90 seconds | — |
+| Best-in-slot gear (legendary, full set) | about 2× faster than on-level rare gear, never one-shots | — |
+
+Changes:
+- **Weapons:**
+  - level growth goes to 1.16 a level, matching enemy health, so on-level gear keeps pace;
+  - the rarity spread is compressed to common 1.0, uncommon 1.06, rare 1.14, epic 1.22, legendary 1.30;
+  - maker and part bonuses are normalised to about ±10%.
+- **Player damage:** the +3%-a-level bonus goes. The extra edge comes from talents (phase 2), set bonuses and rarity.
+- **Attributes:** they become talents in phase 2. Until then, each point after the 5th gives less (diminishing returns).
+- **Armour:**
+  - damage reduction is measured against the attacker's level: `reduction = A / (A + 40 × 1.12^(enemy level − 1))`;
+  - full heavy armour sits at about 50–55% against on-level enemies.
+- **Enemies:** damage growth goes from 1.11 to 1.13 a level, to match player health growth.
+- **Level gaps:**
+  - enemies 3 or more levels above you take less from you (−8% per level, to −40%);
+  - enemies 5 or more levels below give a tenth of the experience and no extra loot luck.
+- **Existing characters:** points are refunded and re-spent on load, and gear regenerates on the new curve automatically.
+- **Check:** `tools/powercurve.mjs` (the table above) becomes a test that fails if a level drifts outside its targets.
+
+### 3.2 Hordes
+Camp size grows with region level:
+
+| Region level | Camp size | Elites | Champion |
+|---|---|---|---|
+| 1–4 | 4–6 | 0 | — |
+| 5–9 | 6–9 | 0–1 | — |
+| 10–17 | 8–12 | 1–2 | 30% of camps |
+| 18 and up | 10–16 | 2–3 | always |
+
+- **Roaming hordes:** in regions of level 10 and up, bands of 10–20 roam occasionally as small events, flagged on the minimap.
+- **Strongholds:** the boss, 10–14 guards and reinforcement waves when the alarm goes up.
+- **Elite affixes:** about eight to start, two or more at higher tiers, with a coloured aura and named on the nameplate:
+  - Shielded: a shield that must be broken first;
+  - Frenzied: speeds up at low health;
+  - Vampiric;
+  - Volatile: explodes when it dies;
+  - Blinking: teleports;
+  - Splitting: Hive only, splits when it dies;
+  - Overcharged: Synths only, a shock aura;
+  - Commander: buffs nearby allies.
+- **Horde AI:**
+  - more enemies may attack at once (the "attack token" limit goes up), but readably;
+  - packs surround and flank;
+  - ranged enemies hold back and fire in turns.
+
+### 3.3 Difficulty tiers
+| Tier | Enemy health | Enemy damage | Extra affixes | Loot |
+|---|---|---|---|---|
+| Normal | ×1 | ×1 | — | — |
+| Veteran | ×1.6 | ×1.35 | +1 | luck +1, rarity floor +1, +25% XP |
+| Elite | ×2.5 | ×1.7 | +2 | luck +2, rarity floor +2, +50% XP |
+| Nightmare *(later)* | ×4 | ×2.2 | +3 | rarity floor legendary for bosses |
+
+- **Dungeons, raids and events:** the tier is picked when you start.
+  - Dungeons and raids: by the party leader.
+  - Events: at the event beacon, with a majority vote.
+- **Open world:** a personal **Threat** setting under Character, which you can't change mid-fight.
+  - Enemies are shared in an MMO world, so the tier changes how hard enemies hit *you* and how much they shrug off *your* damage.
+  - Your loot and experience rolls are server-side and use your tier.
+  - Everyone else sees normal enemies.
+
+### 3.4 Performance for hordes
+- **Draw calls:**
+  - each enemy is currently 15–25 draw calls (one per colour, plus outline shells);
+  - enemies get baked into three: one lit mesh using per-vertex colours, one glow mesh, one outline;
+  - target: 40 enemies on screen for about 120 draw calls.
+- **Animation:** distant enemies animate less often (already partly done), and their AI updates less often on the server.
+- **Server budget:** measured with the bot tool. Target: 300 active enemies per layer at 20 ticks a second, under a quarter of a core.
+
+---
+
+## 4. Phase 2 — Abilities, talents and achievements
+
+**Status: built** (2026-10-13). `npm test` adds `tools/progresscheck.mjs` (talent tiers and
+points, save clamping, every ability and upgrade, achievements through the character's rules,
+codex coverage); the smoke test checks talents, Threat and visit records online, and
+`tools/powercurve.mjs` now builds its characters from talents. Where it differs from the plan below:
+- **Keys:** the guild tab moved from G to U, so abilities could have X, G and T; talents open on N.
+- **The curve:** enemy health now grows 17% a level (was 19% with attributes) and enemy damage
+  13.5%; damage ranks are +7% and capstones +15% (a full tree ≈ +57% to its class).
+- **Tree order:** Gunslinger unlocks Grapple Line before Holo-Decoy and Overclock.
+- **Respec** is at any trader for now (gold by level, free below 10); it moves to workshops when
+  towns arrive in phase 3.
+- **Achievements:** 43, in combat, exploration, collections, progression and feats; story,
+  dungeon, raid and event ones come with those phases. Records started with this phase, so older
+  characters bring only their kill count and level.
+- **Codex:** enemies, kinds of landmark and makers; places and quests grow with phases 3–4.
+
+### 4.1 Talent tree (replaces attribute points)
+- **Points:** one per level from 2, so 29 at the level cap of 30 *(default cap)*.
+- **Three trees, each tied to a weapon class and a role:**
+  - **Vanguard** (melee, toughness);
+  - **Gunslinger** (ranged, mobility);
+  - **Technomancer** (magic and tech, support).
+- **Tiers** open at 0, 3, 6, 10 and 15 points spent in that tree. Each tier has:
+  - minor nodes (a small bonus, up to 3 ranks);
+  - one ability unlock;
+  - ability upgrades.
+- **Capstones** at 15 points.
+- Bonuses are tuned to the 3.1 targets, so a fully invested tree is about +60% to its class.
+- **Respec:** free while you're under level 10, then a gold cost at a town or city workshop.
+
+### 4.2 Abilities
+- **Three slots:**
+  - keyboard: X, G and T *(default; Q, E, R, F, C and V are taken)*;
+  - touch: three buttons above the action cluster;
+  - each ability has its own cooldown.
+- **Twelve abilities at launch, four per tree:**
+  - **Vanguard:**
+    - Seismic Slam: a ground blast that knocks enemies down;
+    - Bulwark: a frontal energy shield that stops shots;
+    - Leap Strike: closes the gap;
+    - Rally Cry: a burst of damage and healing for your party.
+  - **Gunslinger:**
+    - Frag Grenade;
+    - Holo-Decoy: draws enemy attention;
+    - Overclock: a fire-rate burst;
+    - Grapple Line: pulls you to a point.
+  - **Technomancer:**
+    - Sentry Drone: a turret;
+    - Arc Barrier: a dome that blocks projectiles;
+    - Stasis Field: slows enemies;
+    - Restoration Pulse: party healing over time.
+- **Networking:**
+  - abilities are operations the server checks (cooldowns, unlocks) and effects every screen plays;
+  - their damage runs through the existing damage pipeline;
+  - they work with gear perks and set bonuses.
+
+### 4.3 Achievements, titles and codex
+- **Achievements:** about 40 at launch, tracked and saved on the server, with points and notifications. Categories:
+  - combat (by faction, elites, bosses, affixes);
+  - exploration (landmarks, waystones, every biome);
+  - story;
+  - dungeons, raids and events (clears by tier, without anyone falling);
+  - collections (complete sets, legendaries);
+  - feats (movement-tech tricks, unusual kills).
+- **Titles:** earned from achievements; pick one in the Character tab; shown on your nameplate and in chat.
+- **Codex:**
+  - a bestiary entry per enemy type, unlocked by kills: lore, strengths, weaknesses, and its tier and affixes once seen;
+  - entries for landmarks and makers.
+
+---
+
+## 5. Phase 3 — Settlements of every size
+
+**Status: built** (2026-10-13). `npm test` adds `tools/poicheck.mjs` (every kind of place built
+headlessly: services present, nobody standing in a wall) and `tools/placecheck.mjs` (how common each
+size is, where towns and cities stand, and every service through the character's rules as the
+server runs them). Where it differs from the plan below:
+- **How common:** hamlets turn up in about two regions in five; villages stay at the waystones that
+  had them (about a third), so existing worlds keep their layouts; towns are one per block of nine
+  regions (a region and the ring round it) — about one region in eleven — so there's a town every
+  few hundred metres out to the edge rather than one per ring of the whole world.
+- **Sizes:** towns are 31 m to their walls; a city is 82 m to its walls (a 26 m heart and four 22 m
+  districts round it). Hamlets have 2–3 folk, villages 4–6, towns 9–12, cities about 19.
+- **Cities** sit on a spiral out from the hub at the acts' distances (about 500, 1,450, 2,500 and
+  3,400 m), moved to open level ground if the spot is in mountains or water. They have no camps
+  inside their region and nothing else is built within their walls. Each streams in as six parts:
+  its heart, its walls, and four districts.
+- **Services:** the gate yard's dungeon and raid gates are sealed until phases 5 and 7; the war
+  table lists the strongholds near the city (the raid board proper comes with phase 7). Villages all
+  have a trader now, plus a quest board. Gunsmiths and armourers carry a fine stock (rare or better,
+  a level ahead, up to the cap) besides their share of the everyday stock.
+- **Quests:** boards hold three postings (bounty, camp to clear, salvage or waystone survey), hamlet
+  givers an errand, and town and city Wardens contracts — with the objective types that exist now;
+  phase 4's quest system gives them more to ask.
+- **Brightwater:** a town of 30 m round the old camp; its reactor stays the inn. Its tower moved
+  outside the new walls.
+- Existing worlds: only town and city regions (and a few of their neighbours' features that stood
+  where a town or city now does) changed; everything new elsewhere comes from a stream of its own.
+
+| Size | Radius | Buildings | Folk | Services | How common |
+|---|---|---|---|---|---|
+| Hamlet | about 12 m | 2–4 | 2–3 | a side-quest giver | common, any biome |
+| Village | about 20 m | 6–10 | 4–6 | trader, quest board | one region in three |
+| Town | about 35 m | 12–20, walls and gates | 8–12 | weapon and armour traders, Warden post (contracts), inn (rest and respawn), workshop (respec) | about one per ring of regions |
+| City | 60 m and up, in districts | 40 and up | 15–25 | everything, plus dungeon and raid gates and a raid board | three or four in the world; story hubs |
+
+- **Building on what exists:** the current homestead, outpost, mining, caravan and stilt builders become village kits; hamlets, towns and cities get new builders.
+- **Brightwater Vale** becomes a town.
+- **Placement:** cities are placed deliberately, one at the heart of each act's region. Towns and villages scatter along roads.
+- **Performance:**
+  - buildings merge by colour per district;
+  - townsfolk animate only near you (already the case) and fade out with distance;
+  - cities stream in by district.
+- **Hooks for later phases:** settlements can come under attack (phase 6 events); towns and cities hold quest boards (phase 4) and dungeon gates (phase 5).
+
+---
+
+## 6. Phase 4 — Quest system v2 and Story Act I
+
+**Status: built** (2026-10-13). `npm test` adds `tools/questcheck.mjs`: the Prologue and Act I
+played from Warden Maren's first word to Old Ysolde's last through the character's rules as the
+server runs them (places reached and defences held as the server reports them, quest drops, objects
+used, both choices and their flags, nothing taken or handed in out of order or away from who it goes
+back to), a village of each kind's side chain, and the story's achievements. Where it differs from
+the plan below:
+- **Quests** run in stages (each with its text, objectives, lines people say and a moment when it's
+  done); objective types are goto, talk, kill (type, faction, a named foe's tag, near a place),
+  clear, use, collect (quest drops), defend (waves of the local faction), choose, plus the old attune
+  and chest. Escort waits, as planned. Quests that finish where they're done hand themselves in,
+  and a village's chain carries straight on.
+- **The story:** 12 quests (Prologue 4, Act I 8), 10 moments, 2 choices (Krell: in chains or let go;
+  Ysolde: told about the voice or not). Its places — the wreck of the Pilgrim, Eastwatch and
+  Highwatch beacons, the Wardens' relic dig, the Rustjaw Outpost, the Rustjaw Foundry and the Sunken
+  Vault — are set in every world from its seed, like the cities, on the flattest open ground near
+  where the story wants them. The Foundry is an open-world stronghold with **Ironjaw** as its named
+  boss; the Sunken Vault is, for now, his dig round a sealed Maker door — opening it ends Act I, and
+  the dungeon behind it comes with phase 5.
+- **Side quests:** five chains of three (15 quests), one per kind of village, so every homestead,
+  mine, caravan stop, outpost and fen village in the world has one; the boards' generated postings
+  (bounties, camps to clear with captives to free, salvage runs, waystone surveys, deliveries) carry
+  on beside them.
+- **Talking:** a quest's step can give anyone lines, so story folk, villagers and objects take part;
+  markers over heads show a quest to take (gold), to hand in (green) and someone a quest wants
+  (teal). Folk call out as you arrive (`BARKS`), once a visit.
+- **The journal:** Story, Side and Contracts tabs, each quest's step, objectives and who it goes back
+  to, the story so far act by act, and a Track button; the tracked quest leads the HUD, compass,
+  minimap and map. The story's places show on the map in gold. Seven story achievements (three with
+  titles: *the Last Sleeper*, *Ironjaw's Bane*, *the Good Neighbour*).
+- **Online:** the server watches each player's quests every second (places reached, defences
+  started and held) and rolls quest drops into kills; `use` and `choose` are new ops. A build check
+  keeps clients offline against a server running older rules.
+
+### 6.1 Quest system v2
+- **Chains and flags:** story quest chains with requirements, plus story flags such as "the vault is open" or "Ironjaw fell" that change dialogue and world state.
+- **Objective types:**
+  - go to a place;
+  - talk to someone;
+  - kill N of a type or faction;
+  - clear a camp or dungeon;
+  - use an object;
+  - collect a quest drop;
+  - defend a point or survive waves;
+  - escort *(later)*.
+- **Dialogue:** branching choices, choices that set flags, and NPCs who speak on arrival.
+- **Story moments:** short camera-and-dialogue scenes that you can skip.
+- **Journal:** tabs for Story, Side and Contracts; tracked objectives on the compass, minimap and map (the markers already exist).
+- **Side quests:**
+  - handwritten chains per settlement kind (a homestead's missing child, a caravan escort, a mine cave-in);
+  - generated quest-board jobs (bounties, deliveries, rescues, salvage runs) themed by the local faction.
+
+### 6.2 Story outline (draft for your review)
+**Premise:**
+- Long ago the precursors, the **Makers**, wove a network across this world: the waystones, the Ring, and the Tether reaching up to orbit. Then they vanished.
+- Generations ago the colony ship **Pilgrim** came down here (its wreck is a landmark). Its survivors became the settlers; those who turned on them became the **Scav clans**.
+- The ship's sealed cargo was Hive spores: the **Hive** "came down with the old ships", and has bred in the dark ever since.
+- The colony's war machines, the **Synths**, were never switched off.
+- You are the last sleeper of the Pilgrim, pulled from a cryo-pod in the wreck. The waystones *remember* you, because the Pilgrim's mind is in the Maker network and it is waking up through you.
+
+| Act | Levels | Arc | Big moments |
+|---|---|---|---|
+| Prologue | 1–3 | You wake in Brightwater. Warden Maren, Old Ysolde, the first waystone answers you. | First camp, first waystone, the Pilgrim's voice |
+| I. Signal Fire | 3–8 | The scav warlord **Ironjaw** is raiding settlers for Maker relics. Trace him to the **Rustjaw Foundry**, his fortress (open-world dungeon), and to the **Sunken Vault** he was digging out (instanced dungeon). | Ironjaw falls; the vault was a *seal*, and now it's open |
+| II. The Brood | 8–16 | Hive surges on settlements (events). Ysolde admits the Hive came on the Pilgrim. The **Farcall Array** is calling them. The **Brood Pits** (dungeon). | Raid: **The Brood Mother** (the Hive Queen) |
+| III. Iron Heart | 16–24 | Synths wake across the highlands: the waystones' waking roused the Makers' old guardians. War-walkers cross regions (events). The **Foundry Below** (dungeon); the Fallen Titan. | The Colossus foundry; the Synths' true orders |
+| IV. The Tether | 24–30 | The Ring opens and the Tether reconnects. Climb to the anchor. | Final raid: **The Tether Crown**; you choose the network's fate: shut it down, take it, or wake the Makers |
+
+- **This phase:** the Prologue and Act I, with about 12 story quests and about 15 side quests in the Act I region.
+- **Phase 8:** Acts II–IV.
+- Every act unlocks its region's city, a dungeon, events, achievements and titles.
+
+---
+
+## 7. Phase 5 — Dungeons
+
+### 7.1 Interior tech
+- **Pocket spaces:**
+  - interiors are built far outside the playable land, at their own coordinates;
+  - the terrain, sky and fog switch to an interior mode there;
+  - the world's ground lookup returns the dungeon's floors, so movement, physics and enemies all just work.
+- **Kit:** rooms, corridors, doors, stairs and lifts, built from the same modelling kit as everything else.
+  - Collisions come from wall segments; the world currently only has round colliders, so this adds box colliders.
+  - Lighting comes from faction-themed light fixtures.
+- **Enemy navigation:** a coarse grid search inside interiors, so enemies follow you through doors and round corners.
+- **Transitions:** a loading screen ("Entering the Sunken Vault…"); the minimap switches to an interior map.
+
+### 7.2 Generator
+- **A graph of rooms:**
+  - a main route with side rooms;
+  - keys and locked doors, and power-the-door puzzles;
+  - traps (vents, turrets, spore pods);
+  - a mini-boss, a final boss and treasure rooms.
+- **Themed per faction:**
+  - Scav bunkers;
+  - Hive tunnels and nests;
+  - Synth facilities;
+  - Maker vaults;
+  - Wild caverns.
+- Seeded, so every dungeon has a fixed layout. Instanced copies reshuffle side rooms per run.
+
+### 7.3 Open-world and instanced
+- **Open-world dungeons:**
+  - entrances are points of interest in the world, on the map;
+  - one shared interior per layer;
+  - enemies respawn like camps.
+- **Instanced dungeons:**
+  - the same places, entered through a gate in a town or city, or at the entrance;
+  - a private copy for your party at a chosen tier;
+  - no outside respawns;
+  - a reward chest at the end, once per day per tier *(default lockout)*.
+- **Server:**
+  - an instance manager per layer, tied to the party (parties already gather on one layer);
+  - an empty instance closes after 10 minutes;
+  - offline single-player runs the same code locally.
+- **Launch set:** three dungeons, the Rustjaw Foundry, the Sunken Vault and the Brood Pits, matching the story.
+
+---
+
+## 8. Phase 6 — Public world events
+
+- **Director:**
+  - per layer on the server (and offline), it picks events in regions near players;
+  - cooldowns stop the same event repeating or two events stacking;
+  - events are announced on screen and on the map.
+- **Five event types:**
+  - **Hive Surge:** waves attack a settlement; defend its points; burst spore pods.
+  - **Scav Siege:** siege engines and juggernauts batter an outpost; destroy the engines, then hold.
+  - **Synth War-walker:** a moving Colossus-class walker crosses the region with escorts; break its weak points before it reaches a town.
+  - **Wild Stampede:** thunderhorns and a Behemoth drive across a caravan route; protect the caravans.
+  - **Maker Anomaly:** a vault beacon charges while waves pour out; hold it to the end for a relic cache.
+- **Scaling and rewards:**
+  - health and wave size scale with the number of players taking part;
+  - contribution is tracked for rewards;
+  - the tier is voted at the beacon;
+  - an event chest at the end, plus achievements.
+- **Failure has consequences:**
+  - a lost settlement is overrun for a while: its services close and its folk flee;
+  - a retake event follows.
+
+---
+
+## 9. Phase 7 — Raids
+
+- **Raid groups:** two to four parties linked, so 8–16 players *(default 12)*. Formed at a city raid board, or by inviting party leaders.
+- **Boss scripting framework:**
+  - phases at health thresholds;
+  - attack patterns with telegraphs;
+  - adds and arena hazards;
+  - shields and weak points;
+  - an enrage timer.
+  - Written as data, like the bestiary.
+- **First raid: *The Brood Mother*,** the Act II finale:
+  - three bosses (Brood Warden, Psion Choir, the Brood Mother);
+  - Normal, Veteran and Elite tiers;
+  - raid-only legendary set pieces;
+  - weekly reward lockouts *(default)*.
+- *The Tether Crown* follows in phase 8.
+
+---
+
+## 10. Phase 8 — Story Acts II–IV and the endgame loop
+- **Story:**
+  - Acts II–IV with their cities, about 12 story quests each, side quests, and two more dungeons;
+  - the second raid;
+  - the ending choice.
+- **Endgame at the level cap:**
+  - tiered dungeons up to Nightmare;
+  - a rotating event schedule;
+  - achievements and titles;
+  - chasing legendary sets.
+
+---
+
+## 11. Things that cut across every phase
+- **Saving:**
+  - new character data: talents, abilities, achievements, titles, story flags, tier and lockouts;
+  - versioned, migrated on load;
+  - stored on the server for online characters.
+- **Server authority:** the server checks and rolls everything that grants progress (rewards, cooldowns, quest steps, instance entry), as it does today.
+- **Mobile:** ability buttons, a tier picker, and journal and codex screens laid out for touch.
+- **Testing:**
+  - Node checks for the power curve, generators and quests;
+  - `npm test` (the multiplayer smoke test);
+  - bot load tests for hordes and events;
+  - scripted in-game captures (`tools/enemyshots.js` and new dungeon and event tours).
+- **Docs:** README sections per system; `docs/MULTIPLAYER.md` covers instances and raid groups.
+
+## 12. Open questions *(my defaults in brackets; change any when you review)*
+- **Level cap:** 30, with the regions past 30 kept as cap-level zones that tiers make harder [yes].
+- **Death penalty:** none beyond the respawn walk; in dungeons, the whole party wiping sends you back to the last checkpoint [yes].
+- **Dungeon reward lockout:** daily per tier; raids weekly [yes].
+- **Raid size:** 12, as up to three parties [yes].
+- **Ability keys:** X, G and T, rebindable later [yes].
+- **The story draft above:** tone, names and the ending choice [your call].

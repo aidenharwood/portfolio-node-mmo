@@ -75,6 +75,8 @@ export class Remotes {
         if (w?.cls === 'magic') g.audio.cast(w, (fx.sz ?? 1) > 1.2, _o);
         else if (w?.cls === 'ranged') g.audio.shot(w, _o);
       }
+    } else if (fx.k === 'ab') {
+      g.player.abilities.playRemote(r, fx);
     } else if (fx.k === 'rune') {
       const pos = new THREE.Vector3().fromArray(fx.p);
       const delay = Math.min(fx.dl, 3);

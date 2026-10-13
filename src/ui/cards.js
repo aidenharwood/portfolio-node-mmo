@@ -6,9 +6,17 @@ export const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '
 
 const comparable = (a, b) => b && a !== b && (isArmor(a) ? isArmor(b) && a.slot === b.slot : !isArmor(b) && a.cls === b.cls);
 
-export function itemCardHTML(item, { compare = null, thumb = '', footer = '' } = {}) {
+// The set section of an armour card: pieces worn and each bonus, lit when it's active.
+export function setHTML(set) {
+  if (!set) return '';
+  const rows = set.bonuses.map((b) => `<div class="lc-set-b ${b.active ? 'on' : ''}"><i>${b.n}</i>${b.name ? `<b>${esc(b.name)}</b> — ` : ''}${esc(b.text)}</div>`).join('');
+  return `<div class="lc-set"><div class="lc-set-h">◈ ${esc(set.name)} set <span>${set.worn}/${set.pieces} worn</span></div>${rows}</div>`;
+}
+
+// `sets`: pieces of each set worn (Stats.gearSets), so the card can show which bonuses are live.
+export function itemCardHTML(item, { compare = null, thumb = '', footer = '', sets = {} } = {}) {
   const armor = isArmor(item);
-  const info = armor ? armorInfo(item, itemValue(item)) : weaponInfo(item);
+  const info = armor ? armorInfo(item, itemValue(item), sets) : weaponInfo(item);
   const linesOf = (it) => (isArmor(it) ? armorStatLines(it) : weaponStatLines(it));
   const cmp = comparable(item, compare) ? linesOf(compare) : null;
   const rows = linesOf(item).map((line) => {
@@ -32,6 +40,7 @@ export function itemCardHTML(item, { compare = null, thumb = '', footer = '' } =
       <table>${rows}</table>
       ${info.how ? `<div class="lc-how">${esc(info.how)}</div>` : ''}
       ${element}${perks}
+      ${armor ? setHTML(info.set) : ''}
       <div class="lc-blurb">“${esc(info.blurb)}”</div>
       ${footer}
     </div>`;

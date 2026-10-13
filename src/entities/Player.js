@@ -8,6 +8,8 @@ import { Character, MAX_SLOPE, wrapAngle } from './Character.js';
 import { MELEE_COMBOS, WHIRLWIND, DODGE, resolveMeleeAttack } from '../combat/attacks.js';
 import { performSweep, dealDamage } from '../combat/Damage.js';
 import { updateStatuses } from '../combat/Status.js';
+import { armorReduction, tierOf } from '../rpg/balance.js';
+import { AbilityKit } from './AbilityKit.js';
 import { Inventory } from '../items/Inventory.js';
 import { buildWeaponModel, animateWeapon } from '../items/WeaponModel.js';
 import { WEAPON_TYPES } from '../items/weaponTypes.js';
@@ -31,6 +33,8 @@ const EYE_HEIGHT = 1.92; // standing, models/Human.js
 const BASE_FOV = 55;
 const ARCANE = 0xc9a6ff;
 const CHARGE_TIME = 0.7;
+// Out of the fight (unhurt this many seconds), health comes back at this share of max a second.
+const CALM_REGEN = { after: 5, rate: 0.08 };
 
 // Traversal tuning.
 export const MOVE = {
@@ -99,6 +103,7 @@ export class Player extends Character {
     this.charge = 0;
     this.swapTimer = 0;
     this.invulnTimer = 0;
+    this.inCutscene = false;
 
     this.dodgeDir = new THREE.Vector3();
     this.vy = 0;
@@ -129,6 +134,7 @@ export class Player extends Character {
     this.walkPhase = 0;
     this.deathFall = 0;
     this.time = 0;
+    this.abilities = new AbilityKit(game, this, { gravity: MOVE.gravity });
 
     this.wardTimer = 0;
     this.secondWindTimer = 0;
@@ -156,12 +162,18 @@ export class Player extends Character {
   get weapon() { return this.inventory.current; }
   get weaponClass() { return this.weapon?.cls ?? 'melee'; }
   get damageMultiplier() {
-    return this.game.stats.damageMult(this.weaponClass) * (this.weaponClass === 'melee' ? this.comboMult : 1);
+    return this.game.stats.damageMult(this.weaponClass) * (this.weaponClass === 'melee' ? this.comboMult : 1) * (1 + this.abilities.damageBonus);
   }
   get critBonus() { return this.game.stats.critBonus; }
+  get critDamage() { return this.game.stats.critDamage; }
+  get level() { return this.game.stats.level; }
+  // The Threat setting (rpg/balance.js: TIERS): what enemies do to us, and shrug off of us.
+  get threat() { return tierOf(this.game.char?.tier ?? this.game.settings.threat); }
+  elementDamage(element) { return this.game.stats.elementDamage(element); }
   get isAiming() { return this.alive && this.weaponClass !== 'melee' && (this.adsHeld || this.aimTimer > 0); }
   get cameraMode() {
-    if (this.weaponClass === 'melee' || !this.alive) return 'melee';
+    if (!this.alive) return 'melee';
+    if (this.weaponClass === 'melee') return this.state === 'dodge' ? 'melee' : 'aim';
     return this.adsHeld && this.state !== 'dodge' ? 'ads' : 'aim';
   }
 
@@ -183,7 +195,7 @@ export class Player extends Character {
   }
 
   // ---------- inventory ----------
-  get perks() { return this.game.stats.gearPerks; }
+  get perks() { return this.game.stats.perks; }
   // Vertical component of the aim direction (other players' comes over the network).
   get aimY() { return this.game.aim.dir.y; }
 
@@ -302,6 +314,7 @@ export class Player extends Character {
     for (let i = 0; i < this.inventory.slots.length; i++) {
       if (input.wasPressed(`Digit${i + 1}`)) { this.quickReturn = null; this.equip(i); }
     }
+    this.abilities.readInput(input);
   }
 
   queue(action) {
@@ -358,7 +371,9 @@ export class Player extends Character {
     this.regen(dt);
     this.updateReload(dt);
     updateStatuses(this, dt, this.game);
+    this.abilities.update(dt);
 
+    // (A leap flies its arc and a grapple is pulled along its line: neither steers.)
     switch (this.state) {
       case 'move': this.updateMove(dt); break;
       case 'attack': this.updateAttack(dt); break;
@@ -382,8 +397,11 @@ export class Player extends Character {
     this.updateMaterials(dt);
   }
 
+  // Stamina and mana come back steadily; health only after a while without being hurt.
   regen(dt) {
     this.staminaDelay -= dt;
+    this.calm = (this.calm ?? 0) + dt;
+    if (this.alive && this.calm > CALM_REGEN.after && this.hp < this.maxHp) this.hp = Math.min(this.maxHp, this.hp + this.maxHp * CALM_REGEN.rate * dt);
     const s = this.game.stats;
     if (this.staminaDelay <= 0 && this.state !== 'dodge') this.stamina = Math.min(this.maxStamina, this.stamina + 30 * (1 + s.staminaRegen) * dt);
     this.manaDelay -= dt;
@@ -405,7 +423,7 @@ export class Player extends Character {
     if (this.sprinting) this.aimTimer = 0;
     const slow = this.adsHeld ? 0.5 : (this.aimTimer > 0 || this.charge > 0) ? 0.72 : 1;
     const base = this.sprinting ? MOVE.sprint : MOVE.walk;
-    const speed = base * slow * this.speedMultiplier() * (1 + this.game.stats.moveSpeed) * (wading ? 0.6 : 1);
+    const speed = base * slow * this.speedMultiplier() * (1 + this.game.stats.moveSpeed + this.abilities.moveBonus) * (wading ? 0.6 : 1);
     _dir.copy(this.moveIntent).multiplyScalar(speed);
     if (this.grounded) this.steerGround(_dir, speed, dt);
     else this.steerAir(_dir, speed, dt);
@@ -441,7 +459,7 @@ export class Player extends Character {
 
   startAttack(index) {
     const def = index < 0 ? WHIRLWIND : this.comboChain()[index];
-    this.attack = resolveMeleeAttack(def, this.weapon);
+    this.attack = resolveMeleeAttack(def, this.weapon, this.abilities.rate);
     if (index < 0) {
       // Heavy attacks cash in the combo counter for one big hit.
       this.heavyBonus = 1 + Math.min(2, this.combo * 0.05);
@@ -481,7 +499,7 @@ export class Player extends Character {
     this.forward(_fwd);
     this.sprinting = this.sprintHeld && this.moveIntent.lengthSq() > 0.1;
     const speed = (this.sprinting ? MOVE.sprint : MOVE.walk) * (a.spin ? 0.9 : 0.82)
-      * this.speedMultiplier() * (1 + this.game.stats.moveSpeed);
+      * this.speedMultiplier() * (1 + this.game.stats.moveSpeed + this.abilities.moveBonus);
     _dir.copy(this.moveIntent).multiplyScalar(speed);
     // The lunge is a step into the strike: it starts late in the wind-up and peaks as the weapon
     // comes through, so the body's weight drives the swing.
@@ -576,14 +594,14 @@ export class Player extends Character {
     if (!wants || this.fireCooldown > 0) return;
     if (w.ammo <= 0) { this.startReload(); return; }
     this.buffer = null;
-    this.fireCooldown = 1 / s.fireRate;
+    this.fireCooldown = 1 / (s.fireRate * this.abilities.rate);
     w.ammo--;
     this.shoot(w);
     if (w.ammo <= 0) this.startReload();
   }
 
   startReload() {
-    this.reloadTimer = this.weapon.stats.reloadTime;
+    this.reloadTimer = this.weapon.stats.reloadTime / this.abilities.rate;
     this.game.audio.reload(this.weapon, this.reloadTimer);
   }
 
@@ -644,14 +662,14 @@ export class Player extends Character {
     const charged = this.charge >= CHARGE_TIME;
     this.charge = 0;
     this.buffer = null;
-    const cost = s.manaCost * (charged ? 3 : 1);
+    const cost = s.manaCost * (charged ? 3 : 1) * (1 - this.game.stats.manaDiscount);
     if (this.mana < cost) {
       this.game.hud.toast('Not enough mana');
       return;
     }
     this.mana -= cost;
     this.manaDelay = 0.6;
-    this.fireCooldown = (1 / s.castRate) * (charged ? 1.4 : 1);
+    this.fireCooldown = (1 / (s.castRate * this.abilities.rate)) * (charged ? 1.4 : 1);
     this.cast(w, charged);
   }
 
@@ -1073,7 +1091,7 @@ export class Player extends Character {
 
   get comboMult() {
     const c = this.combo;
-    return c >= 50 ? 3 : c >= 30 ? 2.5 : c >= 15 ? 2 : c >= 5 ? 1.5 : 1;
+    return c >= 50 ? 2 : c >= 30 ? 1.7 : c >= 15 ? 1.4 : c >= 5 ? 1.2 : 1;
   }
 
   tryAirDash() {
@@ -1131,6 +1149,7 @@ export class Player extends Character {
     this.jumpCut = false;
     this.animator.land(Math.sqrt(2 * MOVE.gravity * Math.max(0, fall)));
     if (this.state === 'slam') { this.slamImpact(); return; }
+    if (this.state === 'leap') { this.abilities.leapLand(); return; }
     this.game.audio.land(fall);
     if (fall > 3.5) {
       for (let i = 0; i < 4; i++) this.game.effects.spawnPuff(this.position.clone().add(new THREE.Vector3((Math.random() - 0.5) * 1.2, 0.1, (Math.random() - 0.5) * 1.2)));
@@ -1251,14 +1270,16 @@ export class Player extends Character {
 
   // ---------- damage ----------
   canBeHit() {
-    if (!this.alive || this.invulnTimer > 0 || this.god) return false;
+    if (!this.alive || this.invulnTimer > 0 || this.god || this.state === 'leap') return false;
     return !(this.state === 'dodge' && this.stateTime < DODGE.iframes);
   }
 
-  // Armour mitigation + elemental resistance + Warded.
-  damageTakenMultiplier(element, source) {
+  // Armour (measured against the attacker's level) + elemental resistance + Warded.
+  damageTakenMultiplier(element, source, attacker) {
     const s = this.game.stats;
-    let m = super.damageTakenMultiplier() * (100 / (100 + s.armor)) * (1 - s.resist(element));
+    let m = super.damageTakenMultiplier() * (1 - armorReduction(s.armor, attacker?.level ?? s.level)) * (1 - s.resist(element));
+    if (attacker?.faction === 'enemy') m *= this.threat.damage;
+    m *= 1 - s.damageTaken;
     if (source !== 'status' && this.perks.has('warded') && this.wardTimer <= 0) {
       m *= 0.5;
       this.wardTimer = 8;
@@ -1267,7 +1288,8 @@ export class Player extends Character {
   }
 
   takeHit(hit) {
-    if (this.perks.has('juggernaut')) hit = { ...hit, knockback: 0 };
+    if (!this.abilities.guard(hit)) return false;
+    if (this.perks.has('juggernaut') || this.perks.has('steadfast')) hit = { ...hit, knockback: 0 };
     if (this.perks.has('phoenix') && !this.phoenixUsed && this.canBeHit() && this.hp - hit.damage <= 0) {
       this.phoenixUsed = true;
       const ok = super.takeHit({ ...hit, damage: this.hp - 1 });
@@ -1289,6 +1311,7 @@ export class Player extends Character {
   }
 
   onDamaged(hit) {
+    this.calm = 0;
     if (hit.source !== 'status') this.game.hud.damageFrom(this.game, hit.attacker && hit.attacker !== this ? hit.attacker.position : null);
     if (this.perks.has('thorns') && hit.source === 'melee' && hit.attacker?.alive && hit.attacker !== this) {
       dealDamage(this.game, {
@@ -1319,6 +1342,7 @@ export class Player extends Character {
     this.velocity.set(0, 0, 0);
     this.vy = 0;
     this.mantle = null;
+    this.abilities.clear();
     this.setState('move');
   }
 

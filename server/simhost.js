@@ -4,20 +4,31 @@
 //
 // Protocol additions (inside the realm's snap, and messages of their own):
 //   server → client, in snap:  ea [enemy add], ed [ids removed], es [enemy states], ev [events]
-//     enemy add   { id, t, v, lv, el, su, mh, hp, s }        (s: a state, as in es)
+//     enemy add   { id, t, v, lv, el, ch, af, su, mh, hp, s }  (ch: a champion, af: affixes; su: its
+//                 summoner's id, or -1 for a split half; s: a state, as in es)
 //     state       [id, x, y, z, facing, vx, vz, state, stateTime, attack, hitIndex, hp, flags, lift,
-//                  alt, foe, attackSeq, maxHp]
+//                  alt, foe, attackSeq, maxHp, shield?]
 //     event       see src/sim/EnemySim.js (shot, boom, tele, blink, ward, heal, howl, dmg, poof, die)
-//   server → client:  reward { xp, gold, kill, at, loot: [recipe] }   ·   camp { id, cleared, near }
+//   server → client:  reward { xp, gold, kill, at, loot: [recipe], quest? } · camp { id, cleared, near }
+//                     bonus { title, xp, gold, at, loot } — a warband broken, a stronghold stormed
+//                     reach / defended { id, i } — a quest's place reached, a place held (each
+//                     second the server checks where everyone is against their quests:
+//                     rpg/questWatch.js; a defence is the world sim's, shared by whoever's there)
+//                     dun { id, st: { open, key, nodes, mini, boss, cleared }, say? } — a dungeon copy's
+//                     state (sim/Dungeons.js), to everyone in it whenever it changes
 //   client → server:  hit { id, d, src, po, kb, dx, dz }   ·   st { id, el, po }
+//                     dun { id } — something in their dungeon used (a key, a power node, a door)
 import * as THREE from 'three';
 import { HeadlessWorld } from './world.js';
-import { WorldSim } from '../src/sim/WorldSim.js';
+import { WorldSim, strongholdXp } from '../src/sim/WorldSim.js';
 import { STATE_CODE, FLAG } from '../src/sim/enemyDefs.js';
-import { rewardRoll } from '../src/rpg/CharacterCore.js';
+import { rewardRoll, bonusRoll, visitRoll } from '../src/rpg/CharacterCore.js';
+import { reachedPlaces, defenceAt, heldObjectives, questDrops } from '../src/rpg/questWatch.js';
 import { maxHit } from './characters.js';
 import { PARTY_RANGE } from './parties.js';
 import { Grid, metrics } from './ops.js';
+import { Dungeons } from '../src/sim/Dungeons.js';
+import { inPocket } from '../src/world/dungeons.js';
 
 const EAOI = 110;          // metres: enemies further than this from a player aren't sent to them
 const EVENT_RANGE = 130;
@@ -35,6 +46,15 @@ export class SimHost {
     this.realm = realm;
     this.world = new HeadlessWorld(seed);
     this.sim = new WorldSim(this);
+    // The dungeons' copies on this layer (sim/Dungeons.js): built in the world, their rooms filled
+    // by the sim.
+    this.dungeons = new Dungeons({
+      world: this.world,
+      sim: this.sim,
+      send: (id, msg) => this.realm.sessions.get(id)?.send(msg),
+      positionOf: (id) => { const p = this.realm.sessions.get(id)?.proxy; return p?.placed ? p.position : null; },
+      cleared: (run) => this.dungeonCleared(run),
+    });
     this.events = [];
     this.snaps = new Map();    // enemy → { s, json }: its state this tick (see snapOf)
     this.cleared = new Set();
@@ -47,30 +67,86 @@ export class SimHost {
   onKilled(e, hit, credit) {
     metrics.inc('kills');
     this.emit({ k: 'die', id: e.id, at: e.position });
-    const near = new Set(credit.map(([id]) => id));
-    for (const p of this.sim.players) {
-      if (p.alive && Math.hypot(p.position.x - e.position.x, p.position.z - e.position.z) <= SHARE_RANGE) near.add(p.id);
+    // Each credited character gets their own roll (XP for their level, their own loot, the quest
+    // drops their quests are after).
+    for (const s of this.sharers(e.position, credit.map(([id]) => id))) {
+      const roll = rewardRoll(e, s.core.stats.level, () => s.core.gid(), s.core.tier);
+      const quest = questDrops(s.core.quests, { ...roll.kill, at: roll.at });
+      if (quest.length) roll.quest = quest;
+      this.give(s, { op: 'reward', roll });
     }
-    // Party members a little further off share in it too.
+  }
+
+  // A place held against its waves (a quest's 'defend'): everyone there whose quests wanted it.
+  onDefended(d) {
+    for (const s of this.realm.sessions.values()) {
+      const p = s.proxy;
+      if (!p?.placed || !s.core || Math.hypot(p.position.x - d.x, p.position.z - d.z) > d.r + 50) continue;
+      for (const [id, i] of heldObjectives(s.core.quests, d.key)) this.give(s, { op: 'defended', roll: { id, i } });
+    }
+  }
+
+  // A warband wiped out: everyone who was there gets a bonus.
+  onHordeBroken(pack, last) {
+    const at = [last.position.x, last.position.y, last.position.z];
+    for (const s of this.sharers(last.position)) {
+      const roll = bonusRoll({ title: 'Warband broken', kind: 'warband', xp: pack.xp * 0.5, level: pack.level, race: pack.race, items: 1, at }, s.core.stats.level, () => s.core.gid(), s.core.settings.threat);
+      this.give(s, { op: 'bonus', roll });
+    }
+  }
+
+  // The characters a feat near `pos` is shared with: those credited, those close by, and their
+  // party members a little further off.
+  sharers(pos, credited = []) {
+    const near = new Set(credited);
+    for (const p of this.sim.players) {
+      if (p.alive && Math.hypot(p.position.x - pos.x, p.position.z - pos.z) <= SHARE_RANGE) near.add(p.id);
+    }
     for (const id of [...near]) {
       const s = this.realm.sessions.get(id);
       if (!s) continue;
       for (const m of this.realm.parties.mates(s)) {
         const q = m.proxy?.position;
-        if (m.proxy?.placed && q && Math.hypot(q.x - e.position.x, q.z - e.position.z) <= PARTY_RANGE) near.add(m.id);
+        if (m.proxy?.placed && q && Math.hypot(q.x - pos.x, q.z - pos.z) <= PARTY_RANGE) near.add(m.id);
       }
     }
-    // Each credited character gets their own roll (XP for their level, their own loot).
-    for (const id of near) {
+    return [...near].map((id) => this.realm.sessions.get(id)).filter((s) => s?.core);
+  }
+
+  // A server-rolled change to a character: applied to the server's copy and sent to theirs.
+  give(s, op) {
+    s.core.time = this.sim.time;
+    s.core.apply(op);
+    s.dirty = true;
+    s.level = s.core.stats.level;
+    s.send({ t: 'sop', op });
+  }
+
+  // A dungeon's room emptied or filled again, and the dungeon beaten: everyone in that copy has it
+  // in their records.
+  onRoomCleared(camp) { this.dungeons.onRoomCleared(camp); }
+  onRoomRestored(camp) { this.dungeons.onRoomRestored(camp); }
+  dungeonCleared(run) {
+    for (const id of run.players) {
       const s = this.realm.sessions.get(id);
-      if (!s?.core) continue;
-      const op = { op: 'reward', roll: rewardRoll(e, s.core.stats.level, () => s.core.gid()) };
-      s.core.time = this.sim.time;
-      s.core.apply(op);
-      s.dirty = true;
-      s.level = s.core.stats.level;
-      s.send({ t: 'sop', op });
+      if (s?.core) this.give(s, { op: 'dclear', roll: { d: run.def.id, tier: run.tier, name: run.def.name } });
     }
+  }
+
+  // The instance manager as one character's operations see it (rpg/CharacterCore.js `dungeons`):
+  // going in with their party (or alone), coming out, and the chests that are theirs.
+  dungeonPort(s) {
+    const d = this.dungeons;
+    const who = () => ({
+      id: s.id, position: s.proxy.position, party: this.realm.parties.partyOf(s)?.id ?? `solo:${s.charId}`,
+      level: s.core?.stats.level ?? 1, flags: s.core?.quests.flags ?? {},
+    });
+    return {
+      enter: (ask) => d.enter(who(), ask),
+      leave: () => d.leave(who()),
+      current: () => { const r = d.runOf(s.id); return r && { dungeon: r.def.id, tier: r.tier, shared: r.shared }; },
+      claim: (id, kind) => d.claim(s.id, s.charId, id, s.proxy.position, kind),
+    };
   }
 
   onCampCleared(camp) { this.campChanged(camp, true); }
@@ -89,23 +165,41 @@ export class SimHost {
     for (const s of this.realm.sessions.values()) {
       const near = there.has(s);
       s.send({ t: 'camp', id: camp.def.id, cleared, near, name: camp.def.name });
-      // Those there when it fell get it on their quests.
+      // Those there when it fell get it on their quests — and, for a stronghold, a bonus.
       if (cleared && near && s.core) {
         const op = { op: 'camp', id: camp.def.id, roll: {} };
         s.core.apply(op);
         s.dirty = true;
         s.send({ t: 'sop', op });
+        if (camp.def.stronghold) {
+          const at = [camp.def.x, this.world.groundHeight(camp.def.x, camp.def.z), camp.def.z];
+          const roll = bonusRoll({ title: `${camp.def.name} stormed`, kind: 'stronghold', xp: strongholdXp(camp), level: camp.def.level, race: camp.def.race, items: 2, at }, s.core.stats.level, () => s.core.gid(), s.core.settings.threat);
+          this.give(s, { op: 'bonus', roll });
+        }
       }
     }
   }
 
+  // A player's holo-decoy (combat/abilities.js), for enemies near it to go for.
+  addDecoy(session, p, duration) {
+    session.decoys = (session.decoys ?? 0) + 1;
+    this.sim.addDecoy({ id: `d${session.id}:${session.decoys}`, owner: session.id, position: new THREE.Vector3().fromArray(p), duration });
+  }
+
   // ---------------------------------------------------------------- players
+  // In a fight: an enemy is after them, or one they've hurt is still fighting.
+  inCombat(session) {
+    for (const e of this.sim.enemies) if (e.alive && e.engaged && (e.foe?.id === session.id || e.threat.has(session.id))) return true;
+    return false;
+  }
+
   join(session) {
     session.proxy = { id: session.id, session, position: new THREE.Vector3(), velocity: new THREE.Vector3(), radius: 0.45, height: 2.0, alive: false, placed: false };
     session.knownEnemies = new Map(); // enemy id → { s: last state sent, at: when }
   }
 
   leave(session) {
+    this.dungeons.out(session.id);
     this.sim.forgetPlayer(session.id);
     this.refreshPlayers();
   }
@@ -148,8 +242,31 @@ export class SimHost {
   // ---------------------------------------------------------------- per tick
   tick(dt) {
     this.snaps.clear();
+    // Every couple of seconds, somewhere new for anyone? (Biomes, regions, landmarks, settlements
+    // go into their records: rpg/achievements.js.)
+    if ((this.visitTimer = (this.visitTimer ?? 0) - dt) <= 0) {
+      this.visitTimer = 2;
+      for (const s of this.realm.sessions.values()) {
+        const p = s.proxy;
+        if (!p?.placed || !s.core || inPocket(p.position.x)) continue;
+        const roll = visitRoll(this.world, p.position.x, p.position.z, s.core.records);
+        if (roll) this.give(s, { op: 'visit', roll });
+      }
+    }
+    // Every second: quests' places reached, and places to hold (rpg/questWatch.js).
+    if ((this.questTimer = (this.questTimer ?? 0) - dt) <= 0) {
+      this.questTimer = 1;
+      for (const s of this.realm.sessions.values()) {
+        const p = s.proxy;
+        if (!p?.placed || !p.alive || !s.core || inPocket(p.position.x)) continue;
+        for (const [id, i] of reachedPlaces(s.core.quests, p.position.x, p.position.z)) this.give(s, { op: 'reach', roll: { id, i } });
+        const d = defenceAt(s.core.quests, this.world, p.position.x, p.position.z);
+        if (d) this.sim.encounters.defend(d);
+      }
+    }
     const foci = this.sim.players.map((p) => p.position);
     if (foci.length) this.world.track(foci);
+    this.dungeons.tick(dt);
     this.sim.update(dt);
     this.grid.clear();
     for (const e of this.sim.enemies) this.grid.add(e, e.position.x, e.position.z);
@@ -177,7 +294,11 @@ export class SimHost {
       const last = known.get(e.id);
       if (!last) {
         known.set(e.id, { s: snap.s, at: now });
-        ea.push({ id: e.id, t: e.typeName, v: e.variant, lv: e.level, el: e.elite || null, su: e.summoner?.id ?? 0, mh: e.maxHp, hp: Math.round(e.hp), s: snap.s });
+        ea.push({
+          id: e.id, t: e.typeName, v: e.variant, lv: e.level, el: e.elite || null, ch: e.champion ? 1 : undefined, af: e.affixes.length ? e.affixes : undefined,
+          hd: e.camp?.horde ? 1 : undefined, nm: e.name ?? undefined,
+          su: e.summoner?.id ?? (e.split ? -1 : 0), mh: e.maxHp, hp: Math.round(e.hp), s: snap.s,
+        });
       } else if (now - last.at > KEEPALIVE || changed(snap.s, last.s, (now - last.at) / 1000)) {
         // Only what changed (the player's screen carries an unchanged enemy on by itself).
         known.set(e.id, { s: snap.s, at: now });
@@ -219,12 +340,14 @@ export class SimHost {
     const s = e.statuses;
     const fl = (e.engaged ? FLAG.engaged : 0) | (e.hidden ? FLAG.hidden : 0) | (e.guarding ? FLAG.guarding : 0) | (e.ward ? FLAG.ward : 0)
       | (e.frenzy > 0 ? FLAG.frenzy : 0) | (s.burn ? FLAG.burn : 0) | (s.chill ? FLAG.chill : 0) | (s.corrode ? FLAG.corrode : 0)
-      | (s.shocked ? FLAG.shocked : 0) | (e.alive ? FLAG.alive : 0);
-    return [
+      | (s.shocked ? FLAG.shocked : 0) | (e.alive ? FLAG.alive : 0) | (e.rallied > 0 ? FLAG.rallied : 0);
+    const st = [
       e.id, r2(e.position.x), r2(e.position.y), r2(e.position.z), r2(e.facing), r2(e.velocity.x), r2(e.velocity.z),
       STATE_CODE[e.state], r2(e.stateTime), e.curIndex, e.hitIndex, Math.round(e.hp), fl, r2(e.lift), r2(e.alt),
       e.foe?.id ?? -1, e.attackSeq, e.maxHp,
     ];
+    if (e.shieldMax) st.push(Math.round(e.shield));
+    return st;
   }
 
   // ---------------------------------------------------------------- reports from players
@@ -264,7 +387,7 @@ export class SimHost {
 // by itself (stateTime counting up)? Positions to 5 cm, facing to ~2°.
 const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 function changed(a, b, dt) {
-  if (a[7] !== b[7] || a[9] !== b[9] || a[10] !== b[10] || a[11] !== b[11] || a[12] !== b[12] || a[15] !== b[15] || a[16] !== b[16] || a[17] !== b[17]) return true;
+  if (a[7] !== b[7] || a[9] !== b[9] || a[10] !== b[10] || a[11] !== b[11] || a[12] !== b[12] || a[15] !== b[15] || a[16] !== b[16] || a[17] !== b[17] || a[18] !== b[18]) return true;
   if (Math.abs(a[1] - b[1]) > 0.05 || Math.abs(a[2] - b[2]) > 0.05 || Math.abs(a[3] - b[3]) > 0.05) return true;
   if (Math.abs(wrap(a[4] - b[4])) > 0.03 || Math.abs(a[5] - b[5]) > 0.1 || Math.abs(a[6] - b[6]) > 0.1) return true;
   if (Math.abs(a[13] - b[13]) > 0.03 || Math.abs(a[14] - b[14]) > 0.03) return true;

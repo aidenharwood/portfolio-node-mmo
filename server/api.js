@@ -1,5 +1,5 @@
 // JSON API under /api: realm status, accounts and sessions, characters.
-//   GET    /api/status                 { online, players, version, seed }
+//   GET    /api/status                 { online, players, version, seed, build, stale }
 //   POST   /api/register  {name, password}  → { token, account }
 //   POST   /api/login     {name, password}  → { token, account }
 //   POST   /api/logout                 (Authorization: Bearer <token>)
@@ -8,6 +8,7 @@
 //   DELETE /api/characters/:id
 import { AuthError } from './accounts.js';
 import { log } from './ops.js';
+import { BUILD, stale } from './build.js';
 
 const MAX_BODY = 16 * 1024;
 export const VERSION = 1;
@@ -69,7 +70,8 @@ export function createApi({ store, accounts, seed, clientAddress }) {
     const ip = clientAddress(req);
     try {
       const route = `${req.method} ${url.pathname}`;
-      if (route === 'GET /api/status') return send(res, 200, { online: true, players: await store.onlineCount(), version: VERSION, seed });
+      // `build`: the shared code this server runs; `stale`: the files it serves have changed since.
+      if (route === 'GET /api/status') return send(res, 200, { online: true, players: await store.onlineCount(), version: VERSION, seed, build: BUILD, stale: stale() });
 
       if (route === 'POST /api/register' || route === 'POST /api/login') {
         if (!authLimit.allow(ip)) throw new AuthError('Too many attempts — wait a minute.', 429);

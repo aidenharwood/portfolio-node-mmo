@@ -17,6 +17,20 @@ export function levelColor(diff) {
 
 const RACE_COLOR = { scav: '#e8603a', hive: '#b07aff', synth: '#3ad8ff', fauna: '#ffb030' };
 
+function samePlaceName(a, b) {
+  const na = (a ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const nb = (b ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+  return na && na === nb;
+}
+
+function isRegionAnchorWaystone(region, poi) {
+  return !!poi && poi.type === 'waystone' && samePlaceName(poi.name, region.name);
+}
+
+function sameRegionSettlement(settlement, region) {
+  return !!settlement && !!region && samePlaceName(settlement.name, region.name) && !!settlement.way;
+}
+
 export function pickMapDrawStride({ width, height, zoom, chunkCount }) {
   if (!Number.isFinite(width) || !Number.isFinite(height) || !Number.isFinite(zoom) || zoom <= 0) return 1;
   const visibleArea = (width * height) / (zoom * zoom);
@@ -200,14 +214,35 @@ export class MapUI {
     const g = this.game;
     const d = g.discovery;
     const out = [];
+    const hubInView = this.viewRect();
+    const insideHub = HUB.x >= Math.min(hubInView[0], hubInView[2]) && HUB.x <= Math.max(hubInView[0], hubInView[2]) && HUB.z >= Math.min(hubInView[1], hubInView[3]) && HUB.z <= Math.max(hubInView[1], hubInView[3]);
+    if (insideHub) out.push({ kind: 'settlement', x: HUB.x, z: HUB.z, name: HUB.name, id: 'w-hub', active: g.attuned.has('w-hub') });
     for (const r of this.regionsInView()) {
+      // A town's or city's waystone stands at its heart: the place's own icon stands for it.
+      const heart = r.pois.find((p) => p.type === 'town' || p.type === 'city');
+      const way = heart && r.pois.find((p) => p.type === 'waystone');
+      const areaWay = r.pois.find((p) => isRegionAnchorWaystone(r, p));
+      if (r.hub || g.discovery.isKnown(r.x, r.z)) {
+        out.push({ kind: 'location', x: r.x, z: r.z, name: r.name, level: r.level, id: areaWay?.id ?? null, active: !!areaWay && g.attuned.has(areaWay.id), hitWidth: Math.max(90, r.name.length * 9 + 28), hitHeight: 38, hitDx: 0, hitDy: -25, hoverDy: -50 });
+      }
       for (const p of r.pois) {
+        // The four story cities are known from the start: somewhere to head for.
+        if (p.type === 'city') out.push({ kind: 'city', x: p.x, z: p.z, name: p.name, act: p.act, known: d.isKnown(p.x, p.z), id: way?.id, active: !!way && g.attuned.has(way.id) });
         if (!d.isKnown(p.x, p.z)) continue;
+        if (p.type === 'waystone' && p === way) continue;
+        if (p.type === 'waystone' && p.id === 'w-hub') continue;
+        if (p.type === 'waystone' && p === areaWay) continue;
         if (p.type === 'waystone') out.push({ kind: 'waystone', x: p.x, z: p.z, name: p.name, active: g.attuned.has(p.id), id: p.id });
         else if (p.type === 'camp') out.push({ kind: 'camp', x: p.x, z: p.z, name: p.name, level: p.level, race: p.race, cleared: g.encounters.isCleared(p.id), boss: !!p.stronghold });
         else if (p.type === 'chest' && !g.openedChests.has(p.id)) out.push({ kind: 'chest', x: p.x, z: p.z, name: 'Treasure' });
-        else if (p.type === 'settlement') out.push({ kind: 'settlement', x: p.x, z: p.z, name: p.name, trader: p.npcs.some((n) => n.role === 'trader') });
-        else if (p.type === 'landmark') out.push({ kind: 'landmark', x: p.x, z: p.z, name: p.name });
+        else if (p.type === 'settlement') {
+          const wayId = `w:${p.key}`;
+          const linked = sameRegionSettlement(p, r);
+          out.push({ kind: 'settlement', x: p.x, z: p.z, name: p.name, id: linked ? wayId : null, active: linked && g.attuned.has(wayId) });
+        }
+        else if (p.type === 'hamlet') out.push({ kind: 'hamlet', x: p.x, z: p.z, name: p.name });
+        else if (p.type === 'town') out.push({ kind: 'town', x: p.x, z: p.z, name: p.name, id: way?.id, active: !!way && g.attuned.has(way.id) });
+        else if (p.type === 'landmark' || p.type === 'story') out.push({ kind: 'landmark', x: p.x, z: p.z, name: p.name, story: !!p.story });
       }
     }
     return out;
@@ -215,11 +250,29 @@ export class MapUI {
 
   pick(sx, sy, radius = 14) {
     let best = null;
-    let bd = radius;
+    let bd = Infinity;
     for (const p of this.pois()) {
       const [px, py] = this.toScreen(p.x, p.z);
+      const hitDx = p.hitDx ?? 0;
+      const hitDy = p.hitDy ?? 0;
+      const hitRadius = p.hitRadius ?? radius;
+      const dd = Math.hypot(px + hitDx - sx, py + hitDy - sy);
+      const inside = p.hitWidth && p.hitHeight
+        ? Math.abs(px + hitDx - sx) <= p.hitWidth / 2 && Math.abs(py + hitDy - sy) <= p.hitHeight / 2
+        : dd < hitRadius;
+      if (inside && dd < bd) { bd = dd; best = p; }
+    }
+    const wp = this.game.questWaypoint();
+    if (wp) {
+      const [px, py] = this.toScreen(wp.x, wp.z);
       const dd = Math.hypot(px - sx, py - sy);
-      if (dd < bd) { bd = dd; best = p; }
+      const r = Math.max(18, (wp.radius ?? 4) * this.zoom + 10);
+      if (dd < r) {
+        const qid = this.game.tracked;
+        const q = qid && this.game.quests?.defs?.get(qid);
+        const marker = { kind: 'quest', x: wp.x, z: wp.z, name: q?.title ?? 'Tracked quest', radius: wp.radius ?? 4 };
+        if (!best || dd < bd) return marker;
+      }
     }
     return best;
   }
@@ -248,7 +301,7 @@ export class MapUI {
   click() {
     if (!this.mouse) return;
     const hit = this.pick(this.mouse.x, this.mouse.y);
-    if (hit?.kind === 'waystone' && hit.active) {
+    if ((hit?.kind === 'location' || hit?.kind === 'waystone' || hit?.kind === 'town' || hit?.kind === 'city' || hit?.kind === 'settlement') && hit.active) {
       this.game.travelTo(hit.id);
       return;
     }
@@ -264,6 +317,12 @@ export class MapUI {
     const H = this.canvas.height;
     ctx.fillStyle = '#0b0f18';
     ctx.fillRect(0, 0, W, H);
+    // Down in a dungeon, the map is its rooms seen so far.
+    if (g.dungeonView?.active) {
+      g.dungeonView.drawMap(ctx, W, H);
+      this.label(W / 2, 46, g.dungeonView.def.name.toUpperCase(), '#ffe2a8', 18);
+      return;
+    }
     const [x0, z0, x1, z1] = this.viewRect();
     drawExplored(ctx, g, x0, z0, x1, z1, (x, z) => this.toScreen(x, z), this.zoom);
 
@@ -288,29 +347,48 @@ export class MapUI {
     for (const r of regions) {
       if (r.hub || !g.discovery.isKnown(r.x, r.z)) continue;
       const [sx, sy] = this.toScreen(r.x, r.z);
-      this.label(sx, sy - 26, r.name.toUpperCase(), RACE_COLOR[r.race], 14);
-      this.label(sx, sy - 12, `Lv ${r.level}`, levelColor(r.level - g.stats.level), 11);
+      if (this.zoom < 0.45) continue;
+      const name = r.name.toUpperCase();
+      this.label(sx, sy - 26, name, RACE_COLOR[r.race], 14);
+      const areaWay = r.pois.find((p) => isRegionAnchorWaystone(r, p));
+      if (areaWay && g.attuned.has(areaWay.id)) this.icon(sx - ctx.measureText(name).width / 2 - 9, sy - 30, 'badge');
+      if (this.zoom > 0.62) this.label(sx, sy - 12, `Lv ${r.level}`, levelColor(r.level - g.stats.level), 11);
     }
-
-    const [hx, hy] = this.toScreen(HUB.x, HUB.z);
-    this.icon(hx, hy, 'hub');
-    this.label(hx, hy + 18, HUB.name, '#9fe3ff');
 
     for (const p of this.pois()) {
       const [sx, sy] = this.toScreen(p.x, p.z);
       if (sx < -20 || sy < -20 || sx > W + 20 || sy > H + 20) continue;
+      const waystoneAnchor = p.kind === 'waystone' || p.kind === 'town' || p.kind === 'city' || (p.kind === 'settlement' && !!p.id);
+      if (this.zoom < 0.65 && !waystoneAnchor) continue;
       if (p.kind === 'camp') {
         this.icon(sx, sy, p.boss ? 'boss' : 'camp', p.cleared, RACE_COLOR[p.race]);
         if (this.zoom > 0.5 || p.boss) this.label(sx, sy + 18, `${p.name} · Lv ${p.level}`, levelColor(p.level - g.stats.level));
       } else if (p.kind === 'waystone') {
+        const region = this.game.world.gen.regionAt(p.x, p.z);
+        const attachedToRegion = !!region && (p.anchor || isRegionAnchorWaystone(region, { type: 'waystone', name: p.name, x: p.x, z: p.z }));
+        if (attachedToRegion) continue;
         this.icon(sx, sy, 'waystone', !p.active);
         if (this.zoom > 1.2 || this.hover === p) this.label(sx, sy + 16, p.name, p.active ? '#7fe8ff' : '#aaa');
       } else if (p.kind === 'settlement') {
         this.icon(sx, sy, 'settlement');
-        this.label(sx, sy + 18, p.trader ? `${p.name} · Trader` : p.name, '#ffe2a8');
+        if (p.id) this.icon(sx + 12, sy - 10, 'waystone', !p.active);
+        this.label(sx, sy + 18, p.name, '#ffe2a8');
+      } else if (p.kind === 'hamlet') {
+        this.icon(sx, sy, 'hamlet');
+        if (this.zoom > 0.6 || this.hover === p) this.label(sx, sy + 15, p.name, '#ffe2a8', 11);
+      } else if (p.kind === 'town') {
+        this.icon(sx, sy, 'town');
+        if (p.active) this.icon(sx + 13, sy - 11, 'badge');
+        this.label(sx, sy + 22, p.name, '#ffe2a8', 13);
+      } else if (p.kind === 'city') {
+        this.icon(sx, sy, 'city', !p.known);
+        if (p.active) this.icon(sx + 15, sy - 14, 'badge');
+        this.label(sx, sy + 26, p.name.toUpperCase(), p.known ? '#ffd27a' : '#c8b48a', 15);
+        if (!p.known) this.label(sx, sy + 40, `Act ${p.act}`, '#a89878', 11);
       } else if (p.kind === 'landmark') {
-        this.icon(sx, sy, 'landmark');
-        if (this.zoom > 0.35 || this.hover === p) this.label(sx, sy + 18, p.name, '#d8c8ff');
+        // The story's own places in gold.
+        this.icon(sx, sy, 'landmark', false, p.story ? '#ffcf7a' : null);
+        if (this.zoom > 0.35 || this.hover === p || p.story) this.label(sx, sy + 18, p.name, p.story ? '#ffe2a8' : '#d8c8ff');
       } else if (this.zoom > 0.4) {
         this.icon(sx, sy, 'chest');
       }
@@ -319,11 +397,7 @@ export class MapUI {
     const wp = g.questWaypoint();
     if (wp) {
       const [sx, sy] = this.toScreen(wp.x, wp.z);
-      ctx.strokeStyle = '#ffd23f';
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.arc(sx, sy, Math.max(10, (wp.radius ?? 4) * this.zoom), 0, Math.PI * 2);
-      ctx.stroke();
+      this.questMarker(sx, sy, wp.kind ?? 'default', Math.max(8, (wp.radius ?? 4) * this.zoom * 0.9));
     }
     if (g.customMarker) {
       const [sx, sy] = this.toScreen(g.customMarker.x, g.customMarker.z);
@@ -357,10 +431,90 @@ export class MapUI {
     ctx.restore();
 
     this.hover = this.mouse ? this.pick(this.mouse.x, this.mouse.y) : null;
+    const hoverLabel = (h) => {
+      if (!h) return null;
+      if (h.kind === 'quest') return `${h.name} — tracked objective`;
+      if (h.kind === 'location' || h.kind === 'waystone' || h.kind === 'town' || h.kind === 'city' || (h.kind === 'settlement' && h.id)) {
+        return h.active ? `Fast travel to ${h.name}` : `Cannot fast travel to ${h.name}`;
+      }
+      return null;
+    };
+    if (this.hover && hoverLabel(this.hover)) {
+      const [sx, sy] = this.toScreen(this.hover.x, this.hover.z);
+      const c = this.hover.kind === 'quest' ? '#ffd23f' : this.hover.kind === 'waystone' ? '#7fe8ff' : '#ffe2a8';
+      this.label(sx, sy + (this.hover.hoverDy ?? -18), hoverLabel(this.hover), c, 12);
+    }
     const here = g.world.regionAt(p.position.x, p.position.z);
-    this.info.textContent = this.hover
-      ? (this.hover.kind === 'waystone' ? (this.hover.active ? `${this.hover.name} — click to travel` : `${this.hover.name} — not yet attuned`) : this.hover.name)
-      : `${here.name} · Lv ${here.level} — Drag to pan · Wheel to zoom · Click to place a marker · Right-click clears it · Click an attuned waystone to fast travel`;
+    this.info.textContent = `${here.name} · Lv ${here.level} — Drag to pan · Wheel to zoom · Click to place a marker · Right-click clears it · Click an attuned waystone to fast travel`;
+  }
+
+  questMarkerStyle(kind = 'default') {
+    const styles = {
+      talk: { fill: '#ffd76a', stroke: '#ff9a1f', accent: '#fff0bf', mark: 'diamond' },
+      use: { fill: '#74d9ff', stroke: '#2aa4ff', accent: '#dff7ff', mark: 'square' },
+      goto: { fill: '#a3f5b0', stroke: '#31c36c', accent: '#e8ffe9', mark: 'ring' },
+      defend: { fill: '#ff9d7d', stroke: '#f05d5d', accent: '#ffe2d6', mark: 'shield' },
+      clear: { fill: '#d8b5ff', stroke: '#9b67e8', accent: '#f3eaff', mark: 'star' },
+      killRace: { fill: '#ff8d8d', stroke: '#df4747', accent: '#ffe1e1', mark: 'cross' },
+      attune: { fill: '#71f0ff', stroke: '#2bb9d6', accent: '#dffcff', mark: 'hex' },
+      chest: { fill: '#f3d774', stroke: '#c68d1f', accent: '#fff6bf', mark: 'gem' },
+      default: { fill: '#ffd23f', stroke: '#f9af28', accent: '#fff1b3', mark: 'diamond' },
+    };
+    return styles[kind] ?? styles.default;
+  }
+
+  questMarker(x, y, kind, radius = 9) {
+    const ctx = this.ctx;
+    const s = this.questMarkerStyle(kind);
+    const r = radius;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = '#0a0c13';
+    ctx.fillStyle = s.fill;
+    ctx.beginPath();
+    if (s.mark === 'diamond') {
+      ctx.moveTo(0, -r * 1.2); ctx.lineTo(r * 1.1, 0); ctx.lineTo(0, r * 1.2); ctx.lineTo(-r * 1.1, 0); ctx.closePath();
+    } else if (s.mark === 'square') {
+      ctx.rect(-r * 1.05, -r * 1.05, r * 2.1, r * 2.1);
+    } else if (s.mark === 'ring') {
+      ctx.arc(0, 0, r * 1.1, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(0, 0, r * 0.48, 0, Math.PI * 2);
+    } else if (s.mark === 'shield') {
+      ctx.moveTo(0, -r * 1.35); ctx.lineTo(r * 1.15, -r * 0.35); ctx.lineTo(r * 0.75, r * 1.2); ctx.lineTo(0, r * 1.45); ctx.lineTo(-r * 0.75, r * 1.2); ctx.lineTo(-r * 1.15, -r * 0.35); ctx.closePath();
+    } else if (s.mark === 'star') {
+      for (let i = 0; i < 10; i++) {
+        const a = (Math.PI / 5) * i - Math.PI / 2;
+        const rr = i % 2 === 0 ? r * 1.3 : r * 0.5;
+        const px = Math.cos(a) * rr; const py = Math.sin(a) * rr;
+        if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+    } else if (s.mark === 'cross') {
+      ctx.moveTo(-r * 0.6, -r * 1.2); ctx.lineTo(-r * 0.2, -r * 1.2); ctx.lineTo(-r * 0.2, -r * 0.2); ctx.lineTo(r * 1.2, -r * 0.2); ctx.lineTo(r * 1.2, r * 0.2); ctx.lineTo(-r * 0.2, r * 0.2); ctx.lineTo(-r * 0.2, r * 1.2); ctx.lineTo(-r * 0.6, r * 1.2); ctx.lineTo(-r * 0.6, r * 0.2); ctx.lineTo(-r * 1.2, r * 0.2); ctx.lineTo(-r * 1.2, -r * 0.2); ctx.lineTo(-r * 0.6, -r * 0.2); ctx.closePath();
+    } else if (s.mark === 'hex') {
+      for (let i = 0; i < 6; i++) {
+        const a = (Math.PI / 3) * i - Math.PI / 6; const px = Math.cos(a) * r * 1.12; const py = Math.sin(a) * r * 1.12; if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+    } else if (s.mark === 'gem') {
+      ctx.moveTo(0, -r * 1.25); ctx.lineTo(r * 1.05, 0); ctx.lineTo(0, r * 1.25); ctx.lineTo(-r * 1.05, 0); ctx.closePath();
+      ctx.moveTo(-r * 0.8, 0); ctx.lineTo(0, r * 0.7); ctx.lineTo(r * 0.8, 0); ctx.lineTo(0, -r * 0.7); ctx.closePath();
+    } else {
+      ctx.arc(0, 0, r * 1.1, 0, Math.PI * 2);
+    }
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = s.accent;
+    ctx.beginPath();
+    if (s.mark === 'ring' || s.mark === 'gem') { ctx.arc(0, 0, r * 0.34, 0, Math.PI * 2); }
+    else if (s.mark === 'square') { ctx.rect(-r * 0.28, -r * 0.28, r * 0.56, r * 0.56); }
+    else if (s.mark === 'hex') { ctx.arc(0, 0, r * 0.35, 0, Math.PI * 2); }
+    else { ctx.arc(0, 0, r * 0.28, 0, Math.PI * 2); }
+    ctx.fill();
+    ctx.restore();
   }
 
   label(x, y, text, color, size = 12) {
@@ -400,8 +554,18 @@ export class MapUI {
       ctx.fillStyle = '#f0c75e';
       ctx.strokeRect(-6, -4, 12, 9);
       ctx.fillRect(-6, -4, 12, 9);
-    } else if (kind === 'settlement') {
-      // A house: walls and a roof.
+    } else if (kind === 'settlement' || kind === 'hamlet' || kind === 'town') {
+      // A house (smaller for a hamlet); a town's inside a ring of walls.
+      if (kind === 'hamlet') ctx.scale(0.7, 0.7);
+      if (kind === 'town') {
+        ctx.strokeStyle = '#ffd27a';
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.arc(0, 0, 14, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.strokeStyle = '#0a0c13';
+        ctx.lineWidth = 3;
+      }
       ctx.fillStyle = '#ffd27a';
       ctx.beginPath();
       ctx.moveTo(-8, 7); ctx.lineTo(-8, -1); ctx.lineTo(0, -9); ctx.lineTo(8, -1); ctx.lineTo(8, 7); ctx.closePath();
@@ -409,9 +573,20 @@ export class MapUI {
       ctx.fill();
       ctx.fillStyle = '#5a3a1a';
       ctx.fillRect(-2, 1, 4, 6);
+    } else if (kind === 'city') {
+      // Three towers behind a wall.
+      ctx.fillStyle = dim ? '#a8976a' : '#ffd27a';
+      ctx.beginPath();
+      ctx.moveTo(-13, 10); ctx.lineTo(-13, -4); ctx.lineTo(-9, -8); ctx.lineTo(-5, -4); ctx.lineTo(-5, -2);
+      ctx.lineTo(-3, -2); ctx.lineTo(-3, -11); ctx.lineTo(0, -15); ctx.lineTo(3, -11); ctx.lineTo(3, -2); ctx.lineTo(5, -2);
+      ctx.lineTo(5, -4); ctx.lineTo(9, -8); ctx.lineTo(13, -4); ctx.lineTo(13, 10); ctx.closePath();
+      ctx.stroke();
+      ctx.fill();
+      ctx.fillStyle = '#5a3a1a';
+      ctx.fillRect(-2.5, 3, 5, 7);
     } else if (kind === 'landmark') {
       // A four-pointed star.
-      ctx.fillStyle = '#c8b4ff';
+      ctx.fillStyle = tint ?? '#c8b4ff';
       ctx.beginPath();
       for (let i = 0; i < 8; i++) {
         const r = i % 2 ? 3.5 : 10;
@@ -427,6 +602,13 @@ export class MapUI {
       ctx.moveTo(0, -11); ctx.lineTo(10, 7); ctx.lineTo(-10, 7); ctx.closePath();
       ctx.stroke();
       ctx.fill();
+    } else if (kind === 'badge') {
+      // A small waystone mark: attuned, so you can travel there.
+      ctx.rotate(Math.PI / 4);
+      ctx.lineWidth = 2;
+      ctx.fillStyle = '#58cfff';
+      ctx.strokeRect(-3.5, -3.5, 7, 7);
+      ctx.fillRect(-3.5, -3.5, 7, 7);
     } else if (kind === 'marker') {
       ctx.fillStyle = '#4ad2ff';
       ctx.beginPath();

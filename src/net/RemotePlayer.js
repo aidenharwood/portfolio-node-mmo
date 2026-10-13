@@ -43,9 +43,10 @@ export class RemotePlayer extends Player {
   get aimY() { return this.netAimY; }
   get perks() { return []; }
 
-  applyProfile({ lv, w, a, gt }) {
+  applyProfile({ lv, w, a, gt, ti }) {
     if (lv) this.level = lv;
     this.tag = gt ?? null; // guild tag
+    this.title = ti ?? null; // an achievement's title (rpg/achievements.js)
     const weapon = recipeItem(w);
     this.inventory.slots = [weapon && weapon.kind !== 'armor' ? weapon : null, null, null];
     this.inventory.active = 0;

@@ -202,19 +202,24 @@ function gun(g, c, w, kind) {
   }
 }
 
-// Scopes in each maker's style (the scope view in first person matches — ui/ScopeView.js):
-//   kessler    long matte military tube, big objective bell, turrets, a rangefinder box
-//   rattlecap  brass tube patched with tape and rivets, a dangling lens cap, a stray wire
-//   voltaic    boxy white digital housing, coil rings round the objective, glowing screen
-//   rime       faceted crystal tube with ice shards along its back
+// Scopes in each maker's style — its `scope` (items/manufacturers.js); the scope view in first
+// person matches (ui/ScopeView.js):
+//   military   long matte military tube, big objective bell, turrets, a rangefinder box
+//   junk       brass tube patched with tape and rivets, a dangling lens cap, a stray wire
+//   digital    boxy white digital housing, coil rings round the objective, glowing screen
+//   crystal    faceted crystal tube with ice shards along its back
 // All share one sight line (top + 0.07) and eyepiece position, so aiming lines up the same.
-export const SCOPE_STYLES = ['kessler', 'rattlecap', 'voltaic', 'rime'];
+export const SCOPE_STYLES = ['military', 'junk', 'digital', 'crystal'];
+export const scopeStyle = (w) => {
+  const style = MANUFACTURERS[w.manufacturer]?.scope;
+  return SCOPE_STYLES.includes(style) ? style : 'default';
+};
 function scopeModel(g, c, w, top, mid) {
   const y = top + 0.07;
   const lens = c.accent;
-  const style = SCOPE_STYLES.includes(w.manufacturer) ? w.manufacturer : 'default';
+  const style = scopeStyle(w);
   const rings = (color) => { for (const z of [mid - 0.06, mid + 0.06]) piece(g, G.box(0.03, 0.05, 0.03), color, { pos: [0, top + 0.02, z], outline: 0.01 }); };
-  if (style === 'kessler') {
+  if (style === 'military') {
     rings(DARK);
     piece(g, G.cylZ(0.033, 0.033, 0.3, 12), 0x2a3038, { pos: [0, y, mid] });
     piece(g, G.cylZ(0.056, 0.036, 0.09, 12), 0x2a3038, { pos: [0, y, mid + 0.18], outline: 0.012 });
@@ -224,7 +229,7 @@ function scopeModel(g, c, w, top, mid) {
     piece(g, G.cyl(0.018, 0.018, 0.035, 8), c.pal.metal, { pos: [0.045, y, mid], rot: [0, 0, Math.PI / 2], outline: 0.006 });
     piece(g, G.box(0.05, 0.035, 0.08), DARK, { pos: [0, y + 0.05, mid + 0.1], outline: 0.008 });
     piece(g, G.cylZ(0.01, 0.01, 0.01, 8), lens, { pos: [0, y + 0.05, mid + 0.142], glow: true, outline: 0 });
-  } else if (style === 'rattlecap') {
+  } else if (style === 'junk') {
     const brass = 0xb08a3e;
     rings(0x5a4a3a);
     piece(g, G.cylZ(0.036, 0.034, 0.26, 10), brass, { pos: [0, y, mid], rot: [0, 0.03, 0] });
@@ -235,14 +240,14 @@ function scopeModel(g, c, w, top, mid) {
     piece(g, G.cylZ(0.046, 0.046, 0.008, 10), 0xd8c070, { pos: [0, y, mid + 0.172], glow: true, outline: 0 });
     piece(g, G.cylZ(0.05, 0.05, 0.02, 10), 0x5a4a3a, { pos: [0.05, y - 0.06, mid + 0.17], rot: [0.6, 0, 0.3], outline: 0.008 });
     cable(g, [[0.035, y, mid - 0.08], [0.06, y - 0.03, mid - 0.02], [0.05, top - 0.02, mid + 0.04]], 0x2a2a2a, 0.006);
-  } else if (style === 'voltaic') {
+  } else if (style === 'digital') {
     rings(c.pal.secondary);
     piece(g, G.box(0.07, 0.075, 0.26), c.pal.primary, { pos: [0, y, mid], outline: 0.012 });
     piece(g, G.box(0.074, 0.012, 0.2), lens, { pos: [0, y + 0.026, mid], glow: true, outline: 0 });
     for (const z of [0.12, 0.15, 0.18]) piece(g, G.torus(0.046, 0.007, Math.PI * 2, 4, 14), c.pal.secondary, { pos: [0, y, mid + z], outline: 0.004 });
     piece(g, G.cylZ(0.044, 0.044, 0.008, 14), lens, { pos: [0, y, mid + 0.2], glow: true, outline: 0 });
     piece(g, G.box(0.06, 0.05, 0.008), lens, { pos: [0, y, mid - 0.134], glow: true, outline: 0 });
-  } else if (style === 'rime') {
+  } else if (style === 'crystal') {
     rings(c.pal.secondary);
     piece(g, G.cylZ(0.038, 0.038, 0.28, 8), c.pal.primary, { pos: [0, y, mid], rot: [0, 0, Math.PI / 8] });
     piece(g, G.cylZ(0.054, 0.04, 0.06, 8), c.pal.secondary, { pos: [0, y, mid + 0.16], rot: [0, 0, Math.PI / 8], outline: 0.012 });
@@ -262,10 +267,10 @@ function scopeModel(g, c, w, top, mid) {
 // Holo (reflex) sights in each maker's style. A tinted glass pane carries a glowing reticle; the
 // reticle is one group ('sightReticle') so first-person aiming can collimate it — keep it on the
 // glass where the eye's line to the gun's aim point crosses it.
-//   kessler    closed military box hood, green glass, ring-and-ticks reticle with a centre dot
-//   rattlecap  a round lens wired into a brass ring on a taped, crooked post; a crude painted cross
-//   voltaic    sleek white loop frame with a glow strip, a glowing chevron
-//   rime       hexagonal crystal frame with an ice shard, a small diamond
+//   military   closed military box hood, green glass, ring-and-ticks reticle with a centre dot
+//   junk       a round lens wired into a brass ring on a taped, crooked post; a crude painted cross
+//   digital    sleek white loop frame with a glow strip, a glowing chevron
+//   crystal    hexagonal crystal frame with an ice shard, a small diamond
 // All share one sight line (top + 0.042) and glass position.
 const _box = new THREE.Box3();
 const glow = (color, opacity = 1) => new THREE.MeshBasicMaterial({ color, transparent: opacity < 1, opacity, side: THREE.DoubleSide, depthWrite: false });
@@ -276,7 +281,7 @@ const bar = (w, h, color, x = 0, y = 0, rot = 0) => {
   return m;
 };
 function holoSight(g, c, w, top, mid) {
-  const style = SCOPE_STYLES.includes(w.manufacturer) ? w.manufacturer : 'default';
+  const style = scopeStyle(w);
   const zf = mid + 0.02;
   const y = top + 0.042;
   const col = c.accent;
@@ -285,7 +290,7 @@ function holoSight(g, c, w, top, mid) {
   reticle.position.set(0, y, zf + 0.002);
   let glass;
   let tint = 0x9fe8ff;
-  if (style === 'kessler') {
+  if (style === 'military') {
     // Closed box hood: walls, roof, a thick base with a mount lever.
     for (const s of [-1, 1]) piece(g, G.box(0.01, 0.078, 0.07), 0x2a3038, { pos: [0.044 * s, top + 0.04, zf - 0.015], outline: 0.006 });
     piece(g, G.box(0.098, 0.012, 0.07), 0x2a3038, { pos: [0, top + 0.081, zf - 0.015], outline: 0.006 });
@@ -297,7 +302,7 @@ function holoSight(g, c, w, top, mid) {
     reticle.add(new THREE.Mesh(new THREE.RingGeometry(0.0145, 0.0165, 28), glow(col, 0.9)));
     for (const [x, yy, r] of [[0, 0.0105, 0], [0, -0.0105, 0], [0.0105, 0, Math.PI / 2], [-0.0105, 0, Math.PI / 2]]) reticle.add(bar(0.0016, 0.006, col, x, yy, r));
     reticle.add(new THREE.Mesh(new THREE.CircleGeometry(0.0022, 10), glow(col)));
-  } else if (style === 'rattlecap') {
+  } else if (style === 'junk') {
     // A lens jammed into a brass ring on a crooked, taped post.
     const brass = 0xb08a3e;
     piece(g, G.box(0.022, 0.012, 0.03), 0x5a4a3a, { pos: [0.004, top + 0.001, zf], rot: [0, 0, 0.08], outline: 0.006 });
@@ -308,7 +313,7 @@ function holoSight(g, c, w, top, mid) {
     glass = new THREE.CircleGeometry(0.034, 20);
     tint = 0xe8d890;
     reticle.add(bar(0.0024, 0.016, col, 0.0004, 0, 0.06), bar(0.016, 0.0024, col, 0, 0.0003, 0.04));
-  } else if (style === 'voltaic') {
+  } else if (style === 'digital') {
     // Sleek white loop with a glow strip along its top and an emitter in the base.
     piece(g, G.torus(0.04, 0.007, Math.PI * 2, 6, 24), c.pal.primary, { pos: [0, y, zf], scale: [1.05, 0.92, 1], outline: 0.006 });
     piece(g, G.torus(0.041, 0.003, Math.PI * 0.6, 4, 12), col, { pos: [0, y, zf + 0.004], rot: [0, 0, Math.PI * 0.2], glow: true, outline: 0 });
@@ -318,7 +323,7 @@ function holoSight(g, c, w, top, mid) {
     reticle.add(bar(0.0022, 0.011, col, -0.0037, -0.0037, -Math.PI / 4), bar(0.0022, 0.011, col, 0.0037, -0.0037, Math.PI / 4));
     reticle.add(new THREE.Mesh(new THREE.RingGeometry(0.019, 0.0202, 32, 1, 0, Math.PI * 0.4), glow(col, 0.6)));
     reticle.add(new THREE.Mesh(new THREE.RingGeometry(0.019, 0.0202, 32, 1, Math.PI, Math.PI * 0.4), glow(col, 0.6)));
-  } else if (style === 'rime') {
+  } else if (style === 'crystal') {
     // Hexagonal crystal frame with a shard standing on top.
     piece(g, G.torus(0.039, 0.006, Math.PI * 2, 4, 6), c.pal.metal, { pos: [0, y, zf], rot: [0, 0, Math.PI / 6], glow: true, outline: 0.006 });
     piece(g, G.box(0.03, 0.03, 0.03), c.pal.secondary, { pos: [0, top + 0.004, zf], outline: 0.006 });
@@ -337,19 +342,19 @@ function holoSight(g, c, w, top, mid) {
   }
   const pane = new THREE.Mesh(glass, new THREE.MeshBasicMaterial({ color: tint, transparent: true, opacity: 0.16, depthWrite: false, side: THREE.DoubleSide }));
   pane.position.set(0, y, zf);
-  if (style === 'rime') pane.rotation.z = Math.PI / 6;
+  if (style === 'crystal') pane.rotation.z = Math.PI / 6;
   g.add(pane, reticle);
   g.userData.sight = { kind: 'holo', y, z: zf, style };
 }
 
 // Iron sights in each maker's style; all on one line (top + 0.022) from the rear sight at the back
 // of the receiver to the front post near the muzzle.
-//   kessler    a military peep (aperture ring) and a winged front post
-//   rattlecap  a bent-plate V-notch and a bolt for a front post with a painted tip
-//   voltaic    three-dot sights: glowing dots either side of the notch and on the post
-//   rime       a notch between two crystal shards and an ice-spike front post
+//   military   a military peep (aperture ring) and a winged front post
+//   junk       a bent-plate V-notch and a bolt for a front post with a painted tip
+//   digital    three-dot sights: glowing dots either side of the notch and on the post
+//   crystal    a notch between two crystal shards and an ice-spike front post
 function ironSight(g, c, w, recTop, z0, by, muzzleZ) {
-  const style = SCOPE_STYLES.includes(w.manufacturer) ? w.manufacturer : 'default';
+  const style = scopeStyle(w);
   const zr = z0 + 0.04;
   const zf = muzzleZ - 0.05;
   // Some receivers carry a frame or rail above their nominal top between the sights; the sights
@@ -366,7 +371,7 @@ function ironSight(g, c, w, recTop, z0, by, muzzleZ) {
   const base = by + 0.03;
   const col = c.accent;
   const tower = (color) => piece(g, G.box(0.03, y - base, 0.03), color, { pos: [0, (y + base) / 2 - 0.006, zf], outline: 0.008 });
-  if (style === 'kessler') {
+  if (style === 'military') {
     piece(g, G.box(0.012, 0.03, 0.014), DARK, { pos: [0, top + 0.004, zr], outline: 0.006 });
     piece(g, G.torus(0.0085, 0.0035, Math.PI * 2, 6, 16), DARK, { pos: [0, y, zr], outline: 0.004 });
     for (const s of [-1, 1]) piece(g, G.box(0.006, 0.026, 0.014), DARK, { pos: [0.02 * s, top + 0.016, zr], outline: 0.004 });
@@ -374,14 +379,14 @@ function ironSight(g, c, w, recTop, z0, by, muzzleZ) {
     for (const s of [-1, 1]) piece(g, G.box(0.005, 0.03, 0.012), 0x2a3038, { pos: [0.014 * s, y - 0.008, zf], outline: 0.004 });
     piece(g, G.box(0.006, 0.024, 0.008), DARK, { pos: [0, y - 0.006, zf], outline: 0.004 });
     piece(g, G.sphere(0.0035, 6, 4), col, { pos: [0, y + 0.004, zf], glow: true, outline: 0 });
-  } else if (style === 'rattlecap') {
+  } else if (style === 'junk') {
     for (const s of [-1, 1]) piece(g, G.box(0.018, 0.028, 0.006), 0x8a8a8a, { pos: [0.012 * s, top + 0.016, zr], rot: [0, 0, 0.55 * s], outline: 0.005 });
     piece(g, G.box(0.05, 0.008, 0.01), 0x5a4a3a, { pos: [0, top + 0.004, zr], outline: 0.004 });
     tower(0x5a4a3a);
     piece(g, G.cyl(0.005, 0.005, 0.03, 6), 0x8a8a8a, { pos: [0.001, y - 0.01, zf], rot: [0, 0, 0.05], outline: 0.004 });
     piece(g, G.cyl(0.008, 0.008, 0.005, 6), 0x8a8a8a, { pos: [0.001, y - 0.024, zf], outline: 0.003 });
     piece(g, G.sphere(0.0055, 6, 4), 0xff5a2a, { pos: [0.002, y + 0.004, zf], glow: true, outline: 0 });
-  } else if (style === 'voltaic') {
+  } else if (style === 'digital') {
     // Dark posts so the glowing dots read against a pale receiver and sky.
     for (const s of [-1, 1]) {
       piece(g, G.box(0.012, 0.03, 0.012), c.pal.secondary, { pos: [0.016 * s, top + 0.015, zr], outline: 0.005 });
@@ -391,7 +396,7 @@ function ironSight(g, c, w, recTop, z0, by, muzzleZ) {
     tower(c.pal.secondary);
     piece(g, G.box(0.008, 0.024, 0.01), c.pal.secondary, { pos: [0, y - 0.006, zf], outline: 0.005 });
     piece(g, G.sphere(0.0042, 6, 4), col, { pos: [0, y, zf - 0.006], glow: true, outline: 0 });
-  } else if (style === 'rime') {
+  } else if (style === 'crystal') {
     for (const s of [-1, 1]) piece(g, G.octa(0.012), c.pal.metal, { pos: [0.017 * s, top + 0.016, zr], scale: [0.6, 1.5, 0.6], rot: [0, 0, -0.25 * s], glow: true, outline: 0.004 });
     piece(g, G.box(0.04, 0.008, 0.012), c.pal.secondary, { pos: [0, top + 0.004, zr], outline: 0.004 });
     tower(c.pal.secondary);

@@ -10,10 +10,15 @@ import { ARMOR_SLOT_IDS } from '../items/armorTypes.js';
 import { RARITIES } from '../items/rarity.js';
 import { generateWeapon } from '../items/WeaponGenerator.js';
 import { generateArmor } from '../items/ArmorGenerator.js';
+import { GEAR_SETS } from '../items/sets.js';
+import { AFFIXES, AFFIX_IDS } from '../sim/affixes.js';
+import { MAX_LEVEL } from '../rpg/talents.js';
+import { MANUFACTURERS } from '../items/manufacturers.js';
 import { HUB, REGION } from '../world/Gen.js';
 import { setHatchScale } from '../render/Toon.js';
 import { clearSave } from '../core/Save.js';
 import { typing } from '../core/Input.js';
+import { DUNGEONS } from '../world/dungeons.js';
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 const TABS = ['Player', 'World', 'Spawn', 'Loot', 'Render', 'Audio', 'Save', 'Console', 'Errors'];
@@ -31,10 +36,10 @@ const SOUNDS = {
   'Jump': (a) => a.jump(), 'Double jump': (a) => a.doubleJump(), 'Land (high)': (a) => a.land(9), 'Bullet jump': (a) => a.bulletJump(), 'Air dash': (a) => a.airDash(),
   'Dash': (a) => a.dash(), 'Mantle': (a) => a.mantle(), 'Slam dive': (a) => a.slamDive(), 'Hurt': (a) => a.playerHurt(0.2), 'Kill': (a, g) => a.kill(ahead(g, 5), false),
   'Arrow whizz': (a, g) => a.whiz(ahead(g, 1)), 'Heavy stomp step': (a, g) => a.stomp(ahead(g, 4), 1.2),
-  'Wolf howl': (a, g) => a.howl(ahead(g, 12)), 'Ursa call': (a, g) => a.howl(ahead(g, 12), true), 'Tusker roar': (a, g) => a.roar(ahead(g, 6), 2.4),
-  'Spider screech': (a, g) => a.screech(ahead(g, 5)), 'Void cast': (a, g) => a.enemyCast(ahead(g, 6), 'void', 0.8), 'Sentry charge': (a, g) => a.enemyCast(ahead(g, 6), 'energy', 0.5),
-  'Sentry shot': (a, g) => a.enemyShot(ahead(g, 6), 'energy'), 'Wraith blink': (a, g) => a.blink(ahead(g, 5)), 'Shield block': (a, g) => a.block(ahead(g, 2)),
-  'Bomb fuse': (a, g) => a.fuse(ahead(g, 4), 0.9), 'Shaman ward': (a, g) => a.ward(ahead(g, 5)), 'Shaman mend': (a, g) => a.ward(ahead(g, 5), true),
+  'Razorhound howl': (a, g) => a.howl(ahead(g, 12)), 'Behemoth call': (a, g) => a.howl(ahead(g, 12), true), 'Thunderhorn roar': (a, g) => a.roar(ahead(g, 6), 2.4),
+  'Crawler screech': (a, g) => a.screech(ahead(g, 5)), 'Psi cast': (a, g) => a.enemyCast(ahead(g, 6), 'psi', 0.8), 'Sentry charge': (a, g) => a.enemyCast(ahead(g, 6), 'energy', 0.5),
+  'Sentry shot': (a, g) => a.enemyShot(ahead(g, 6), 'energy'), 'Acid spit': (a, g) => a.enemyShot(ahead(g, 6), 'acid'), 'Psion blink': (a, g) => a.blink(ahead(g, 5)),
+  'Shield block': (a, g) => a.block(ahead(g, 2)), 'Grenade fuse': (a, g) => a.fuse(ahead(g, 4), 0.9), 'Tech shield': (a, g) => a.ward(ahead(g, 5)), 'Tech repair': (a, g) => a.ward(ahead(g, 5), true),
 };
 function fake(g, type, element = 'none') {
   const w = generateWeapon({ type, level: 1, rarity: 'common', seed: 5 });
@@ -198,6 +203,7 @@ export class DevTools {
     const g = this.game;
     const p = g.player.position;
     const list = [{ label: `Hub — ${HUB.name}`, x: HUB.x, z: HUB.z + 4 }];
+    for (const c of g.world.gen.cities()) list.push({ label: `City — ${c.name} (act ${c.act}, ${Math.round(Math.hypot(c.x, c.z))} m out)`, x: c.x + 2.5, z: c.z - 2.5 });
     const [cx, cz] = g.world.gen.cellOf(p.x, p.z);
     const regions = [];
     for (let dx = -3; dx <= 3; dx++) for (let dz = -3; dz <= 3; dz++) regions.push(g.world.gen.region(cx + dx, cz + dz));
@@ -210,14 +216,19 @@ export class DevTools {
         else if (poi.type === 'waystone') list.push({ label: `   Waystone — ${poi.name}`, x: poi.x + 2.5, z: poi.z - 2.5 });
         else if (poi.type === 'tower' || poi.type === 'ruin') list.push({ label: `   ${poi.type === 'tower' ? 'Tower' : 'Ruins'}`, x: poi.x + 4, z: poi.z + (poi.r ?? 0) + 4 });
         else if (poi.type === 'landmark') list.push({ label: `   Landmark — ${poi.name} (${poi.kind})`, x: poi.x + Math.sin(poi.rot) * (poi.r + 8), z: poi.z + Math.cos(poi.rot) * (poi.r + 8) });
-        else if (poi.type === 'settlement') list.push({ label: `   Settlement — ${poi.name} (${poi.kind})`, x: poi.x, z: poi.z });
+        else if (poi.type === 'settlement') list.push({ label: `   Village — ${poi.name} (${poi.kind})`, x: poi.x, z: poi.z });
+        else if (poi.type === 'hamlet') list.push({ label: `   Hamlet — ${poi.name} (${poi.kind})`, x: poi.x + Math.sin(poi.rot) * 6, z: poi.z + Math.cos(poi.rot) * 6 });
+        else if (poi.type === 'town' || poi.type === 'city') list.push({ label: `   ${poi.type === 'town' ? 'Town' : 'City'} — ${poi.name}`, x: poi.x + 2.5, z: poi.z - 2.5 });
       }
     }
     return list;
   }
 
-  spawn(key, level, count, elite) {
+  // `elite`: '' (none), 'elite' or 'champion'; `affix`: one to give it ('' for a random roll), or
+  // 'horde' to raise a whole warband of the type's race there instead.
+  spawn(key, level, count, elite, affix = '') {
     const g = this.game;
+    if (affix === 'horde') return this.horde(key, level);
     const [type, variant = null] = key.split(':');
     const name = variant ? ENEMY_TYPES[type].variants[variant].name : ENEMY_TYPES[type].name;
     const at = g.aim.point.clone();
@@ -226,17 +237,45 @@ export class DevTools {
       const r = count > 1 ? 1.5 + count * 0.25 : 0;
       const pos = at.clone().add(new THREE.Vector3(Math.cos(a) * r, 0, Math.sin(a) * r));
       pos.y = g.world.groundHeight(pos.x, pos.z);
-      const e = g.spawnEnemy(type, pos, { level, variant, elite: elite ? true : null });
+      const e = g.spawnEnemy(type, pos, {
+        level, variant, elite: elite ? true : null, champion: elite === 'champion', affixes: elite && affix ? [affix] : null,
+      });
       if (this.flags.freezeAI) e.state = 'idle';
     }
     g.hud.toast(`Spawned ${count} × ${name} (Lv ${level})`);
   }
 
-  forge(kind, rarity, level, where) {
+  // A warband of `key`'s race at the reticle (offline: the local sim's roaming packs).
+  horde(key, level) {
     const g = this.game;
-    const opts = { level, ...(rarity !== 'random' ? { rarity } : {}) };
+    const enc = g.encounters;
+    if (!enc.spawnRoamers) return g.hud.toast('Warbands spawn on the server online');
+    const at = g.aim.point;
+    enc.spawnRoamers(at.x, at.z, { horde: true, race: ENEMY_TYPES[key.split(':')[0]].race, level: Math.max(10, level) });
+  }
+
+  // `set`: an armour set id (its maker for weapons), or 'any'.
+  // Every piece of a set, worn at once (what was in each slot goes to the backpack).
+  wearSet(set, rarity, level) {
+    const g = this.game;
+    if (!GEAR_SETS[set]) { g.hud.toast('Pick a set first'); return; }
+    const inv = g.player.inventory;
+    for (const slot of ARMOR_SLOT_IDS) {
+      const old = inv.armor[slot];
+      if (old && !inv.stash(old)) g.dropWeapon(old, g.player.position);
+      inv.armor[slot] = generateArmor({ level, slot, set, ...(rarity !== 'random' ? { rarity } : {}) });
+    }
+    g.player.refreshAppearance();
+    g.hud.toast(`Wearing the ${GEAR_SETS[set].name} set`);
+  }
+
+  forge(kind, rarity, level, where, set = 'any') {
+    const g = this.game;
+    const S = GEAR_SETS[set];
+    const opts = { level, ...(rarity !== 'random' ? { rarity } : {}), ...(S ? { set, maker: S.maker } : {}) };
+    const line = S ? MANUFACTURERS[S.maker].types : null;
     let item;
-    if (kind === 'weapon') item = generateWeapon(opts);
+    if (kind === 'weapon') item = generateWeapon(line ? { ...opts, type: line[Math.floor(Math.random() * line.length)] } : opts);
     else if (kind.startsWith('armor:')) item = generateArmor({ ...opts, slot: kind.slice(6) });
     else item = generateWeapon({ ...opts, type: kind });
     if (where === 'pack') {
@@ -257,8 +296,7 @@ export class DevTools {
 
   setLevel(n) {
     const s = this.game.stats;
-    n = Math.max(1, Math.min(99, Math.round(n)));
-    s.points += Math.max(0, n - s.level) * 3;
+    n = Math.max(1, Math.min(MAX_LEVEL, Math.round(n)));
     s.level = n;
     s.xp = 0;
     const p = this.game.player;
@@ -298,7 +336,7 @@ export class DevTools {
     for (const c of [...grp.children]) { grp.remove(c); c.geometry.dispose(); }
     const mat = this.colliderMat ??= new THREE.MeshBasicMaterial({ color: 0xff3df0, wireframe: true, transparent: true, opacity: 0.5, depthTest: false });
     for (const c of g.world.collidersNear(p.x, p.z, 45)) {
-      const m = new THREE.Mesh(new THREE.CylinderGeometry(c.r, c.r, c.h, 12, 1, true), mat);
+      const m = new THREE.Mesh(c.box ? new THREE.BoxGeometry(c.hx * 2, c.h, c.hz * 2) : new THREE.CylinderGeometry(c.r, c.r, c.h, 12, 1, true), mat);
       m.position.set(c.x, c.y + c.h / 2, c.z);
       grp.add(m);
     }
@@ -335,11 +373,12 @@ export class DevTools {
         </div>
         <div class="row"><button data-act="heal">Heal</button><button data-act="kill-self">Kill self</button><button data-act="revive">Revive</button></div>
         <div class="row"><button data-act="lvl-up">Level +1</button><input type="number" id="dev-lvl" value="${g.stats.level}" min="1" max="99"><button data-act="lvl-set">Set level</button></div>
-        <div class="row"><button data-act="gold">+1000 gold</button><button data-act="points">+5 attribute points</button></div>
+        <div class="row"><button data-act="gold">+1000 gold</button><button data-act="points">Reset talents (free)</button></div>
         <p class="note">Lv ${g.stats.level} · ${g.stats.gold}g · HP ${Math.ceil(p.hp)}/${p.maxHp} · ${p.state}</p>`;
     } else if (this.tab === 'World') {
       body = `
         <div class="row"><select id="dev-loc">${this.locations().map((l, i) => `<option value="${i}">${esc(l.label)}</option>`).join('')}</select><button data-act="tp">Teleport</button></div>
+        <div class="row"><select id="dev-dun">${Object.values(DUNGEONS).map((d) => `<option value="${d.id}">${esc(d.name)} (${esc(d.theme)}, Lv ${d.level})</option>`).join('')}</select><select id="dev-dun-mode"><option value="open">Open world</option><option value="run:0">Run · Normal</option><option value="run:1">Run · Veteran</option><option value="run:2">Run · Elite</option></select><button data-act="dungeon">Go down</button></div>
         <div class="row"><button data-act="tp-reticle">Teleport to reticle</button><button data-act="reveal">Reveal map</button><button data-act="attune">Attune all waystones</button></div>
         <div class="row"><button data-act="kill-all">Kill all enemies</button><button data-act="respawn">Respawn camps</button><button data-act="clear-loot">Clear ground loot</button></div>
         <div class="grid2">${chk('freezeAI', 'Freeze enemy AI', f.freezeAI)}<label class="chk"><input type="checkbox" data-act="pause" ${this.paused ? 'checked' : ''}> Pause simulation</label></div>
@@ -348,7 +387,8 @@ export class DevTools {
       body = `
         <div class="row"><select id="dev-enemy">${Object.entries(ENEMY_TYPES).map(([k, v]) => `<optgroup label="${esc(v.name)}"><option value="${k}">${esc(v.name)}</option>${Object.entries(v.variants ?? {}).map(([vk, vv]) => `<option value="${k}:${vk}">${esc(vv.name)} (Lv ${vv.minLevel}+)</option>`).join('')}</optgroup>`).join('')}</select>
           Lv <input type="number" id="dev-elvl" value="${g.stats.level}" min="1" max="60"> × <input type="number" id="dev-count" value="1" min="1" max="20">
-          <label class="chk"><input type="checkbox" id="dev-elite"> Elite</label></div>
+          <select id="dev-elite"><option value="">Normal</option><option value="elite">Elite</option><option value="champion">Champion</option></select>
+          <select id="dev-affix"><option value="">Random affixes</option>${AFFIX_IDS.map((id) => `<option value="${id}">${AFFIXES[id].name}</option>`).join('')}<option value="horde">A whole warband</option></select></div>
         <div class="row"><button data-act="spawn">Spawn at reticle</button></div>
         <p class="note">Enemies spawn where the reticle points (${g.aim.distance.toFixed(0)} m).</p>`;
     } else if (this.tab === 'Loot') {
@@ -357,6 +397,8 @@ export class DevTools {
         <div class="row"><select id="dev-kind">${kinds.map(([k, l]) => `<option value="${k}">${esc(l)}</option>`).join('')}</select>
           <select id="dev-rarity"><option value="random">Random rarity</option>${RARITIES.map((r) => `<option value="${r.id}">${esc(r.name ?? r.id)}</option>`).join('')}</select>
           Lv <input type="number" id="dev-ilvl" value="${g.stats.level}" min="1" max="60"></div>
+        <div class="row"><select id="dev-set"><option value="any">Any set / maker</option>${Object.entries(GEAR_SETS).map(([id, s]) => `<option value="${id}">${esc(s.name)} set · ${esc(MANUFACTURERS[s.maker].name)}</option>`).join('')}</select>
+          <button data-act="forge-set">Wear the whole set</button></div>
         <div class="row"><button data-act="forge-drop">Drop in front</button><button data-act="forge-pack">Add to backpack</button><button data-act="forge-10">Drop 10 random</button></div>`;
     } else if (this.tab === 'Render') {
       const pr = g.prefs;
@@ -439,8 +481,17 @@ export class DevTools {
       case 'lvl-up': g.grantXp(Math.max(1, g.stats.xpToNext() - g.stats.xp)); break;
       case 'lvl-set': this.setLevel(+$('#dev-lvl').value); break;
       case 'gold': g.stats.gold += 1000; break;
-      case 'points': g.stats.points += 5; break;
+      case 'points': g.stats.respec(); g.refreshMenus(); break;
       case 'tp': { const l = this.locations()[+$('#dev-loc').value]; this.teleport(l.x, l.z); break; }
+      // Straight down into any dungeon (offline: the way in needn't be near, nor the story there).
+      case 'dungeon': {
+        const def = DUNGEONS[$('#dev-dun').value];
+        const [mode, tier] = $('#dev-dun-mode').value.split(':');
+        this.dungeons = true;
+        this.hide();
+        g.enterDungeon(def, def.open || mode !== 'open' ? mode : 'run', tier === undefined ? (def.open ? null : 0) : +tier, 'dev');
+        return;
+      }
       case 'tp-reticle': { const a = g.aim.point; this.teleport(a.x, a.z, g.world.supportHeight(a.x, a.z, a.y + 1)); break; }
       case 'reveal':
         for (let x = -260; x <= 260; x += 12) for (let z = -260; z <= 260; z += 12) g.discovery.reveal(x, z);
@@ -455,9 +506,10 @@ export class DevTools {
       case 'clear-loot': for (const d of [...g.drops]) g.removeDrop(d); break;
       case 'pause': this.paused = el.checked; return;
       case 'mute': g.setPref('muted', el.checked); return;
-      case 'spawn': this.spawn($('#dev-enemy').value, +$('#dev-elvl').value, +$('#dev-count').value, $('#dev-elite').checked); break;
-      case 'forge-drop': this.forge($('#dev-kind').value, $('#dev-rarity').value, +$('#dev-ilvl').value, 'drop'); break;
-      case 'forge-pack': this.forge($('#dev-kind').value, $('#dev-rarity').value, +$('#dev-ilvl').value, 'pack'); break;
+      case 'spawn': this.spawn($('#dev-enemy').value, +$('#dev-elvl').value, +$('#dev-count').value, $('#dev-elite').value, $('#dev-affix').value); break;
+      case 'forge-drop': this.forge($('#dev-kind').value, $('#dev-rarity').value, +$('#dev-ilvl').value, 'drop', $('#dev-set').value); break;
+      case 'forge-pack': this.forge($('#dev-kind').value, $('#dev-rarity').value, +$('#dev-ilvl').value, 'pack', $('#dev-set').value); break;
+      case 'forge-set': this.wearSet($('#dev-set').value, $('#dev-rarity').value, +$('#dev-ilvl').value); break;
       case 'forge-10': for (let i = 0; i < 10; i++) this.forge('weapon', 'random', +$('#dev-ilvl').value, 'drop'); break;
       case 'perf': this.perfOn = !this.perfOn; this.perf.classList.toggle('hidden', !this.perfOn); break;
       case 'save': g.save(); g.hud.toast('Saved'); break;

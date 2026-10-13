@@ -68,8 +68,9 @@ export function weaponInfo(w) {
 // ---------------------------------------------------------------- armour
 import { ARMOR_SLOTS, ARMOR_PERKS, STAT_LABEL, PCT_STATS } from './armorTypes.js';
 import { PART_INDEX } from './parts.js';
+import { GEAR_SETS, SET_PIECES, setBonuses } from './sets.js';
 
-const ARMOR_ORDER = ['armor', 'hp', 'might', 'finesse', 'arcana', 'vitality', 'moveSpeed', 'critBonus', 'manaRegen', 'staminaRegen', 'resistFire', 'resistShock', 'resistFrost', 'resistCorrosive'];
+const ARMOR_ORDER = ['armor', 'hp', 'healthPct', 'meleeDamage', 'rangedDamage', 'magicDamage', 'moveSpeed', 'critBonus', 'manaRegen', 'staminaRegen', 'resistFire', 'resistShock', 'resistFrost', 'resistCorrosive'];
 
 export function armorStatLines(a) {
   return ARMOR_ORDER.filter((k) => a.stats[k]).map((k) => {
@@ -79,19 +80,39 @@ export function armorStatLines(a) {
   });
 }
 
-export function armorInfo(a, value) {
+// A set bonus in words: its stats ("+6% Move Speed") and what it does.
+const statText = (k, v) => (k === 'manaDiscount'
+  ? `−${Math.round(v * 100)}% ${STAT_LABEL[k]}`
+  : PCT_STATS.has(k) ? `+${Math.round(v * 100)}% ${STAT_LABEL[k]}` : `+${Math.round(v)} ${STAT_LABEL[k]}`);
+export function setBonusText(b) {
+  const stats = Object.entries(b.stats ?? {}).map(([k, v]) => statText(k, v)).join(', ');
+  return [b.text, stats && `${stats}.`].filter(Boolean).join(' ');
+}
+
+// A set as cards and the character sheet show it: its name, pieces worn and each bonus.
+export function setInfo(setId, worn = 0) {
+  const S = GEAR_SETS[setId];
+  if (!S) return null;
+  return {
+    id: setId, name: S.name, worn, pieces: SET_PIECES, blurb: S.blurb,
+    bonuses: setBonuses(setId, worn).map((b) => ({ n: b.n, name: b.name ?? '', text: setBonusText(b), active: b.active })),
+  };
+}
+
+export function armorInfo(a, value, sets = {}) {
   const rar = RARITY[a.rarity];
   const mfr = MANUFACTURERS[a.manufacturer];
-  const material = PART_INDEX[a.parts.material]?.name ?? '';
+  const set = setInfo(a.set, sets[a.set] ?? 0);
   return {
     name: a.name,
     color: rar.css,
     subtitle: `Lv ${a.level} · ${rar.name} ${ARMOR_SLOTS[a.slot].label}`,
     manufacturer: mfr.name,
-    blurb: mfr.blurb,
+    blurb: set?.blurb ?? mfr.blurb,
     element: null,
     perks: a.perks.map((id) => ARMOR_PERKS[id]),
-    components: [material, PART_INDEX[a.parts.lining]?.name, PART_INDEX[a.parts.trim]?.name].filter(Boolean),
+    components: [PART_INDEX[a.parts.lining]?.name, PART_INDEX[a.parts.trim]?.name].filter(Boolean),
+    set,
     value,
   };
 }

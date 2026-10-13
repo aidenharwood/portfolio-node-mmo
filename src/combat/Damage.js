@@ -3,6 +3,7 @@
 import * as THREE from 'three';
 import { PERKS } from '../items/perks.js';
 import { applyStatus } from './Status.js';
+import { levelGapMult } from '../rpg/balance.js';
 
 const _d = new THREE.Vector3();
 const _f = new THREE.Vector3();
@@ -24,11 +25,21 @@ export function dealDamage(game, o) {
   const stats = weapon?.stats;
   let damage = o.base * (o.scaled ? 1 : attacker.damageMultiplier);
   const crit = o.canCrit !== false && !!stats && source !== 'status' && Math.random() < stats.critChance + (attacker.critBonus ?? 0);
-  if (crit) damage *= stats.critMult;
+  if (crit) damage *= stats.critMult + (attacker.critDamage ?? 0);
   const element0 = o.element ?? weapon?.element ?? 'none';
-  damage *= target.damageTakenMultiplier(element0, source);
+  if (element0 !== 'none') damage *= 1 + (attacker.elementDamage?.(element0) ?? 0);
+  // Enemies far above your level shrug off some of it, and more on a higher Threat (rpg/balance.js);
+  // armour is measured against the attacker's level.
+  if (attacker.faction === 'player' && target.faction === 'enemy') {
+    damage *= levelGapMult(attacker.level ?? target.level, target.level) / (attacker.threat?.health ?? 1);
+  }
+  damage *= target.damageTakenMultiplier(element0, source, attacker);
 
-  const perks = weapon ? weapon.perks.map((id) => PERKS[id]) : [];
+  // The weapon's perks, and any weapon perks the attacker's armour sets grant (those run on every
+  // hit — except the blasts their own kills set off, so a pack can't chain-detonate).
+  const ids = new Set(weapon ? weapon.perks : []);
+  if (attacker.perks && (weapon || source !== 'explosion')) for (const id of attacker.perks) if (PERKS[id]) ids.add(id);
+  const perks = [...ids].map((id) => PERKS[id]);
   const ctx = { game, attacker, target, weapon, damage, crit, source };
   for (const p of perks) p.modifyDamage?.(ctx);
   ctx.damage = Math.max(1, Math.round(ctx.damage * (source === 'status' ? 1 : 0.92 + Math.random() * 0.16)));

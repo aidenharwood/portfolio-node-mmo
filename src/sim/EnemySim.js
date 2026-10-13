@@ -5,15 +5,18 @@
 //   spawn → idle (wander near home) → chase (the behaviour's footwork) → windup → attack → recover
 //   with stagger, return (leashed home) and dead on the side.
 // Enemies fight whichever player has the most threat on them (damage dealt, plus being close), and
-// take turns per player through attack tokens, so a crowd doesn't all swing at once.
+// take turns per player through attack tokens, so a crowd doesn't all swing at once; those
+// waiting spread out around their target. Named elites carry affixes (sim/affixes.js).
 // The sim never damages players: their own screens decide what hits them (docs/MULTIPLAYER.md).
 // Its sweeps against players only drive the AI (a bash that connects ends early, a charge stops).
 import * as THREE from 'three';
 import {
-  enemyType, enemyAttacks, enemyMaxHp, enemyRadius, eliteName, liveAttack, sweepReaches,
+  enemyType, enemyAttacks, enemyMaxHp, enemyDamage, enemyRadius, eliteName, liveAttack, sweepReaches,
   CLOSE_KINDS, RANGED_KINDS, MELEE_KINDS, KITERS,
 } from './enemyDefs.js';
 import { resolveType } from '../combat/bestiary.js';
+import { rollAffixes, affixCount, SHIELD, RALLY, VAMPIRIC_REGEN, OVERCHARGE, VOLATILE } from './affixes.js';
+import { inPocket } from '../world/dungeons.js';
 
 const _to = new THREE.Vector3();
 const _desired = new THREE.Vector3();
@@ -39,9 +42,12 @@ const CROWD_HP = 0.6;      // ...each one past the first adding this much to its
 const BURN_TICK = 0.5;
 
 export class EnemySim {
-  constructor(sim, id, typeName, position, { level = 1, camp = null, elite = null, variant = null, summoner = null } = {}) {
+  // `split`: one of the two halves of a Splitting elite (worth what a summoned minion is);
+  // `transient`: called in for a fight (reinforcements, halves) — gone when it gives up.
+  // `name` / `tag`: a story enemy's own name and the tag quests know it by (world/story.js).
+  constructor(sim, id, typeName, position, { level = 1, camp = null, elite = null, champion = false, affixes = null, variant = null, summoner = null, split = false, transient = false, name = null, tag = null } = {}) {
     if (elite === true) elite = eliteName(resolveType(typeName, variant).race);
-    const type = enemyType(typeName, variant, elite, !!summoner);
+    const type = enemyType(typeName, variant, elite, !!summoner || split, !!elite && champion);
     this.sim = sim;
     this.id = id;
     this.type = type;
@@ -51,8 +57,13 @@ export class EnemySim {
     this.camp = camp;
     this.elite = elite;
     this.summoner = summoner;
+    this.split = split;
+    this.transient = transient || split;
+    this.champion = !!type.champion;
     this.minions = [];
-    this.displayName = elite ? `${elite}` : type.name;
+    this.displayName = name ?? (elite ? `${elite}` : type.name);
+    this.name = name;
+    this.tag = tag;
     this.isBoss = !!type.boss;
     this.faction = 'enemy';
     this.radius = enemyRadius(type);
@@ -61,6 +72,13 @@ export class EnemySim {
     this.baseMaxHp = enemyMaxHp(type, level);
     this.maxHp = this.baseMaxHp;
     this.hp = this.maxHp;
+    this.affixes = elite ? (affixes ?? rollAffixes(type.race, affixCount(level, this.champion))) : [];
+    this.affix = new Set(this.affixes);
+    this.shieldMax = this.affix.has('shielded') ? Math.round(this.baseMaxHp * SHIELD.share) : 0;
+    this.shield = this.shieldMax;
+    this.calm = 0;                    // seconds since it was last hurt
+    this.rallied = 0;                 // seconds left of a commander's rally
+    this.pulseT = OVERCHARGE.every;
     this.alive = true;
     this.statuses = {};
     this.attacks = enemyAttacks(type, level).map((a) => ({ ...a, cd: (a.cooldown ?? 0) * Math.random() * 0.6 }));
@@ -85,6 +103,7 @@ export class EnemySim {
     this.cooldown = randIn(type.cooldown);
     this.poiseAccum = 0;
     this.strafeDir = Math.random() < 0.5 ? 1 : -1;
+    this.flank = (id * 2.39996) % (Math.PI * 2); // its own bearing round a target, to surround it
     this.orbitA = 0;
     this.ringJitter = Math.random() * 1.5;
     this.engaged = false;
@@ -136,9 +155,14 @@ export class EnemySim {
   }
 
   // Engages `by` (or whoever is nearest), and the camp joins in.
+  isPlayerIgnored(p) {
+    return !!p?.inCutscene;
+  }
+
   aggro(force = false, by = null) {
     if (!this.alive || (this.state === 'return' && !force)) return;
-    if (by && by.alive) this.foe = by;
+    if (by && by.alive && !this.isPlayerIgnored(by)) this.foe = by;
+    if (this.foe && this.isPlayerIgnored(this.foe)) this.foe = null;
     if (this.engaged) return;
     this.foe ??= this.nearestPlayer(TARGET_RANGE);
     if (!this.foe) return;
@@ -159,7 +183,7 @@ export class EnemySim {
     let best = null;
     let bd = range;
     for (const p of this.sim.players) {
-      if (!p.alive) continue;
+      if (!p.alive || this.isPlayerIgnored(p)) continue;
       const d = this.dist2(p);
       if (d < bd) { bd = d; best = p; }
     }
@@ -170,18 +194,27 @@ export class EnemySim {
   // reach, with a little stickiness so targets don't flicker.
   retarget(dt) {
     if (!this.engaged) return;
+    if (this.foe && this.isPlayerIgnored(this.foe)) {
+      this.foe = null;
+      this.engaged = false;
+      this.setState('return');
+      return;
+    }
     this.retargetT -= dt;
     if (this.retargetT > 0 && this.foe?.alive && !this.foe.gone) return;
     this.retargetT = 0.5;
     let best = null;
     let bestScore = -Infinity;
-    for (const p of this.sim.players) {
-      if (!p.alive) continue;
+    const consider = (p, bonus) => {
+      if (!p.alive || this.isPlayerIgnored(p)) return;
       const d = this.dist2(p);
-      if (d > TARGET_RANGE) continue;
-      const score = ((this.threat.get(p.id) ?? 0) / this.maxHp) * 40 - d + (p === this.foe ? 5 : 0);
+      if (d > TARGET_RANGE) return;
+      const score = ((this.threat.get(p.id) ?? 0) / this.maxHp) * 40 - d + (p === this.foe ? 5 : 0) + bonus;
       if (score > bestScore) { bestScore = score; best = p; }
-    }
+    };
+    for (const p of this.sim.players) consider(p, 0);
+    // A holo-decoy close enough draws them off.
+    for (const p of this.sim.decoys) if (this.dist2(p) < 20) consider(p, 60);
     if (best !== this.foe) {
       this.sim.releaseToken(this);
       this.foe = best;
@@ -211,7 +244,8 @@ export class EnemySim {
     let sx = 0;
     let sz = 0;
     for (const c of this.sim.world.collidersNear(px, pz, 4.5)) {
-      if (this.hover > 1.5 && c.y + c.h < this.position.y) continue;
+      // (Walls indoors are boxes: the way round them is the pathfinding's business.)
+      if (c.box || (this.hover > 1.5 && c.y + c.h < this.position.y)) continue;
       const dx = c.x - px;
       const dz = c.z - pz;
       const ahead = dx * _dir.x + dz * _dir.z;
@@ -250,26 +284,61 @@ export class EnemySim {
       this.stuckCount = 0;
       return;
     }
-    const a = Math.atan2(this.velocity.x, this.velocity.z) + (Math.random() < 0.5 ? 1 : -1) * (Math.PI / 2 + Math.random() * 0.6);
-    this.detour = new THREE.Vector3(Math.sin(a), 0, Math.cos(a));
-    this.detourTime = 0.9;
+    const target = this.foe ?? { position: this.home };
+    const away = Math.atan2(this.position.x - target.position.x, this.position.z - target.position.z);
+    const step = (Math.random() < 0.5 ? 1 : -1) * (Math.PI / 2 + Math.random() * 0.9);
+    const a = away + step;
+    const dir = new THREE.Vector3(Math.sin(a), 0, Math.cos(a));
+    const world = this.sim.world;
+    const clear = world.standable(this.position.x + dir.x * 2.2, this.position.z + dir.z * 2.2) && !world.blocks(new THREE.Vector3(this.position.x + dir.x * 2.2, world.groundHeight(this.position.x + dir.x * 2.2, this.position.z + dir.z * 2.2) + 0.5, this.position.z + dir.z * 2.2));
+    this.detour = clear ? dir : new THREE.Vector3(Math.sin(Math.atan2(this.velocity.x, this.velocity.z) + step), 0, Math.cos(Math.atan2(this.velocity.x, this.velocity.z) + step));
+    this.detourTime = clear ? 1.2 : 0.7;
+    if (this.stuckCount >= 3) this.stuckCount = 0;
   }
 
   moveToward(target, speed, dt, rate = 8) {
-    _to.subVectors(target, this.position).setY(0);
-    const d = _to.length();
+    const w = this.wayTo(target);
+    _to.subVectors(w?.via ? _p.set(w.x, 0, w.z) : target, this.position).setY(0);
+    let d = _to.length();
     if (d > 0.01) _to.divideScalar(d);
+    if (w?.via) d = Math.max(d, w.dist);
     _desired.copy(_to).multiplyScalar(d > 0.3 ? speed : 0);
     this.steer(_desired, dt, rate);
     if (d > 0.3) this.turnTowards(Math.atan2(_to.x, _to.z), 6 * dt);
     return d;
   }
 
-  // Planar direction to the target in _to; returns the distance.
+  // Indoors (a dungeon's rooms: world/Interior.js) the way to a point goes round walls and through
+  // open doors (sim/Nav.js): { x, z, via, dist } — the next point to make for (the point itself
+  // when it's in sight: `via` false) and how far it is by the way there. Null outdoors.
+  wayTo(target) {
+    if (!inPocket(this.position.x)) return null;
+    const it = this.sim.world.interiorAt(this.position.x, this.position.z);
+    if (!it) return null;
+    const w = it.nav.next(this.position.x - it.x0, this.position.z - it.z0, target.x - it.x0, target.z - it.z0, this.sim.time);
+    return w && { x: w.x + it.x0, z: w.z + it.z0, via: w.via, dist: w.dist };
+  }
+
+  // Can it see `p`? Indoors, only along the grid with nothing in the way.
+  sees(p) {
+    if (!inPocket(this.position.x)) return true;
+    const it = this.sim.world.interiorAt(this.position.x, this.position.z);
+    return !it || it.nav.sees(this.position.x - it.x0, this.position.z - it.z0, p.position.x - it.x0, p.position.z - it.z0);
+  }
+
+  // Planar direction to the target in _to; returns the distance. Indoors with the target out of
+  // sight: towards the next turn of the way there (`blind`), and the distance by that way.
   toFoe(p) {
     _to.subVectors(p.position, this.position).setY(0);
-    const d = _to.length();
-    _to.divideScalar(d || 1);
+    let d = _to.length();
+    this.blind = false;
+    const w = this.wayTo(p.position);
+    if (w?.via) {
+      _to.set(w.x - this.position.x, 0, w.z - this.position.z);
+      d = w.dist;
+      this.blind = true;
+    }
+    _to.divideScalar(_to.length() || 1);
     return d;
   }
 
@@ -285,14 +354,17 @@ export class EnemySim {
     for (const a of this.attacks) a.cd -= dt;
     this.blinkCd -= dt;
     this.frenzy -= dt;
+    this.rallied -= dt;
     if (this.ward && (this.ward.time -= dt) <= 0) this.ward = null;
     this.updateStatuses(dt);
     this.retarget(dt);
+    if (this.affixes.length && this.alive) this.updateAffixes(dt);
 
-    // Minions fade when whoever called them is gone or has given up.
+    // Minions fade when whoever called them is gone or has given up; reinforcements and halves
+    // when they give up themselves.
     if (this.summoner && this.alive && (this.summoner.gone || !this.summoner.alive || (!this.summoner.engaged && this.state !== 'spawn'))) {
       this.dissolve();
-    }
+    } else if (this.transient && this.alive && !this.engaged && this.state !== 'spawn') this.dissolve();
     const p = this.foe;
     if (this.alive && this.engaged && this.state !== 'return') {
       if (!p) this.leash();
@@ -377,7 +449,7 @@ export class EnemySim {
   updateIdle(dt) {
     const radius = this.hidden ? 8 : this.isBoss || this.behavior === 'flyer' ? 16 : AGGRO_RADIUS;
     const near = this.nearestPlayer(radius);
-    if (near) {
+    if (near && this.sees(near)) {
       this.aggro(false, near);
       return;
     }
@@ -393,12 +465,20 @@ export class EnemySim {
   // ================================================================ footwork
   updateChase(dt, p) {
     const dist = this.toFoe(p);
+    // Out of sight round a corner: just go after them.
+    if (this.blind) {
+      this.turnTowards(Math.atan2(_to.x, _to.z), 7 * dt);
+      _desired.copy(_to).multiplyScalar(this.moveSpeed);
+      this.steer(_desired, dt, 8);
+      return;
+    }
     if (this.cooldown <= 0) {
       const a = this.pickAttack(dist, p);
       if (a) { this.startAttack(a, p); return; }
     }
     const blink = this.type.blink;
     if (blink && this.blinkCd <= 0 && dist < blink.range) { this.blink(p, blink); return; }
+    if (this.affix.has('blinking') && this.blinkCd <= 0 && dist > 7 && dist < 26) { this.blinkTo(p); return; }
     this.guarding = !!this.type.block;
     const speed = this.moveSpeed;
     const b = this.behavior;
@@ -406,6 +486,29 @@ export class EnemySim {
     else if (b === 'flyer') this.orbit(dist, speed, dt);
     else if (b === 'pack') this.circle(dist, speed, dt, p);
     else this.press(dist, speed, dt, p);
+  }
+
+  // Elite affixes that act over time (sim/affixes.js).
+  updateAffixes(dt) {
+    const a = this.affix;
+    this.calm += dt;
+    if (this.shieldMax && this.shield < this.shieldMax && this.calm > SHIELD.lull) {
+      if (this.shield === 0) this.sim.emit({ k: 'shield', id: this.id, at: this.position, up: 1 });
+      this.shield = Math.min(this.shieldMax, this.shield + (this.shieldMax / SHIELD.refill) * dt);
+    }
+    if (a.has('frenzied') && this.hp < this.maxHp * 0.5) this.frenzy = Math.max(this.frenzy, 0.3);
+    if (!this.engaged) return;
+    if (a.has('vampiric')) this.heal(this.maxHp * VAMPIRIC_REGEN * dt);
+    if (a.has('commander')) for (const e of this.allies(RALLY.radius)) if (e !== this) e.rallied = 0.6;
+    if (a.has('overcharged') && (this.pulseT -= dt) <= 0) {
+      this.pulseT = OVERCHARGE.every;
+      const pos = this.position.clone();
+      const dmg = Math.round((this.attacks[0]?.damage ?? 10) * OVERCHARGE.damage);
+      this.sim.emit({ k: 'tele', at: pos, p: r3(pos), r: OVERCHARGE.radius, t: OVERCHARGE.warn, el: 'shock' });
+      this.sim.after(OVERCHARGE.warn, () => {
+        if (this.alive) this.sim.emit({ k: 'boom', id: this.id, at: pos, p: r3(pos), r: OVERCHARGE.radius, dmg, kb: 5, el: 'shock' });
+      });
+    }
   }
 
   // Close in; while waiting for an opening (no token, on cooldown) circle at the edge of reach.
@@ -418,12 +521,19 @@ export class EnemySim {
     if (dist > engage + 3 || ready) _desired.copy(_to).multiplyScalar(dist > engage ? sp : 0);
     else if (b === 'brute' || b === 'boss' || b === 'charger') _desired.copy(_to).multiplyScalar(dist > engage + 0.8 ? sp * 0.5 : 0);
     else {
-      const flip = b === 'swarm' ? 0.9 : b === 'duelist' ? 0.6 : 0.3;
-      if (Math.random() < dt * flip) this.strafeDir *= -1;
+      // Waiting for an opening: work round to its own bearing on the target (so a crowd surrounds
+      // them and comes at their flanks and back), then shuffle there.
       const ring = engage + (b === 'swarm' ? 1.0 : 1.8);
       const radial = clamp(dist - ring, -1, 1);
-      const lateral = b === 'swarm' ? 0.7 : b === 'shield' ? 0.3 : 0.45;
-      _desired.set(-_to.z * this.strafeDir, 0, _to.x * this.strafeDir).multiplyScalar(sp * lateral).addScaledVector(_to, radial * sp * 0.6);
+      const off = wrapAngle(this.flank - Math.atan2(-_to.x, -_to.z));
+      const shuffle = b === 'swarm' ? 0.7 : b === 'shield' ? 0.3 : 0.45;
+      let side = this.strafeDir;
+      let lateral = shuffle;
+      if (Math.abs(off) > 0.4) {
+        side = Math.sign(off);
+        lateral = Math.max(shuffle, b === 'shield' ? 0.45 : 0.85);
+      } else if (Math.random() < dt * (b === 'swarm' ? 0.9 : b === 'duelist' ? 0.6 : 0.3)) this.strafeDir *= -1;
+      _desired.set(-_to.z * side, 0, _to.x * side).multiplyScalar(sp * lateral).addScaledVector(_to, radial * sp * 0.6);
     }
     this.steer(_desired, dt, 8);
   }
@@ -478,12 +588,33 @@ export class EnemySim {
       const a = away + (Math.random() - 0.5) * 2.2;
       const x = this.position.x + Math.sin(a) * b.distance;
       const z = this.position.z + Math.cos(a) * b.distance;
-      if (w.isWater(x, z) || w.blocks(_p.set(x, w.groundHeight(x, z) + 0.5, z))) continue;
+      if (!w.standable(x, z) || w.blocks(_p.set(x, w.groundHeight(x, z) + 0.5, z))) continue;
       const from = r3(this.position);
       this.position.set(x, w.groundHeight(x, z), z);
       this.sim.emit({ k: 'blink', id: this.id, from, to: r3(this.position), at: this.position });
       this.blinkCd = b.cooldown;
       this.lastPos.copy(this.position);
+      return;
+    }
+    this.blinkCd = 1;
+  }
+
+  // Blinking elites step through the void to just beside their target, on its far side.
+  blinkTo(p) {
+    const w = this.sim.world;
+    const back = Math.atan2(p.position.x - this.position.x, p.position.z - this.position.z);
+    for (let i = 0; i < 6; i++) {
+      const a = back + (Math.random() - 0.5) * 2.4;
+      const x = p.position.x + Math.sin(a) * 2.6;
+      const z = p.position.z + Math.cos(a) * 2.6;
+      if (!w.standable(x, z) || w.blocks(_p.set(x, w.groundHeight(x, z) + 0.5, z))) continue;
+      const from = r3(this.position);
+      this.position.set(x, w.groundHeight(x, z), z);
+      this.facing = Math.atan2(p.position.x - x, p.position.z - z);
+      this.sim.emit({ k: 'blink', id: this.id, from, to: r3(this.position), at: this.position });
+      this.blinkCd = 6 + Math.random() * 2;
+      this.lastPos.copy(this.position);
+      this.cooldown = Math.max(this.cooldown, 0.35);
       return;
     }
     this.blinkCd = 1;
@@ -549,7 +680,7 @@ export class EnemySim {
     this.cur = a;
     this.curIndex = this.attacks.indexOf(a);
     this.attackSeq++;
-    this.live = liveAttack(a, this.frenzy > 0);
+    this.live = liveAttack(a, this.frenzy > 0, this.rallied > 0);
     this.hitIndex = 0;
     a.cd = a.cooldown ?? 0;
     const tk = this.tokenKind(a);
@@ -800,12 +931,14 @@ export class EnemySim {
     const n = Math.min(L.count, L.maxMinions - this.minions.filter((m) => m.alive).length);
     this.minions = this.minions.filter((m) => m.alive);
     // The pack comes running in from the edge; the rest hatch or are deployed beside the summoner.
-    const far = this.type.race === 'fauna' ? 11 : 3.2;
+    const far = this.type.race === 'fauna' && !inPocket(this.position.x) ? 11 : 3.2;
     for (let i = 0; i < n; i++) {
       const a = this.facing + Math.PI + (i - (n - 1) / 2) * 0.9;
-      const x = this.position.x + Math.sin(a) * far;
-      const z = this.position.z + Math.cos(a) * far;
-      if (this.sim.world.isWater(x, z)) continue;
+      let x = this.position.x + Math.sin(a) * far;
+      let z = this.position.z + Math.cos(a) * far;
+      // Indoors with a wall there: at the summoner's side instead.
+      if (!this.sim.world.standable(x, z)) { x = this.position.x + Math.sin(a) * 1.2; z = this.position.z + Math.cos(a) * 1.2; }
+      if (!this.sim.world.standable(x, z)) continue;
       const e = this.sim.spawnEnemy(L.summon, _p.set(x, 0, z), { level: Math.max(1, this.level - 1), summoner: this });
       e.engaged = true;
       e.hidden = false;
@@ -820,7 +953,19 @@ export class EnemySim {
   applyHit(hit) {
     if (!this.alive) return false;
     const by = hit.by ?? null;
-    this.hp = Math.max(0, this.hp - hit.damage);
+    let damage = hit.damage;
+    this.calm = 0;
+    // A shield soaks up hits until it breaks.
+    if (this.shield > 0) {
+      const soak = Math.min(this.shield, damage);
+      this.shield -= soak;
+      damage -= soak;
+      if (this.shield <= 0) {
+        this.shield = 0;
+        this.sim.emit({ k: 'shield', id: this.id, at: this.position });
+      }
+    }
+    this.hp = Math.max(0, this.hp - damage);
     if (by !== null) {
       this.credit.set(by, (this.credit.get(by) ?? 0) + hit.damage);
       this.threat.set(by, (this.threat.get(by) ?? 0) + hit.damage);
@@ -890,11 +1035,35 @@ export class EnemySim {
     if (burst) {
       // Bloaters burst a moment after they drop.
       const pos = this.position.clone();
-      const dmg = Math.round(burst.damage * Math.pow(1.11, this.level - 1));
+      const dmg = enemyDamage(burst.damage, this.level);
       this.sim.emit({ k: 'tele', at: pos, p: r3(pos), r: burst.radius, t: 0.6, el: burst.element, fuse: 1 });
       this.sim.after(0.6, () => this.sim.emit({ k: 'boom', id: this.id, at: pos, p: r3(pos), r: burst.radius, dmg, kb: 8, el: burst.element }));
     }
+    if (this.affix.has('volatile')) {
+      const pos = this.position.clone();
+      const dmg = Math.round((this.attacks[0]?.damage ?? 10) * VOLATILE.damage);
+      this.sim.emit({ k: 'tele', at: pos, p: r3(pos), r: VOLATILE.radius, t: VOLATILE.fuse, el: 'fire', fuse: 1 });
+      this.sim.after(VOLATILE.fuse, () => this.sim.emit({ k: 'boom', id: this.id, at: pos, p: r3(pos), r: VOLATILE.radius, dmg, kb: 10, el: 'fire', sh: 0.5 }));
+    }
+    if (this.affix.has('splitting')) this.splitApart();
     this.sim.onKilled(this, hit);
+  }
+
+  // A Splitting elite comes apart into two of its kind, already fighting.
+  splitApart() {
+    const pos = this.position.clone();
+    const foe = this.foe;
+    this.sim.after(0.35, () => {
+      for (const side of [-1, 1]) {
+        const a = this.facing + side * 1.7;
+        const x = pos.x + Math.sin(a) * 1.3;
+        const z = pos.z + Math.cos(a) * 1.3;
+        if (!this.sim.world.standable(x, z)) continue;
+        const e = this.sim.spawnEnemy(this.typeName, _p.set(x, 0, z), { level: this.level, variant: this.variant, split: true });
+        e.hidden = false;
+        if (foe?.alive && !foe.gone) e.aggro(true, foe);
+      }
+    });
   }
 
   // Quietly gone (a minion whose summoner left): no rewards.

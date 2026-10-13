@@ -1,10 +1,14 @@
 // Inventory: the game menu's Inventory tab (ui/GameMenu.js), and the trader's shop when opened in
 // 'shop' mode. Left: weapons, armour, backpack, trader stock and the drop zone. Right: item card +
-// actions. (The character sheet lives on the Character tab.)
+// actions. (The character sheet lives on the Character tab.) A trader shows what their stock
+// covers (game.trading): everything, or a gunsmith's weapons and an armourer's armour, with the
+// fine stock only they carry.
 import { RARITY } from '../items/rarity.js';
 import { itemValue, isArmor } from '../items/items.js';
 import { ARMOR_SLOTS, ARMOR_SLOT_IDS } from '../items/armorTypes.js';
 import { itemCardHTML, esc } from './cards.js';
+
+const isStock = (src) => src === 'shop' || src === 'fine';
 
 export class InventoryUI {
   constructor(game, el) {
@@ -40,7 +44,9 @@ export class InventoryUI {
   }
 
   itemAt(loc) {
-    return loc.src === 'shop' ? this.game.shop.stock[loc.i] ?? null : this.game.player.inventory.at(loc);
+    if (loc.src === 'shop') return this.game.shop.stock[loc.i] ?? null;
+    if (loc.src === 'fine') return this.game.shop.fine?.[loc.i] ?? null;
+    return this.game.player.inventory.at(loc);
   }
 
   onPointerDown(e) {
@@ -91,12 +97,12 @@ export class InventoryUI {
     for (const t of this.el.querySelectorAll('.tile[data-src]')) {
       const loc = this.locOf(t);
       let ok;
-      if (d.from.src === 'shop') ok = loc.src === 'pack' && !inv.at(loc);
-      else if (loc.src === 'shop') ok = true;
+      if (isStock(d.from.src)) ok = loc.src === 'pack' && !inv.at(loc);
+      else if (isStock(loc.src)) ok = true;
       else ok = inv.fits(d.item, loc) && inv.fits(inv.at(loc), d.from);
       t.classList.toggle('drop-ok', ok && t !== d.source);
     }
-    this.el.querySelector('.inv-drop')?.classList.toggle('drop-ok', d.from.src !== 'shop');
+    this.el.querySelector('.inv-drop')?.classList.toggle('drop-ok', !isStock(d.from.src));
   }
 
   onPointerUp(e) {
@@ -115,11 +121,11 @@ export class InventoryUI {
     const toGround = !!over?.closest('.inv-drop');
     if (tile && tile.classList.contains('drop-ok')) {
       const to = this.locOf(tile);
-      if (d.from.src === 'shop') {
-        if (!link.do({ op: 'buy', i: d.from.i, to: to.i })) g.hud.toast('Not enough gold');
-      } else if (to.src === 'shop') link.do({ op: 'sell', loc: d.from });
+      if (isStock(d.from.src)) {
+        if (!link.do({ op: 'buy', i: d.from.i, to: to.i, ...(d.from.src === 'fine' ? { fine: true } : {}) })) g.hud.toast('Not enough gold');
+      } else if (isStock(to.src)) link.do({ op: 'sell', loc: d.from });
       else if (link.do({ op: 'move', from: d.from, to })) this.sel = to;
-    } else if (toGround && d.from.src !== 'shop') link.do({ op: 'drop', loc: d.from });
+    } else if (toGround && !isStock(d.from.src)) link.do({ op: 'drop', loc: d.from });
     this.render();
   }
 
@@ -148,8 +154,8 @@ export class InventoryUI {
       const item = this.itemAt(loc);
       if (!item) { this.hideTip(); return; }
       this.tipTile = tile;
-      const price = loc.src === 'shop' ? `<div class="lc-prompt">Price ${itemValue(item) * 3}g</div>` : '';
-      this.tip.innerHTML = itemCardHTML(item, { compare: this.compareFor(item, loc.src), thumb: this.game.thumbs.get(item), footer: price });
+      const price = isStock(loc.src) ? `<div class="lc-prompt">Price ${itemValue(item) * 3}g</div>` : '';
+      this.tip.innerHTML = itemCardHTML(item, { compare: this.compareFor(item, loc.src), thumb: this.game.thumbs.get(item), footer: price, sets: this.game.stats.gearSets });
       this.tip.classList.remove('hidden');
     }
     // Beside the cursor, flipped and clamped to stay on screen.
@@ -174,6 +180,7 @@ export class InventoryUI {
     if (src === 'slot') return inv.slots[i];
     if (src === 'armor') return inv.armor[i];
     if (src === 'pack') return inv.backpack[i];
+    if (src === 'fine') return this.game.shop.fine?.[i] ?? null;
     return this.game.shop.stock[i] ?? null;
   }
 
@@ -200,6 +207,9 @@ export class InventoryUI {
     const inv = g.player.inventory;
     const shop = this.mode === 'shop';
     const item = this.selected();
+    const T = g.trading ?? { name: 'Tobbin', stock: 'all' };
+    const sells = (x) => T.stock === 'all' || (isArmor(x) ? 'armor' : 'weapons') === T.stock;
+    const stockTiles = (list, src) => list.map((x, i) => (sells(x) ? this.tile(x, src, i) : '')).join('');
 
     let actions = '';
     if (item) {
@@ -231,12 +241,13 @@ export class InventoryUI {
             </div>
             <h3>Backpack <small>${inv.backpack.filter(Boolean).length}/${inv.backpack.length}</small></h3>
             <div class="tiles pack">${inv.backpack.map((x, i) => this.tile(x, 'pack', i)).join('')}</div>
-            ${shop ? `<h3>Tobbin's wares <small>${s.gold}g to spend</small></h3><div class="tiles pack">${g.shop.stock.map((x, i) => this.tile(x, 'shop', i)).join('')}</div>` : ''}
+            ${shop ? `<h3>${esc(T.name)}'s wares <small>${s.gold}g to spend</small></h3><div class="tiles pack">${stockTiles(g.shop.stock, 'shop')}</div>` : ''}
+            ${shop && T.stock !== 'all' ? `<h3>Fine stock <small>rare or better, a level ahead</small></h3><div class="tiles pack">${stockTiles(g.shop.fine ?? [], 'fine')}</div>` : ''}
             <div class="inv-drop">Drop here to leave it on the ground</div>
             <p class="hint">Hover an item for its details. Drag items between slots to equip or swap them${shop ? ', stock into your backpack to buy, and your items onto the stock to sell' : ''}.</p>
           </section>
           <section class="inv-detail">
-            ${item ? itemCardHTML(item, { compare: this.compareFor(item), thumb: g.thumbs.get(item) }) + `<div class="actions">${actions}</div>` : '<p class="hint">Select an item.</p>'}
+            ${item ? itemCardHTML(item, { compare: this.compareFor(item), thumb: g.thumbs.get(item), sets: g.stats.gearSets }) + `<div class="actions">${actions}</div>` : '<p class="hint">Select an item.</p>'}
           </section>
         </div>
       </div>`;
@@ -279,7 +290,7 @@ export class InventoryUI {
         if (link.do({ op: action, loc: this.sel })) this.sel = null;
         break;
       case 'buy':
-        if (link.do({ op: 'buy', i: this.sel.i })) this.sel = null;
+        if (link.do({ op: 'buy', i: this.sel.i, ...(this.sel.src === 'fine' ? { fine: true } : {}) })) this.sel = null;
         else g.hud.toast('Not enough gold, or no room');
         break;
     }

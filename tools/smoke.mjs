@@ -1,4 +1,9 @@
-// Smoke test: starts the server, signs up, makes a character, joins the world and chats.
+// Smoke test: starts the server, signs up, makes a character, joins the world and chats — then
+// stands by a camp of level 10 or more and checks its enemies (elites with their affixes) stream
+// in and play back on the client's replicas, that Threat can't change mid-fight, that a new
+// character has no talent points, and that the server notes where they've been (for
+// achievements); and walks the other round Brightwater's services (a quest board's postings
+// taken, a rest that restocks the fine stock, nothing done for someone out of reach).
 //   node tools/smoke.mjs            one process on a throwaway SQLite database (ROLE=all)
 //   node tools/smoke.mjs cluster    a gateway and two realm layers on DATABASE_URL (Postgres);
 //                                   two players land on different layers, and world chat and a
@@ -10,6 +15,10 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomChoice } from '../src/models/heroLooks.js';
+import { WorldGen } from '../src/world/Gen.js';
+import { generateDungeon } from '../src/world/DungeonGen.js';
+import { DUNGEONS } from '../src/world/dungeons.js';
+import { EnemyReplica } from '../src/net/EnemyReplica.js';
 
 const ROOT = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 const cluster = process.argv[2] === 'cluster';
@@ -75,6 +84,108 @@ async function player(port, name) {
   return { name, ws, got, until, welcome, say: (text) => ws.send(JSON.stringify({ t: 'chat', text })) };
 }
 
+// A player at a camp of level 10+: its enemies (led by elites) stream in, every add builds a
+// replica and every state plays back on it; Threat changes out of a fight but not in one.
+async function horde(a, seed) {
+  const opr = async (seq, op) => {
+    a.ws.send(JSON.stringify({ t: 'op', seq, op }));
+    return a.until((m) => m.t === 'opr' && m.seq === seq, `answer ${seq}`);
+  };
+  check((await opr(2, { op: 'threat', v: 1 })).ok, 'Threat changes out of a fight');
+  check(!(await opr(4, { op: 'learn', id: 'v_edge' })).ok, 'no talent points at level 1');
+  const gen = new WorldGen(seed);
+  let camp = null;
+  for (let ring = 3; ring < 14 && !camp; ring++) {
+    for (let rx = -ring; rx <= ring && !camp; rx++) {
+      for (let rz = -ring; rz <= ring && !camp; rz++) {
+        if (Math.max(Math.abs(rx), Math.abs(rz)) === ring) camp = gen.region(rx, rz).pois.find((p) => p.type === 'camp' && !p.stronghold && p.level >= 10) ?? null;
+      }
+    }
+  }
+  check(!!camp, `a level ${camp?.level} camp to stand in`);
+  const at = [camp.x, gen.baseHeight?.(camp.x, camp.z) ?? 0, camp.z];
+  const send = () => a.ws.send(JSON.stringify({ t: 's', p: at, f: 0, v: [0, 0, 0], gr: 1, st: 'move', sT: 0, ci: 0, aq: 0, fl: 0, hp: 1 }));
+  const replicas = new Map();
+  let states = 0;
+  let visits = 0;
+  const seen = (pred, ms = 15000) => new Promise((resolve, reject) => {
+    const t0 = Date.now();
+    const tick = setInterval(() => {
+      send();
+      for (const m of a.got.splice(0)) {
+        if (m.t === 'sop' && m.op?.op === 'visit') visits++;
+        if (m.t !== 'snap') continue;
+        for (const e of m.ea ?? []) replicas.set(e.id, new EnemyReplica(e, m.ts));
+        for (const s of m.es ?? []) {
+          const r = replicas.get(s[0]);
+          if (!r) continue;
+          r.push(m.ts, s);
+          r.update(m.ts);
+          states++;
+        }
+      }
+      if (pred()) { clearInterval(tick); resolve(); } else if (Date.now() - t0 > ms) { clearInterval(tick); reject(new Error('the camp never showed up')); }
+    }, 70);
+  });
+  await seen(() => [...replicas.values()].some((r) => r.elite && r.affixes.length) && states > 20);
+  const elites = [...replicas.values()].filter((r) => r.elite);
+  check(true, `${replicas.size} enemies stream in and play back (${states} states), ${elites.length} of them elites: ${elites.map((r) => `${r.displayName} [${r.affixes.join(', ')}]${r.champion ? ' (champion)' : ''}`).join('; ')}`);
+  await seen(() => [...replicas.values()].some((r) => r.engaged && r.foe === a.welcome.id));
+  check(!(await opr(3, { op: 'threat', v: 0 })).ok, 'Threat stays put mid-fight');
+  await seen(() => visits > 0);
+  check(visits > 0, `the server noted where they went (${visits} visit${visits === 1 ? '' : 's'})`);
+}
+
+// A player round Brightwater (a town since gameplay phase 3): the server finds its folk and quest
+// board by id and checks the player stands with them.
+async function services(b, seed) {
+  let seq = 100;
+  const opr = async (op) => {
+    const s = ++seq;
+    b.ws.send(JSON.stringify({ t: 'op', seq: s, op }));
+    return b.until((m) => m.t === 'opr' && m.seq === s, `answer ${s}`);
+  };
+  const gen = new WorldGen(seed);
+  const hub = gen.region(0, 0).pois.find((p) => p.type === 'hub');
+  const stand = async (x, z) => {
+    for (let i = 0; i < 4; i++) {
+      b.ws.send(JSON.stringify({ t: 's', p: [x, gen.height(x, z), z], f: 0, v: [0, 0, 0], gr: 1, st: 'move', sT: 0, ci: 0, aq: 0, fl: 0, hp: 1 }));
+      await sleep(120);
+    }
+  };
+  const before = (n) => [n.x + Math.sin(n.facing) * 1.6, n.z + Math.cos(n.facing) * 1.6];
+  const board = hub.npcs.find((n) => n.role === 'board');
+  await stand(...before(board));
+  const posted = await opr({ op: 'talk', npc: board.id });
+  check(posted.ok && posted.roll?.offers?.length === 3 && posted.roll.offers.every((q) => q?.giver?.startsWith(`${board.id}#`)), `Brightwater's quest board has three postings: ${posted.roll?.offers?.map((q) => q?.title).join(', ')}`);
+  check((await opr({ op: 'accept', id: posted.roll.offers[0].id })).ok, 'one of them taken at the board');
+  check(!(await opr({ op: 'talk', npc: 'n:300,300:t0' })).ok, 'no talking to someone across the world');
+  const smith = hub.npcs.find((n) => n.role === 'smith');
+  await stand(...before(smith));
+  check(!(await opr({ op: 'rest', at: smith.id })).ok, 'a smith keeps no beds');
+  await stand(1, 3);
+  const rest = await opr({ op: 'rest' });
+  check(rest.ok && rest.roll?.stock?.length > 0 && rest.roll?.fine?.length > 0, 'a rest at the reactor restocks the traders, fine stock and all');
+  // Down into a dungeon through Brightwater's waygate (gameplay phase 5), and out by its portal.
+  const waygate = hub.npcs.find((n) => n.role === 'gate' && n.gate === 'dungeon');
+  check(!(await opr({ op: 'enter', d: 'foundry', mode: 'run', tier: 0, via: 'gate' })).ok, 'no going down from away from a way in');
+  await stand(...before(waygate));
+  const down = await opr({ op: 'enter', d: 'foundry', mode: 'run', tier: 0, via: 'gate' });
+  const run = down.roll?.run;
+  const st = run && await b.until((m) => m.t === 'dun' && m.id === run.id, 'the copy\'s state');
+  check(down.ok && run?.d === 'foundry' && down.roll.at[0] > 50000 && !!st?.st, `down into a private copy of the Rustjaw Foundry through the waygate (at ${down.roll?.at?.map(Math.round).join(', ')})`);
+  const L = generateDungeon(DUNGEONS.foundry, { shuffle: run.sh, level: run.lv });
+  const portal = L.things.find((t) => t.kind === 'portal');
+  const px = run.o[0] + portal.x + 0.6;
+  const pz = run.o[2] + portal.z;
+  for (let i = 0; i < 4; i++) {
+    b.ws.send(JSON.stringify({ t: 's', p: [px, run.o[1] + portal.floor, pz], f: 0, v: [0, 0, 0], gr: 1, st: 'move', sT: 0, ci: 0, aq: 0, fl: 0, hp: 1 }));
+    await sleep(120);
+  }
+  const up = await opr({ op: 'leave' });
+  check(up.ok && Math.hypot(up.roll.at[0] - waygate.x, up.roll.at[2] - waygate.z) < 4, 'out by its portal, back at the waygate (the same layout on both sides)');
+}
+
 async function run() {
   console.log(cluster ? 'Smoke test: gateway + 2 layers on Postgres' : 'Smoke test: one process on SQLite');
   let port;
@@ -105,6 +216,9 @@ async function run() {
   a.ws.send(JSON.stringify({ t: 'op', seq: 1, op: { op: 'filter', v: 2 } }));
   await a.until((m) => m.t === 'opr' && m.seq === 1, 'an op answer');
   check(true, 'the character answers ops');
+  check(typeof status.build === 'string' && status.stale === false, `status names the build it runs (${status.build}) and it's current`);
+  await services(b, status.seed);
+  if (!cluster) await horde(a, status.seed);
   a.ws.close();
   b.ws.close();
 }

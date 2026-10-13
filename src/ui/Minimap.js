@@ -5,6 +5,11 @@ import { CHUNK } from '../world/Chunks.js';
 import { FOG_CELL, FOG_PER_CHUNK } from '../world/Discovery.js';
 import { PARTY_COLOR } from './PartyUI.js';
 
+// Settlements of every size on the minimap: their ground, a little brighter the smaller they are.
+const PLACE_FILL = {
+  hamlet: 'rgba(255,210,122,0.45)', settlement: 'rgba(255,210,122,0.55)', town: 'rgba(255,200,110,0.35)', city: 'rgba(255,200,110,0.22)', district: 'rgba(255,215,140,0.3)',
+};
+
 const SIZE = 180;
 const RANGE = 60; // world units from centre to edge
 const RACE_FILL = { scav: 'rgba(200,80,50,0.65)', hive: 'rgba(150,90,230,0.6)', synth: 'rgba(40,180,230,0.6)', fauna: 'rgba(230,150,40,0.6)' };
@@ -47,6 +52,58 @@ export class Minimap {
     ctx.restore();
   }
 
+  questMarker(x, z, kind = 'default', r = 6) {
+    const ctx = this.ctx;
+    const styles = {
+      talk: { fill: '#ffd76a', stroke: '#ff9a1f', mark: 'diamond' },
+      use: { fill: '#74d9ff', stroke: '#2aa4ff', mark: 'square' },
+      goto: { fill: '#a3f5b0', stroke: '#31c36c', mark: 'ring' },
+      defend: { fill: '#ff9d7d', stroke: '#f05d5d', mark: 'shield' },
+      clear: { fill: '#d8b5ff', stroke: '#9b67e8', mark: 'star' },
+      killRace: { fill: '#ff8d8d', stroke: '#df4747', mark: 'cross' },
+      attune: { fill: '#71f0ff', stroke: '#2bb9d6', mark: 'hex' },
+      chest: { fill: '#f3d774', stroke: '#c68d1f', mark: 'gem' },
+      default: { fill: '#ffd23f', stroke: '#f9af28', mark: 'diamond' },
+    };
+    const s = styles[kind] ?? styles.default;
+    ctx.save();
+    ctx.translate(x, z);
+    ctx.strokeStyle = '#0a0c13';
+    ctx.lineWidth = 2;
+    ctx.fillStyle = s.fill;
+    ctx.beginPath();
+    if (s.mark === 'diamond') {
+      ctx.moveTo(0, -r * 1.2); ctx.lineTo(r * 1.1, 0); ctx.lineTo(0, r * 1.2); ctx.lineTo(-r * 1.1, 0); ctx.closePath();
+    } else if (s.mark === 'square') {
+      ctx.rect(-r * 1.05, -r * 1.05, r * 2.1, r * 2.1);
+    } else if (s.mark === 'ring') {
+      ctx.arc(0, 0, r * 1.1, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(0, 0, r * 0.4, 0, Math.PI * 2);
+    } else if (s.mark === 'shield') {
+      ctx.moveTo(0, -r * 1.35); ctx.lineTo(r * 1.15, -r * 0.35); ctx.lineTo(r * 0.8, r * 1.2); ctx.lineTo(0, r * 1.45); ctx.lineTo(-r * 0.8, r * 1.2); ctx.lineTo(-r * 1.15, -r * 0.35); ctx.closePath();
+    } else if (s.mark === 'star') {
+      for (let i = 0; i < 10; i++) {
+        const a = (Math.PI / 5) * i - Math.PI / 2; const rr = i % 2 === 0 ? r * 1.3 : r * 0.5; const px = Math.cos(a) * rr; const py = Math.sin(a) * rr; if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+    } else if (s.mark === 'cross') {
+      ctx.moveTo(-r * 0.55, -r * 1.2); ctx.lineTo(-r * 0.2, -r * 1.2); ctx.lineTo(-r * 0.2, -r * 0.2); ctx.lineTo(r * 1.2, -r * 0.2); ctx.lineTo(r * 1.2, r * 0.2); ctx.lineTo(-r * 0.2, r * 0.2); ctx.lineTo(-r * 0.2, r * 1.2); ctx.lineTo(-r * 0.55, r * 1.2); ctx.lineTo(-r * 0.55, r * 0.2); ctx.lineTo(-r * 1.2, r * 0.2); ctx.lineTo(-r * 1.2, -r * 0.2); ctx.lineTo(-r * 0.55, -r * 0.2); ctx.closePath();
+    } else if (s.mark === 'hex') {
+      for (let i = 0; i < 6; i++) { const a = (Math.PI / 3) * i - Math.PI / 6; const px = Math.cos(a) * r * 1.12; const py = Math.sin(a) * r * 1.12; if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py); }
+      ctx.closePath();
+    } else if (s.mark === 'gem') {
+      ctx.moveTo(0, -r * 1.2); ctx.lineTo(r * 1.1, 0); ctx.lineTo(0, r * 1.2); ctx.lineTo(-r * 1.1, 0); ctx.closePath();
+      ctx.moveTo(-r * 0.7, 0); ctx.lineTo(0, r * 0.7); ctx.lineTo(r * 0.7, 0); ctx.lineTo(0, -r * 0.7); ctx.closePath();
+    } else {
+      ctx.arc(0, 0, r * 1.1, 0, Math.PI * 2);
+    }
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  }
+
   update(dt, game) {
     this.timer -= dt;
     if (this.timer > 0) return;
@@ -73,6 +130,10 @@ export class Minimap {
     ctx.scale(k, k);
     ctx.translate(-p.x, -p.z);
 
+    // Down in a dungeon: its rooms seen so far (world/DungeonView.js) instead of the land.
+    const indoors = game.dungeonView?.active;
+    if (indoors) game.dungeonView.drawRooms(ctx, 1 / k);
+    else {
     // Tiles are north-up images, so they're drawn flipped into this z-down space.
     const R = RANGE * 1.5;
     const cx0 = Math.floor((p.x - R) / CHUNK);
@@ -133,38 +194,48 @@ export class Minimap {
           ctx.fillRect(-1.6, -1.6, 3.2, 3.2);
           ctx.restore();
         } else if (poi.type === 'chest' && !game.openedChests.has(poi.id)) this.dot(poi.x, poi.z, 1.4, '#f0c75e');
-        else if (poi.type === 'settlement') {
-          ctx.fillStyle = 'rgba(255,210,122,0.55)';
+        else if (PLACE_FILL[poi.type]) {
+          ctx.fillStyle = PLACE_FILL[poi.type];
           ctx.beginPath();
-          ctx.arc(poi.x, poi.z, poi.r, 0, Math.PI * 2);
+          ctx.arc(poi.x, poi.z, poi.type === 'city' ? poi.wall : poi.r, 0, Math.PI * 2);
           ctx.fill();
-          this.dot(poi.x, poi.z, 2.6, '#ffd27a');
-        } else if (poi.type === 'landmark') this.dot(poi.x, poi.z, 2.6, '#c8b4ff');
+          if (poi.type !== 'district') this.dot(poi.x, poi.z, poi.type === 'city' ? 4 : poi.type === 'town' ? 3.2 : poi.type === 'hamlet' ? 2 : 2.6, '#ffd27a');
+        } else if (poi.type === 'landmark' || poi.type === 'story') this.dot(poi.x, poi.z, 2.6, poi.story ? '#ffcf7a' : '#c8b4ff');
       }
+    }
     }
     for (const dr of game.drops) if (dr.tier >= 2) this.dot(dr.position.x, dr.position.z, 1.2, RARITY[dr.weapon.rarity].css);
     for (const e of game.enemies) {
       if (!e.alive) continue;
-      this.dot(e.position.x, e.position.z, e.type.boss || e.elite ? 2.2 : 1.1, e.engaged ? '#ff3030' : '#b03030');
+      this.dot(e.position.x, e.position.z, e.type.boss || e.champion ? 2.8 : e.elite ? 2.2 : 1.1, e.engaged ? '#ff3030' : '#b03030');
+    }
+    // A warband on the move: a pulsing ring round it (and an arrow at the rim when it's off the map).
+    let hx = 0;
+    let hz = 0;
+    let hn = 0;
+    for (const e of game.enemies) if (e.alive && e.horde) { hx += e.position.x; hz += e.position.z; hn++; }
+    const horde = hn >= 3 ? { x: hx / hn, z: hz / hn } : null;
+    if (horde) {
+      ctx.strokeStyle = 'rgba(255, 70, 50, 0.9)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(horde.x, horde.z, 10 + Math.sin(performance.now() / 260) * 1.5, 0, Math.PI * 2);
+      ctx.stroke();
     }
     for (const n of game.npcs) this.dot(n.position.x, n.position.z, 1.3, n.marker ? '#ffd23f' : '#ffffff');
+    for (const s of game.props?.values() ?? []) this.dot(s.position.x, s.position.z, 1.5, s.marker ? '#ffd23f' : '#e8d4a0');
     for (const r of game.remotes?.list ?? []) if (!game.partyUI?.isMate(r.netId)) this.dot(r.position.x, r.position.z, 1.6, '#5ee6ff');
     const mates = (game.partyUI?.mates ?? []).filter((m) => m.online && m.known);
     for (const m of mates) this.dot(m.x, m.z, 2.1, PARTY_COLOR);
 
     const wp = game.questWaypoint();
-    if (wp) {
-      ctx.strokeStyle = '#ffd23f';
-      ctx.lineWidth = 1.2;
-      ctx.beginPath();
-      ctx.arc(wp.x, wp.z, wp.radius ?? 4, 0, Math.PI * 2);
-      ctx.stroke();
-    }
+    if (wp) this.questMarker(wp.x, wp.z, wp.kind ?? 'default', wp.radius ?? 4);
     if (game.customMarker) this.dot(game.customMarker.x, game.customMarker.z, 2, '#4ad2ff');
     ctx.restore();
 
     if (wp) this.rimArrow(wp, p, yaw, '#ffd23f');
     if (game.customMarker) this.rimArrow(game.customMarker, p, yaw, '#4ad2ff');
+    if (horde) this.rimArrow(horde, p, yaw, '#ff4632');
     for (const m of mates) this.rimArrow(m, p, yaw, PARTY_COLOR);
 
     ctx.save();

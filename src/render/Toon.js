@@ -122,9 +122,10 @@ export const INK_SCALE = { world: { value: 0.7 }, view: { value: 0.3 } };
 
 // Pushes vertices out along view-space normals so line weight is independent of object scale.
 // Works for plain, instanced and (rigid-)skinned meshes. `layer` picks the INK_SCALE it follows;
-// `wind` ({ amp, base }) sways the hull with the swaying mesh it outlines.
-export function outlineMaterial(thickness, color = INK, layer = 'world', wind = null) {
-  const key = `${thickness}:${color}:${layer}:${wind ? `${wind.amp}:${wind.base ?? 0}` : ''}`;
+// `wind` ({ amp, base }) sways the hull with the swaying mesh it outlines; `perVertex` multiplies
+// the thickness by each vertex's `inkWidth` (one shell round pieces of different weights).
+export function outlineMaterial(thickness, color = INK, layer = 'world', wind = null, perVertex = false) {
+  const key = `${thickness}:${color}:${layer}:${wind ? `${wind.amp}:${wind.base ?? 0}` : ''}:${perVertex ? 'v' : ''}`;
   let mat = outlineMaterials.get(key);
   if (!mat) {
     mat = new THREE.ShaderMaterial({
@@ -133,10 +134,13 @@ export function outlineMaterial(thickness, color = INK, layer = 'world', wind = 
         { uThickness: { value: thickness }, uColor: { value: new THREE.Color(color) } },
       ]),
       fog: true,
-      defines: wind ? { USE_WIND: '' } : {},
+      defines: { ...(wind ? { USE_WIND: '' } : {}), ...(perVertex ? { USE_INK_WIDTH: '' } : {}) },
       vertexShader: /* glsl */ `
         uniform float uThickness;
         uniform float uInkScale;
+        #ifdef USE_INK_WIDTH
+        attribute float inkWidth;
+        #endif
         #include <fog_pars_vertex>
         #include <skinning_pars_vertex>
         #ifdef USE_WIND
@@ -159,7 +163,11 @@ export function outlineMaterial(thickness, color = INK, layer = 'world', wind = 
           #endif
           vec4 mvPos = modelViewMatrix * local;
           vec3 n = normalize(normalMatrix * objNormal);
+          #ifdef USE_INK_WIDTH
+          mvPos.xyz += n * uThickness * inkWidth * uInkScale;
+          #else
           mvPos.xyz += n * uThickness * uInkScale;
+          #endif
           gl_Position = projectionMatrix * mvPos;
           vec4 mvPosition = mvPos;
           #include <fog_vertex>
@@ -216,7 +224,7 @@ export function hullGeometry(geo) {
   let hull = hullCache.get(geo);
   if (!hull) {
     const g = geo.clone();
-    for (const name of Object.keys(g.attributes)) if (name !== 'position' && name !== 'skinIndex' && name !== 'skinWeight') g.deleteAttribute(name);
+    for (const name of Object.keys(g.attributes)) if (name !== 'position' && name !== 'skinIndex' && name !== 'skinWeight' && name !== 'inkWidth') g.deleteAttribute(name);
     hull = mergeVertices(g, 1e-3);
     hull.computeVertexNormals();
     hullCache.set(geo, hull);

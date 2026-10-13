@@ -295,6 +295,7 @@ export class TitleMenu {
         <button data-act="settings">Settings</button>
         <button data-act="controls">Controls</button>
       </nav>
+      ${this.net.outdated ? '<p class="tt-error" role="alert">The realm\'s server is running older code than the game it serves — it was updated since it started. Restart the server to play online; offline play works meanwhile.</p>' : ''}
       <p class="tt-foot">${this.net.mode === 'probing' ? 'Looking for the realm…' : 'Progress saves automatically.'}</p>`;
   }
 }

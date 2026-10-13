@@ -18,7 +18,8 @@
   <div id="bar"></div>
   <script type="module">
     // Dev tool: the character builders up close, from fixed angles and in test poses, to check
-    // shape and how the skin deforms at the joints. ?view=lineup|head|hands|poses|armour|npcs|enemies
+    // shape and how the skin deforms at the joints. ?view=lineup|head|hands|poses|armour|sets|npcs|enemies
+    // (sets: a hero in every piece of each armour set).
     // (&race=scav|hive|synth|fauna: every model of a faction, base types then variants, posed
     // by the game's animators at rest).
     import * as THREE from 'three';
@@ -33,13 +34,14 @@
     import { setOutlinesVisible } from '../src/render/Toon.js';
     import { lookFromChoice } from '../src/models/heroLooks.js';
     import { generateArmor } from '../src/items/ArmorGenerator.js';
+    import { GEAR_SETS } from '../src/items/sets.js';
     import { NPCS } from '../src/world/mapData.js';
 
     const q = new URLSearchParams(location.search);
     const view = q.get('view') ?? 'lineup';
     const quality = q.get('q') ?? 'medium'; // as the game draws it (render/Quality.js)
     const race = q.get('race') ?? 'scav';
-    const VIEWS = ['lineup', 'head', 'hands', 'poses', 'armour', 'npcs', 'enemies'];
+    const VIEWS = ['lineup', 'head', 'hands', 'poses', 'armour', 'sets', 'npcs', 'enemies'];
     document.getElementById('bar').innerHTML = VIEWS.map((v) => `<a href="?view=${v}&q=${quality}">${v}</a>`).join('')
       + ['scav', 'hive', 'synth', 'fauna'].map((r) => `<a href="?view=enemies&race=${r}&q=${quality}">${r}</a>`).join('')
       + ['low', 'medium', 'high'].map((k) => `<a href="?view=${view}&race=${race}&q=${k}">${k}</a>`).join('');
@@ -129,6 +131,15 @@
       }
       Math.random = orig;
       aim(0, 1.25, 10, 0, 1.0, 0);
+    } else if (view === 'sets') {
+      const ids = Object.keys(GEAR_SETS);
+      ids.forEach((id, i) => {
+        const gear = {};
+        for (const slot of ['head', 'chest', 'hands', 'legs', 'back']) gear[slot] = generateArmor({ level: 10, slot, set: id, rarity: 'epic', seed: 11 + i });
+        add(buildHumanoid(undefined, gear), (i - (ids.length - 1) / 2) * 0.95, 0, 0);
+      });
+      aim(0, 1.25, 15, 0, 1.0, 0);
+      window.lineup = ids;
     } else if (view === 'npcs') {
       const defs = NPCS.filter((d) => d.look).slice(0, 5);
       defs.forEach((d, i) => add(buildHumanoid(d.look), (i - (defs.length - 1) / 2) * 0.9, 0, 0));

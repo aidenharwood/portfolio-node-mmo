@@ -4,7 +4,7 @@
 //            away a query samples the generator directly (same grid points, same answer).
 //   meshes   three levels of detail (2 / 4 / 8 m) by distance, each with a skirt that hides the
 //            cracks between neighbouring levels; vertex colours carry biome, rock, sand, snow,
-//            camp dirt and a little noise. Normals come from the generator across chunk borders,
+//            camp dirt, settlement paving and a little noise. Normals come from the generator across chunk borders,
 //            so there are no lighting seams.
 //   tiles    each chunk paints a small top-down tile for the map and minimap.
 import * as THREE from 'three';
@@ -41,6 +41,7 @@ const SNOWCAP = new THREE.Color(0xeef3f6);
 const SAND = new THREE.Color(0xd9c992);
 const LAKEBED = new THREE.Color(0x5f8a78);
 const DIRT = new THREE.Color(0xc4a271);
+const PAVE = new THREE.Color(0xb7b1a5); // a city's flagstones (a pad's `dirt: 'stone'`)
 const _c = new THREE.Color();
 
 let sharedMaterial = null;
@@ -243,7 +244,7 @@ export class Chunk {
     for (const p of feats.pads) {
       if (!p.dirt) continue;
       const d = Math.hypot(x - p.x, z - p.z);
-      if (d < p.r + 4) out.lerp(DIRT, smoothstep(p.r + 4, p.r - 1, d) * 0.85);
+      if (d < p.r + 4) out.lerp(p.dirt === 'stone' ? PAVE : DIRT, smoothstep(p.r + 4, p.r - 1, d) * 0.85);
     }
     return out.multiplyScalar(0.94 + gen.nD(x * 0.15, z * 0.15) * 0.06);
   }

@@ -66,6 +66,7 @@ export class CharacterLink {
         this.game.onCharFx(r.fx, w.op);
         ok = r.ok;
       }
+      if (!m.ok && m.err) this.game.hud.toast(m.err);
       w.resolve(ok);
     } else if (!m.ok) {
       // A change we'd already shown was refused: take the server's copy.

@@ -3,7 +3,8 @@
 // of the render time — a little in the past, like other players — so motion stays smooth through
 // network jitter. It offers the fields of an EnemySim, so one view (entities/Enemy.js) draws both.
 import * as THREE from 'three';
-import { enemyType, enemyAttacks, enemyRadius, STATES, FLAG } from '../sim/enemyDefs.js';
+import { enemyType, enemyAttacks, enemyRadius, enemyMaxHp, STATES, FLAG } from '../sim/enemyDefs.js';
+import { SHIELD } from '../sim/affixes.js';
 
 const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 const lerp = (a, b, t) => a + (b - a) * t;
@@ -20,8 +21,13 @@ export class EnemyReplica {
     this.level = info.lv;
     this.elite = info.el ?? null;
     this.summoner = info.su || null;
-    this.type = enemyType(info.t, info.v, info.el, !!info.su);
-    this.displayName = info.el ? `${info.el}` : this.type.name;
+    this.type = enemyType(info.t, info.v, info.el, !!info.su, !!info.ch);
+    this.champion = !!info.ch;
+    this.horde = !!info.hd;
+    this.affixes = info.af ?? [];
+    this.shieldMax = this.affixes.includes('shielded') ? Math.round(enemyMaxHp(this.type, info.lv) * SHIELD.share) : 0;
+    this.shield = this.shieldMax;
+    this.displayName = info.nm ?? (info.el ? `${info.el}` : this.type.name);
     this.attacks = enemyAttacks(this.type, info.lv);
     this.radius = enemyRadius(this.type);
     this.height = this.type.height;
@@ -87,6 +93,8 @@ export class EnemyReplica {
     this.foe = s[15] >= 0 ? s[15] : null;
     this.attackSeq = s[16];
     this.maxHp = s[17] ?? this.maxHp;
+    if (this.shieldMax) this.shield = s[18] ?? 0;
+    this.rallied = !!(fl & FLAG.rallied);
     this.alive = !!(fl & FLAG.alive);
     this.engaged = !!(fl & FLAG.engaged);
     this.hidden = !!(fl & FLAG.hidden);

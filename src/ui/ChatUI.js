@@ -96,14 +96,14 @@ export class ChatUI {
     this.game.net.send({ t: 'chat', text });
   }
 
-  add({ ch, from, to, text }) {
+  add({ ch, from, to, text, ti }) {
     const me = this.game.net.character?.name;
     if (ch === 'whisper' && from && from !== me) this.lastWhisper = from;
     const line = document.createElement('div');
     line.className = `chat-msg ${ch}`;
     let who = '';
     if (ch === 'whisper') who = from === me ? `To ${esc(to)}: ` : `${esc(from)} whispers: `;
-    else if (from) who = `${ch === 'say' ? '' : ch === 'party' ? '<i>[Party]</i> ' : ch === 'guild' ? '<i>[Guild]</i> ' : '<i>[World]</i> '}<b>${esc(from)}</b>: `;
+    else if (from) who = `${ch === 'say' ? '' : ch === 'party' ? '<i>[Party]</i> ' : ch === 'guild' ? '<i>[Guild]</i> ' : '<i>[World]</i> '}<b>${esc(from)}</b>${ti ? ` <small class="chat-title">${esc(ti)}</small>` : ''}: `;
     line.innerHTML = `${who}${esc(text)}`;
     line.dataset.at = Date.now();
     this.log.appendChild(line);

@@ -8,6 +8,7 @@ import { FX_TEXTURES } from '../fx/Effects.js';
 import { dealDamage } from './Damage.js';
 import { PERKS } from '../items/perks.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { rayBox } from './Aim.js';
 
 const arrowGeo = (() => {
   const shaft = new THREE.CylinderGeometry(0.015, 0.015, 0.7, 5).rotateX(Math.PI / 2).toNonIndexed();
@@ -188,8 +189,9 @@ export class Projectiles {
   }
 
   /**
-   * kind: 'bullet' | 'bolt' | 'orb' | 'rocket' | 'quarrel' | 'arrow'. direction is 3D.
-   * aoe > 0 explodes on impact/expiry. accel/maxSpeed give rockets a motor.
+   * kind: 'bullet' | 'bolt' | 'orb' | 'rocket' | 'quarrel' | 'arrow' | 'bomb'. direction is 3D.
+   * aoe > 0 explodes on impact/expiry (then `onBurst(pos)`, if given). accel/maxSpeed give rockets
+   * a motor. `quiet`: not re-created on other screens as a shot (abilities send their own).
    */
   spawn(o) {
     const size = o.size ?? 1;
@@ -225,7 +227,7 @@ export class Projectiles {
       this.game.scene.add(p.mesh);
     }
     this.list.push(p);
-    if (o.owner === this.game.player) this.game.net?.shotFx(o);
+    if (o.owner === this.game.player && !o.quiet) this.game.net?.shotFx(o);
     return p;
   }
 
@@ -244,6 +246,7 @@ export class Projectiles {
         p.mesh.scale.setScalar((p.size ?? 1) * (1 + 0.25 * Math.max(0, Math.sin(p.life * 30))));
         if (p.life <= 0) {
           g.explode(p.pos, p.aoe, p.damage, p.owner, p.weapon, { color: p.color, knockback: p.knockback, scaled: p.scaled, element: p.element, inflict: p.inflict });
+          p.onBurst?.(p.pos.clone());
           this.remove(i);
         }
         continue;
@@ -273,7 +276,9 @@ export class Projectiles {
       let tWorld = len;
       let surface = null;
       for (const c of world.collidersAlongRay(_from, _dir, len)) {
-        const t = rayCapsuleCyl(_from, _dir, c.x, c.z, c.r + p.radius * 0.5, c.y, c.y + c.h);
+        const pr = p.radius * 0.5;
+        const t = c.box ? rayBox(_from, _dir, c.x - c.hx - pr, c.x + c.hx + pr, c.y, c.y + c.h, c.z - c.hz - pr, c.z + c.hz + pr)
+          : rayCapsuleCyl(_from, _dir, c.x, c.z, c.r + pr, c.y, c.y + c.h);
         if (t < tWorld) { tWorld = t; surface = c; }
       }
       const tg = world.raycastGround(_from, _dir, tWorld);
@@ -288,6 +293,9 @@ export class Projectiles {
           g.audio.whiz(_look.copy(_from).addScaledVector(_dir, along));
         }
       }
+
+      // An enemy shot reaching an Arc Barrier's dome (entities/AbilityKit.js) stops at its skin.
+      if (p.owner.faction === 'enemy' && g.wards.length && this.warded(p, _from, _dir, len)) { this.remove(i); continue; }
 
       _hits.length = 0;
       // Other players' shots are cosmetic until the server resolves combat (docs/MULTIPLAYER.md).
@@ -334,7 +342,7 @@ export class Projectiles {
       }
       p.pos.copy(_from).addScaledVector(_dir, end);
       p.traveled += end;
-      if (!world.inBounds(p.pos)) dead = true;
+      if (!world.inBounds(p.pos) || p.pos.y > world.ceilingAt(p.pos.x, p.pos.z)) dead = true;
       if (p.life <= 0) dead = true;
 
       // ---- visuals
@@ -350,11 +358,32 @@ export class Projectiles {
       }
 
       if (dead) {
-        if (p.aoe > 0) g.explode(p.pos, p.aoe, p.damage, p.owner, p.weapon, { color: p.color, knockback: p.knockback, scaled: p.scaled, element: p.element, inflict: p.inflict });
+        if (p.aoe > 0) {
+          g.explode(p.pos, p.aoe, p.damage, p.owner, p.weapon, { color: p.color, knockback: p.knockback, scaled: p.scaled, element: p.element, inflict: p.inflict });
+          p.onBurst?.(p.pos.clone());
+        }
         if (p.tracer) p.spent = true;
         else this.remove(i);
       }
     }
+  }
+
+  // Does this frame's travel (from `from`, `len` along `dir`) cross into a dome from outside?
+  warded(p, from, dir, len) {
+    for (const w of this.game.wards) {
+      const r2 = w.radius * w.radius;
+      if (from.distanceToSquared(w.pos) <= r2) continue; // fired from inside: it gets out
+      _look.copy(from).addScaledVector(dir, len);
+      if (_look.distanceToSquared(w.pos) > r2) {
+        // Passing through the dome between the two ends?
+        const t = Math.max(0, Math.min(len, _n.subVectors(w.pos, from).dot(dir)));
+        if (_look.copy(from).addScaledVector(dir, t).distanceToSquared(w.pos) > r2) continue;
+      }
+      this.game.effects.spawnSparks(_look, 0x6ae8ff, 8);
+      if (p.aoe > 0) this.game.explode(_look.clone(), p.aoe, p.damage, p.owner, p.weapon, { color: p.color, knockback: 0, scaled: p.scaled, element: p.element });
+      return true;
+    }
+    return false;
   }
 
   // Bullet holes, sparks or dust depending on what was hit.

@@ -19,10 +19,12 @@ function hound(kind) {
   const fin = rime ? 0xd8f4ff : alpha ? 0x8a2a22 : 0xc8b89a;
   const glow = rime ? 0x7fe8ff : alpha ? 0xff4a2a : FAUNA_GLOW;
   const cfg = {
-    bodyY: 0.72, legLen: 0.68, bodyLen: 1.0, bodyWidth: 0.34, walk: 2.6, strideK: 0.26, height: 1.1, jawOpen: 0.8, tailDroop: 0.3,
+    bodyY: 0.76, legLen: 0.68, bodyLen: 1.0, bodyWidth: 0.34, walk: 2.6, strideK: 0.26, height: 1.1, jawOpen: 0.8, tailDroop: 0.08,
     chest: [0, 0.04, 0.36], neck: [0, 0.12, 0.2], head: [0, 0.08, 0.17], jaw: [0, -0.05, 0.05],
     tail: { at: [0, 0.06, -0.52], n: 4, seg: 0.15 },
-    legs: hexLegs({ zs: [0.42, 0.0, -0.4], x: 0.15, hipY: -0.06, upper: 0.34, lower: 0.36, spread: 1.12 }),
+    // Front and middle legs bend their elbows back, the hind pair their knees forward, so no
+    // two neighbours fold into each other.
+    legs: hexLegs({ zs: [0.42, 0.0, -0.4], x: 0.15, hipY: -0.06, upper: 0.34, lower: 0.36, spread: 1.12, bend: ['back', 'back', 'fwd'] }),
   };
   const rig = legSkeleton(cfg);
   const { body, chest, neck, head, jaw } = rig;
@@ -34,7 +36,7 @@ function hound(kind) {
   for (let i = 0; i < fins; i++) {
     const z = 0.3 - i * (0.75 / (fins - 1));
     const h = (alpha ? 0.26 : 0.18) * (1 - Math.abs(i - fins * 0.35) / fins);
-    if (rime) piece(body, G.octa(0.06), fin, { pos: [0, 0.22 + h * 0.4, z], scale: [0.5, h * 9, 1.2], rot: [-0.5, 0, 0], glow: true, outline: 0.006 });
+    if (rime) piece(body, G.octa(0.06), fin, { pos: [0, 0.17 + h * 0.3, z], scale: [0.5, h * 9, 1.2], rot: [-0.5, 0, 0], glow: true, outline: 0.006 });
     else piece(body, G.cone(0.05, h, 4), fin, { pos: [0, 0.2 + h * 0.4, z], rot: [-0.6, 0, 0], scale: [0.35, 1, 1.5], outline: 0.008 });
   }
   for (const s of [-1, 1]) for (let i = 0; i < 3; i++) piece(body, G.box(0.01, 0.07, 0.03), glow, { pos: [0.165 * s, 0.0, 0.12 - i * 0.07], rot: [0, 0, -0.2 * s], glow: true, outline: 0 });
@@ -176,9 +178,9 @@ function thunderhorn(kind) {
 // ======================================================================== the Behemoth
 // A hunched giant grown over with crystal, four-eyed, tusked twice over, clawed forefeet.
 function behemoth() {
-  const hide = 0x3a4252;
-  const dark = 0x232832;
-  const plate = 0x5a6478;
+  const hide = 0x5a5470;
+  const dark = 0x302c3c;
+  const plate = 0x8a8098;
   const crystal = 0xbff4ff;
   const tusk = 0xe8dcc4;
   const glow = FAUNA_GLOW;
@@ -200,7 +202,11 @@ function behemoth() {
     piece(body, G.octa(0.2 + (i % 2) * 0.1), crystal, { pos: [x, 0.82 - Math.abs(x) * 0.4, z], rot: [i, i * 0.7, 0.3], scale: [0.6, 1.8, 0.6], glow: true, outline: 0.016 });
   }
   piece(chest, G.dome(0.8, 14, 6, 0.4), plate, { pos: [0, 0.6, 0.0], rot: [-0.2, 0, 0], scale: [1.1, 0.8, 0.8], outline: 0.02 });
-  for (const s of [-1, 1]) piece(chest, G.octa(0.26), crystal, { pos: [0.5 * s, 0.95, -0.1], rot: [0.3, 0, -0.5 * s], scale: [0.6, 1.9, 0.6], glow: true, outline: 0.016 });
+  for (const s of [-1, 1]) {
+    piece(chest, G.octa(0.26), crystal, { pos: [0.5 * s, 0.95, -0.1], rot: [0.3, 0, -0.5 * s], scale: [0.6, 1.9, 0.6], glow: true, outline: 0.016 });
+    piece(chest, G.octa(0.18), crystal, { pos: [0.24 * s, 1.08, 0.12], rot: [-0.2, 0, -0.25 * s], scale: [0.6, 2.1, 0.6], glow: true, outline: 0.014 });
+    piece(chest, G.octa(0.14), crystal, { pos: [0.72 * s, 0.62, 0.2], rot: [0.2, 0, -0.9 * s], scale: [0.6, 1.8, 0.6], glow: true, outline: 0.012 });
+  }
   piece(neck, G.sphere(0.55, 14, 10), hide, { pos: [0, 0, 0.08], outline: 0.02 });
   // Head: broad and flat, four glowing eyes, a heavy brow plate, upper tusks curving forward.
   piece(head, G.sphere(0.5, 14, 10), hide, { scale: [1.1, 0.8, 1], outline: 0.02 });

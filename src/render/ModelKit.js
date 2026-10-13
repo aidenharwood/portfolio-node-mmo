@@ -58,6 +58,24 @@ export function bake(group) {
   return group;
 }
 
+// Lifts every piece in `group`'s sub-groups up into `group` itself, where it already stands, so
+// one bake merges them all by colour: a whole town or city district in a handful of draw calls.
+// (Sub-groups must not be scaled, or a piece's place couldn't be kept exactly.)
+export function flatten(group) {
+  group.updateMatrixWorld(true);
+  const inv = new THREE.Matrix4().copy(group.matrixWorld).invert();
+  const lift = [];
+  group.traverse((o) => { if (o.isMesh && o.userData.piece && o.parent !== group) lift.push(o); });
+  for (const m of lift) {
+    m.matrix.multiplyMatrices(inv, m.matrixWorld);
+    m.matrix.decompose(m.position, m.quaternion, m.scale);
+    m.parent.remove(m);
+    group.add(m);
+  }
+  for (const c of [...group.children]) if (!c.isMesh && !c.children.length) group.remove(c);
+  return group;
+}
+
 // Bakes `root` and every descendant group (bones keep their own transforms).
 export function bakeTree(root) {
   const groups = [];
@@ -68,9 +86,11 @@ export function bakeTree(root) {
 
 // Bakes a jointed model (a THREE.Bone hierarchy carrying pieces) into skinned meshes: every
 // piece is weighted fully to its nearest ancestor bone (or keeps its own blended weights — lofted
-// skin, cloth), pieces merge by colour, and the result is a few SkinnedMeshes sharing one
-// Skeleton, one per colour however many bones and pieces, plus one outline shell per ink
-// thickness (shells are all ink, whatever they wrap). Non-bone children (weapon mounts) are kept.
+// skin, cloth), and however many colours, bones and pieces there are, it all merges into three
+// SkinnedMeshes sharing one Skeleton: one lit (each piece's colour carried in its vertices), one
+// unlit for the glowing parts, and one outline shell (each piece's ink thickness carried in its
+// vertices). Three draw calls a character, so crowds stay cheap. Non-bone children (weapon
+// mounts) are kept.
 export function bakeSkinned(root) {
   root.updateMatrixWorld(true);
   const bones = [];
@@ -80,8 +100,10 @@ export function bakeSkinned(root) {
   const m = new THREE.Matrix4();
   const pieces = [];
   root.traverse((o) => { if (o.isMesh && o.userData.piece) pieces.push(o); });
-  const buckets = new Map();
-  const hulls = new Map();
+  const lit = [];
+  const glow = [];
+  const hulls = [];
+  const color = new THREE.Color();
   for (const child of pieces) {
     const p = child.userData.piece;
     let b = child.parent;
@@ -108,34 +130,38 @@ export function bakeSkinned(root) {
       g.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(si, 4));
       g.setAttribute('skinWeight', new THREE.Float32BufferAttribute(sw, 4));
     }
-    const key = `${p.color}|${p.glow}`;
-    if (!buckets.has(key)) buckets.set(key, { color: p.color, glow: p.glow, geos: [] });
-    buckets.get(key).geos.push(g);
     if (p.outline > 0) {
-      if (!hulls.has(p.outline)) hulls.set(p.outline, []);
-      hulls.get(p.outline).push(g);
+      const h = g.clone();
+      h.setAttribute('inkWidth', new THREE.BufferAttribute(new Float32Array(n).fill(p.outline), 1));
+      hulls.push(h);
     }
+    // Colours are linear in the vertices, as a material's colour is once set.
+    color.set(p.color);
+    const rgb = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) { rgb[i * 3] = color.r; rgb[i * 3 + 1] = color.g; rgb[i * 3 + 2] = color.b; }
+    g.setAttribute('color', new THREE.BufferAttribute(rgb, 3));
+    (p.glow ? glow : lit).push(g);
     child.removeFromParent();
   }
   const skeleton = new THREE.Skeleton(bones);
   const meshes = [];
   const slack = (sphere) => { sphere.radius = sphere.radius * 1.25 + 0.6; return sphere; };
-  for (const b of buckets.values()) {
-    const geo = mergeGeometries(b.geos);
+  const add = (geo, mat, solid) => {
     geo.computeBoundingSphere();
-    const mat = b.glow ? new THREE.MeshBasicMaterial({ color: b.color }) : toonMaterial(b.color);
     const mesh = new THREE.SkinnedMesh(geo, mat);
-    mesh.castShadow = !b.glow;
-    mesh.receiveShadow = !b.glow;
+    mesh.castShadow = solid;
+    mesh.receiveShadow = solid;
     root.add(mesh);
     mesh.bind(skeleton, root.matrixWorld);
     mesh.boundingSphere = slack(geo.boundingSphere.clone());
-    meshes.push(mesh);
-  }
-  for (const [thickness, geos] of hulls) {
-    const shell = mergeGeometries(geos);
+    return mesh;
+  };
+  if (lit.length) meshes.push(add(mergeGeometries(lit), toonMaterial(0xffffff, { vertexColors: true }), true));
+  if (glow.length) meshes.push(add(mergeGeometries(glow), new THREE.MeshBasicMaterial({ vertexColors: true }), false));
+  if (hulls.length) {
+    const shell = mergeGeometries(hulls);
     shell.computeBoundingSphere();
-    const hull = new THREE.SkinnedMesh(hullGeometry(shell), outlineMaterial(thickness));
+    const hull = new THREE.SkinnedMesh(hullGeometry(shell), outlineMaterial(1, undefined, 'world', null, true));
     hull.castShadow = false;
     hull.receiveShadow = false;
     hull.raycast = () => {};

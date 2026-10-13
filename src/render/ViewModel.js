@@ -204,7 +204,8 @@ export class ViewModel {
       toViewInk(o);
       if (!o.material.isShaderMaterial) noInk(o.material); // its own hull ink, not the world's
     });
-    if (weapon.cls === 'ranged') this.model.scale.setScalar(HELD_GUN_SCALE);
+    const baseScale = weapon.cls === 'ranged' ? HELD_GUN_SCALE * 0.82 : weapon.cls === 'magic' ? 0.82 : 0.75;
+    this.model.scale.setScalar(baseScale);
     const box = new THREE.Box3().setFromObject(this.model);
     // Without a defined sight line (launchers, crossbows): just over the top of the weapon.
     this.sightY = box.max.y * 0.92;
@@ -399,7 +400,10 @@ export class ViewModel {
     this.root.visible = !this.scoped;
 
     if (this.model) {
-      this.model.position.copy(this.pos);
+      const aimBias = w?.cls === 'ranged' && this.ads > 0.2 ? 0.35 : 1;
+      const fpOffset = new THREE.Vector3(0.42, -0.18, -0.12).multiplyScalar(aimBias);
+      if (w?.cls === 'ranged' && this.ads > 0.75) fpOffset.set(0, 0, 0);
+      this.model.position.copy(this.pos).add(fpOffset);
       this.model.quaternion.copy(this.quat);
       animateWeapon(this.model, this.time);
       if (this.sightReticle) this.collimate();

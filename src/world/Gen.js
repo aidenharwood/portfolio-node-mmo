@@ -8,15 +8,22 @@
 //   climate   temperature / moisture / strangeness fields (domain-warped) → twelve biomes
 //   regions   the world is cut into Voronoi regions (~REGION apart): each has a name, biome,
 //             owning race, danger level (rising with distance from the hub) and its points of
-//             interest — a waystone (often with a friendly settlement built round it, so it sits on
-//             the roads), a landmark, camps, maybe a stronghold, mesas, towers, ruins and chests —
-//             plus roads to its neighbours. Features flatten pads and raise mesas in the terrain.
+//             interest — a waystone (often with a friendly village built round it, so it sits on
+//             the roads), a landmark, camps, maybe a stronghold, mesas, towers, ruins, chests and a
+//             hamlet — plus roads to its neighbours. Features flatten pads and raise mesas in the
+//             terrain.
+//   places    settlements of every size (world/places.js): hamlets off the roads in most regions,
+//             villages at a third of the waystones, a walled town at about one waystone in nine
+//             (one per region and the ring round it), and the four story cities — one at the heart
+//             of each act's lands, in districts. Brightwater, at the hub, is a town.
 import { makeNoise2D, fbm, smoothstep } from '../core/noise.js';
 import { mulberry32 } from '../core/rng.js';
+import { SIZES, CITIES, CITY_WALL, HAMLETS, planHamlet, dressVillage, planTown, planCity, planHub, hamletName, townName, pathBearing } from './places.js';
+import { storyPlaces, storyIn } from './story.js';
 
 export const REGION = 240;
 export const WATER_LEVEL = -0.9;
-export const HUB = { id: 'hub', name: 'Brightwater Outpost', x: 0, z: 0, radius: 15 };
+export const HUB = { id: 'hub', name: 'Brightwater', x: 0, z: 0, radius: 30 };
 export const BIOMES = ['meadow', 'forest', 'highland', 'snow', 'marsh', 'ash', 'mountain', 'desert', 'badlands', 'jungle', 'crystal', 'fungal'];
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
@@ -446,8 +453,198 @@ export class WorldGen {
     return true;
   }
 
+  // ------------------------------------------------------------------ towns and cities
+  // The four story cities (world/places.js CITIES): along a wide spiral out from the hub, one at
+  // the heart of each act's lands, each on the flattest open ground near the centre of a region
+  // there (looking further round when that's mountains or water). That region is the city's: its
+  // waystone is the city's heart.
+  cities() {
+    if (this._cities) return this._cities;
+    const rng = mulberry32(hash2(17, 29, this.seed ^ 0xc17e));
+    const base = rng() * Math.PI * 2;
+    const around = [[0, 0]];
+    for (const r of [180, 360, 540]) for (let i = 0; i < 8; i++) around.push([Math.sin((i * Math.PI) / 4) * r, Math.cos((i * Math.PI) / 4) * r]);
+    this._cities = CITIES.map((c, k) => {
+      const a = base + k * 1.2 + (rng() - 0.5) * 0.3;
+      let best = null;
+      for (const [ox, oz] of around) {
+        const tx = Math.sin(a) * c.dist + ox;
+        const tz = Math.cos(a) * c.dist + oz;
+        const [cx, cz] = this.cellOf(tx, tz);
+        const cells = [];
+        for (let dx = -1; dx <= 1; dx++) {
+          for (let dz = -1; dz <= 1; dz++) {
+            const [sx, sz] = this.site(cx + dx, cz + dz);
+            cells.push({ rx: cx + dx, rz: cz + dz, x: sx, z: sz, s: Infinity, d: Math.hypot(sx - tx, sz - tz) });
+          }
+        }
+        cells.sort((p, q) => p.d - q.d);
+        best ??= cells[0];
+        for (const r of cells.slice(0, 2)) {
+          for (let i = 0; i < 18; i++) {
+            const d = i ? 10 + i * 4 : 0;
+            const x = r.x + Math.sin(i * 2.4) * d;
+            const z = r.z + Math.cos(i * 2.4) * d;
+            if (!this.owns(r.rx, r.rz, x, z)) continue;
+            const s = this.flatness(x, z, [40, 76]);
+            if (s < best.s) best = { rx: r.rx, rz: r.rz, x, z, s };
+            if (s < 5) break;
+          }
+          if (best.s < 7) break;
+        }
+        if (best.s < 7) break;
+      }
+      return { ...c, k, rx: best.rx, rz: best.rz, x: best.x, z: best.z, h: Math.max(this.baseHeight(best.x, best.z), WATER_LEVEL + 1.5) };
+    });
+    return this._cities;
+  }
+
+  cityAt(rx, rz) { return this.cities().find((c) => c.rx === rx && c.rz === rz) ?? null; }
+
+  // How far the ground strays from level over a round site (the most, in metres, on rings of the
+  // given radii), or Infinity where it's wet or mountainous: what a town or city needs.
+  flatness(x, z, radii) {
+    const h0 = this.baseHeight(x, z);
+    if (h0 < WATER_LEVEL + 1.2 || this.mountainMask(x, z) > 0.3) return Infinity;
+    let most = 0;
+    for (const r of radii) {
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * Math.PI * 2 + r;
+        const px = x + Math.sin(a) * r;
+        const pz = z + Math.cos(a) * r;
+        const h = this.baseHeight(px, pz);
+        if (h < WATER_LEVEL + 0.4 || this.mountainMask(px, pz) > 0.45) return Infinity;
+        most = Math.max(most, Math.abs(h - h0));
+      }
+    }
+    return most;
+  }
+
+  // Towns: about one in every block of nine regions (a region and the ring round it), at the
+  // waystone of one of the block's regions with level ground round it and room from its
+  // neighbours — none in the hub's block (Brightwater is its town), nor in or near a city's.
+  townAt(rx, rz) {
+    const t = this.townOf(Math.round(rx / 3), Math.round(rz / 3));
+    return t && t.rx === rx && t.rz === rz ? t : null;
+  }
+
+  townOf(bx, bz) {
+    const key = `${bx},${bz}`;
+    const memo = (this._towns ??= new Map());
+    if (memo.has(key)) return memo.get(key);
+    let town = null;
+    const cells = [];
+    for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) cells.push([bx * 3 + dx, bz * 3 + dz]);
+    const cities = this.cities();
+    if ((bx || bz) && !cells.some(([rx, rz]) => cities.some((c) => c.rx === rx && c.rz === rz))) {
+      const rng = mulberry32(hash2(bx, bz, this.seed ^ 0x70e7));
+      for (let i = cells.length - 1; i > 0; i--) {
+        const j = Math.floor(rng() * (i + 1));
+        [cells[i], cells[j]] = [cells[j], cells[i]];
+      }
+      const name = this.townName(bx, bz);
+      for (const [rx, rz] of cells) {
+        const w = this.waystoneSpot(rx, rz);
+        if (!w || this.flatness(w.x, w.z, [16, 30]) > 4.5) continue;
+        if (cities.some((c) => Math.hypot(c.x - w.x, c.z - w.z) < CITY_WALL + 140)) continue;
+        let crowded = false;
+        for (let dx = -1; dx <= 1 && !crowded; dx++) {
+          for (let dz = -1; dz <= 1 && !crowded; dz++) {
+            const n = dx || dz ? this.peekWaystone(rx + dx, rz + dz) : null;
+            if (n && Math.hypot(n.x - w.x, n.z - w.z) < 80) crowded = true;
+          }
+        }
+        if (crowded) continue;
+        town = { rx, rz, x: w.x, z: w.z, h: this.baseHeight(w.x, w.z), name };
+        break;
+      }
+    }
+    memo.set(key, town);
+    return town;
+  }
+
+  // A town's name: no two blocks near each other share one (the later of a pair takes another).
+  townName(bx, bz) {
+    const first = (x, z) => townName(mulberry32(hash2(x, z, this.seed ^ 0x7a3e)));
+    const mine = first(bx, bz);
+    for (let dx = -2; dx <= 2; dx++) {
+      for (let dz = -2; dz <= 2; dz++) {
+        if ((dx < 0 || (dx === 0 && dz < 0)) && first(bx + dx, bz + dz) === mine) return townName(mulberry32(hash2(bx, bz, this.seed ^ 0x7a3f)));
+      }
+    }
+    return mine;
+  }
+
+  // Towns and cities in the regions round (rx, rz) — big enough to spill over a region's edge —
+  // as ground this region's own features keep off.
+  bigNear(rx, rz) {
+    const out = [];
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dz = -1; dz <= 1; dz++) {
+        const t = dx || dz ? this.townAt(rx + dx, rz + dz) : null;
+        if (t) out.push({ x: t.x, z: t.z, r: SIZES.town.r + 12 });
+      }
+    }
+    for (const c of this.cities()) {
+      if ((c.rx !== rx || c.rz !== rz) && Math.abs(c.rx - rx) <= 1 && Math.abs(c.rz - rz) <= 1) out.push({ x: c.x, z: c.z, r: CITY_WALL + 12 });
+    }
+    // The story's places (world/story.js), here or next door.
+    for (const s of Object.values(storyPlaces(this))) {
+      if (Math.abs(s.rx - rx) <= 1 && Math.abs(s.rz - rz) <= 1) out.push({ x: s.x, z: s.z, r: s.r + 10 });
+    }
+    return out;
+  }
+
+  // The roads the west and south neighbours draw to a region's waystone, replayed from their own
+  // streams (as their buildRoads draws them, without building them).
+  roadsInto(region) {
+    const out = [];
+    for (const [nx, nz, k] of [[region.rx - 1, region.rz, 1], [region.rx, region.rz - 1, 2]]) {
+      const a = this.peekWaystone(nx, nz);
+      if (!a) continue;
+      const rng = mulberry32(hash2(nx, nz, this.seed ^ 0xa0ad));
+      for (const [dx, dz] of [[1, 0], [0, 1]].slice(0, k)) {
+        const b = this.peekWaystone(nx + dx, nz + dz);
+        if (!b) continue;
+        const pts = this.roadPath(a, b, rng);
+        if (nx + dx === region.rx && nz + dz === region.rz && pts.length > 1) out.push(pts);
+      }
+    }
+    return out;
+  }
+
+  // Bearings of the roads that leave (x, z) — the waystone's spot: this region's own, and the ones
+  // its neighbours draw to it.
+  streetsAt(region, x, z) {
+    const out = [];
+    const from = (pts) => Math.hypot(pts[0][0] - x, pts[0][1] - z) < 6;
+    for (const pts of region.roads) if (from(pts)) out.push(pathBearing(x, z, pts));
+    for (const pts of this.roadsInto(region)) {
+      const back = [...pts].reverse();
+      if (from(back)) out.push(pathBearing(x, z, back));
+    }
+    return out;
+  }
+
+  // Bearings where those roads cross a circle of radius R round (x, z): Brightwater's streets (its
+  // waystone isn't at its heart), and the path in to the waystone.
+  hubStreets(region, R = 20) {
+    const out = [0];
+    for (const pts of [...region.roads, ...this.roadsInto(region)]) {
+      for (let i = 1; i < pts.length; i++) {
+        const da = Math.hypot(pts[i - 1][0], pts[i - 1][1]) - R;
+        const db = Math.hypot(pts[i][0], pts[i][1]) - R;
+        if (da * db <= 0 && da !== db) out.push(Math.atan2(pts[i][0], pts[i][1]));
+      }
+    }
+    return out;
+  }
+
   buildRegion(rx, rz, key) {
     const rng = mulberry32(hash2(rx, rz, this.seed ^ 0x51ed));
+    // What came with settlements of every size (more village folk, quest boards, hamlets) draws
+    // from a stream of its own, so regions keep the layouts they had.
+    const extra = mulberry32(hash2(rx, rz, this.seed ^ 0x3a7c));
     const [sx, sz] = this.site(rx, rz);
     const hub = rx === 0 && rz === 0;
     const dist = Math.hypot(sx, sz);
@@ -461,22 +658,25 @@ export class WorldGen {
     const n = noun[Math.floor(rng() * noun.length)];
     const name = hub ? 'Brightwater Vale' : /^[a-z]/.test(n) ? a + n : `${a} ${n}`;
     const region = { key, rx, rz, x: sx, z: sz, biome, race, level, name, hub, pois: [], mesas: [], pads: [], roads: [], roadCells: new Set() };
+    const town = hub ? null : this.townAt(rx, rz);
+    const city = hub ? null : this.cityAt(rx, rz);
 
-    // Candidate spots inside the region, on dry, gentle, non-mountain ground, apart from each other.
-    const taken = [];
+    // Candidate spots inside the region, on dry, gentle, non-mountain ground, apart from each other
+    // (and off any town or city next door).
+    const taken = this.bigNear(rx, rz);
     const free = (x, z, gap) => taken.every((t) => Math.hypot(t.x - x, t.z - z) > gap + t.r);
-    const spot = (minGap, { r = 6, maxSlope = 0.45, near = null, tries = 60, minHub = 70 } = {}) => {
+    const spot = (minGap, { r = 6, maxSlope = 0.45, near = null, tries = 60, minHub = 70, rand = rng } = {}) => {
       for (let i = 0; i < tries; i++) {
         let x;
         let z;
         if (near) {
-          const ang = rng() * Math.PI * 2;
-          const d = near.min + rng() * (near.max - near.min);
+          const ang = rand() * Math.PI * 2;
+          const d = near.min + rand() * (near.max - near.min);
           x = near.x + Math.cos(ang) * d;
           z = near.z + Math.sin(ang) * d;
         } else {
-          x = sx + (rng() - 0.5) * REGION * 1.1;
-          z = sz + (rng() - 0.5) * REGION * 1.1;
+          x = sx + (rand() - 0.5) * REGION * 1.1;
+          z = sz + (rand() - 0.5) * REGION * 1.1;
         }
         if (!this.owns(rx, rz, x, z)) continue;
         if (Math.hypot(x, z) < minHub) continue;
@@ -495,8 +695,10 @@ export class WorldGen {
     const chest = (x, z, extra = {}) => region.pois.push({ type: 'chest', id: `k:${key}:${chestN++}`, x, z, level: level + (extra.bonus ?? 0), ...extra });
 
     if (hub) {
-      taken.push({ x: 0, z: 0, r: 40 });
-      pad(0, 0, HUB.radius + 3, 0, 20, true);
+      // Brightwater: a town now, its walls round the old camp.
+      taken.push({ x: 0, z: 0, r: HUB.radius + 14 });
+      pad(0, 0, HUB.radius + 3, 0, 20);
+      pad(0, 0, 14, 0, 4, true);
       region.pois.push({ type: 'hub', id: 'hub', x: 0, z: 0, radius: HUB.radius, name: HUB.name });
       region.pois.push({ type: 'waystone', id: 'w-hub', x: 0, z: 18, name: 'Brightwater' });
       pad(0, 18, 3, 0, 6);
@@ -504,8 +706,19 @@ export class WorldGen {
       const w = this.waystoneSpot(rx, rz);
       if (w) {
         let h = this.baseHeight(w.x, w.z);
-        // A friendly settlement round the waystone (so on the roads), in about two regions of five.
-        if (rng() < (ring === 1 ? 0.55 : 0.4)) {
+        if (city || town) {
+          // A city or a town round the waystone: the waystone stands in its plaza. Its services are
+          // laid out once the roads are known (below).
+          const wall = city ? CITY_WALL : SIZES.town.r;
+          h = (city ?? town).h;
+          taken.push({ x: w.x, z: w.z, r: wall + 12 });
+          pad(w.x, w.z, wall + 2, h, city ? 22 : 16);
+          pad(w.x, w.z, city ? SIZES.city.r + 6 : 11, h, 3, city ? 'stone' : true);
+          region.pois.push(city
+            ? { type: 'city', id: `y:${key}`, key, x: w.x, z: w.z, r: SIZES.city.r, wall, h, name: city.name, act: city.act, blurb: city.blurb, level, seed: Math.floor(rng() * 1e9) }
+            : { type: 'town', id: `o:${key}`, key, x: w.x, z: w.z, r: wall, h, name: town.name, level, seed: Math.floor(rng() * 1e9) });
+        } else if (rng() < (ring === 1 ? 0.55 : 0.4)) {
+          // A friendly village round the waystone (so on the roads), in about two regions of five.
           const kinds = affinity(SETTLEMENTS, biome, ring);
           const c = Object.keys(kinds).length ? spot(0, { r: SETTLEMENT_RADIUS + 8, maxSlope: 0.32, near: { x: w.x, z: w.z, min: 11, max: 15 } }) : null;
           if (c) {
@@ -521,16 +734,18 @@ export class WorldGen {
               const d = role === 'trader' ? 5.5 : 3.2 + rng() * 2.6;
               npcs.push({ id: `n:${key}:${i}`, role, x: c.x + Math.sin(ang) * d, z: c.z + Math.cos(ang) * d, facing: ang + Math.PI, seed: Math.floor(rng() * 1e9) });
             }
-            region.pois.push({
-              type: 'settlement', id: `v:${key}`, kind, x: c.x, z: c.z, r: SETTLEMENT_RADIUS, rot, h: c.h, name: S.name(rng), level,
+            const place = {
+              type: 'settlement', id: `v:${key}`, key, kind, x: c.x, z: c.z, r: SETTLEMENT_RADIUS, rot, h: c.h, name: S.name(rng), level,
               way: { x: w.x, z: w.z }, npcs, seed: Math.floor(rng() * 1e9),
-            });
+            };
+            dressVillage(place, extra);
+            region.pois.push(place);
             pad(c.x, c.z, SETTLEMENT_RADIUS, c.h, 10, true);
             h = c.h;
           }
         }
         taken.push({ x: w.x, z: w.z, r: 4 });
-        region.pois.push({ type: 'waystone', id: `w:${key}`, x: w.x, z: w.z, name: region.name });
+        region.pois.push({ type: 'waystone', id: `w:${key}`, x: w.x, z: w.z, name: city?.name ?? town?.name ?? region.name });
         pad(w.x, w.z, 3, h, 6);
       }
       // A landmark: something worth the walk, in about three regions of four.
@@ -554,7 +769,7 @@ export class WorldGen {
 
     // Camps (and maybe a stronghold) of the owning race — well away from settlements.
     const campStyle = { scav: 'scav', hive: 'nest', synth: 'relay', fauna: 'den' }[race];
-    const camps = hub ? 1 : 2 + (rng() < 0.45 ? 1 : 0);
+    const camps = hub ? 1 : city ? 0 : 2 + (rng() < 0.45 ? 1 : 0);
     const names = [...CAMP_NAME[race]];
     for (let i = 0; i < camps; i++) {
       const R = 10 + Math.floor(rng() * 4);
@@ -567,7 +782,7 @@ export class WorldGen {
       });
       pad(c.x, c.z, R + 2, c.h, 11, true);
     }
-    if (!hub && level >= 4 && rng() < 0.28) {
+    if (!hub && !city && level >= 4 && rng() < 0.28) {
       const c = spot(50, { r: 24, maxSlope: 0.3 });
       if (c) {
         region.pois.push({
@@ -592,7 +807,7 @@ export class WorldGen {
       if (rng() < 0.7) chest(c.x, c.z, { onMesa: true, bonus: 1 });
     }
     if (rng() < (hub ? 1 : 0.45)) {
-      const t = hub ? spot(15, { r: 6, near: { x: 30, z: 26, min: 0, max: 12 }, minHub: 20 }) : spot(25, { r: 6 });
+      const t = hub ? spot(15, { r: 6, near: { x: 48, z: 42, min: 0, max: 12 }, minHub: 40 }) : spot(25, { r: 6 });
       if (t) {
         const id = `t:${key}`;
         region.pois.push({ type: 'tower', id, x: t.x, z: t.z, h: 5.5 + rng() * 2 });
@@ -616,14 +831,61 @@ export class WorldGen {
       if (c) chest(c.x, c.z);
     }
 
+    // The story's places here (world/story.js): their ground was kept clear from the start.
+    for (const p of storyIn(this, rx, rz)) {
+      region.pois.push(p);
+      if (p.type === 'camp') pad(p.x, p.z, p.radius + (p.stronghold ? 4 : 2), p.h, p.stronghold ? 14 : 11, true);
+      else if (p.kind === 'vault') {
+        pad(p.x, p.z, p.r, p.h, 8, true);
+        pad(p.x, p.z, 7, p.h - 3.5, 4, true);
+      } else if (p.type === 'story') pad(p.x, p.z, p.r, p.h, 6, p.kind === 'relicdig');
+      else pad(p.x, p.z, p.r * 0.85, p.h, 10, true);
+    }
+
+    // A hamlet: a few homes off the road, in most regions (fewer where there's a village or a
+    // town already; none in a city's).
+    const settled = region.pois.some((p) => p.type === 'settlement' || p.type === 'town');
+    if (!city && extra() < (hub ? 0.5 : settled ? 0.3 : 0.62)) {
+      const kinds = affinity(HAMLETS, biome, ring);
+      const c = Object.keys(kinds).length ? spot(16, { r: SIZES.hamlet.r + 4, maxSlope: 0.3, minHub: 90, rand: extra }) : null;
+      if (c) {
+        const way = region.pois.find((p) => p.type === 'waystone');
+        const place = {
+          type: 'hamlet', id: `h:${key}`, key, kind: weighted(extra, kinds), x: c.x, z: c.z, r: SIZES.hamlet.r,
+          rot: way ? Math.atan2(way.x - c.x, way.z - c.z) : extra() * Math.PI * 2, h: c.h, name: hamletName(extra), level, seed: Math.floor(extra() * 1e9),
+        };
+        planHamlet(place, extra);
+        region.pois.push(place);
+        pad(c.x, c.z, SIZES.hamlet.r, c.h, 9);
+        pad(c.x, c.z, 5, c.h, 3, true);
+      }
+    }
+
     this.buildRoads(region);
+    // Towns and cities lay out their services between the streets the roads come in by; a city's
+    // districts are points of interest of their own, so it streams in a district at a time.
+    for (const p of [...region.pois]) {
+      if (p.type === 'hub') {
+        planHub(p, extra, this.hubStreets(region));
+        // The town round the old camp streams in as a part of its own.
+        region.pois.push({ type: 'hubtown', id: 'ht:0,0', x: 0, z: 0, name: HUB.name });
+      }
+      else if (p.type === 'town') planTown(p, extra, this.streetsAt(region, p.x, p.z));
+      else if (p.type === 'city') {
+        for (const d of planCity(p, extra, this.streetsAt(region, p.x, p.z))) {
+          region.pois.push(d);
+          pad(d.x, d.z, d.r - 4, p.h, 3, 'stone');
+        }
+        region.pois.push({ type: 'citywall', id: `yw:${key}`, x: p.x, z: p.z, wall: p.wall, h: p.h, quarters: p.quarters, name: p.name });
+      }
+    }
     return region;
   }
 
   // ------------------------------------------------------------------ roads
   // Each region draws its roads east and north to neighbouring waystones (so every pair is drawn
-  // once), plus spurs from its waystone to its camps and landmarks. Settlements stand round their
-  // waystone, so the roads run through them.
+  // once), plus spurs from its waystone to its camps, landmarks and hamlet. Villages, towns and
+  // cities stand round their waystone, so the roads run through them.
   buildRoads(region) {
     const way = region.pois.find((p) => p.type === 'waystone');
     if (!way) return;
@@ -636,6 +898,7 @@ export class WorldGen {
     for (const p of region.pois) {
       if (p.type === 'camp' || p.type === 'tower' || p.type === 'ruin' || p.type === 'hub') stops.push({ x: p.x, z: p.z, inset: (p.radius ?? p.r ?? 3) * 0.7 });
       else if (p.type === 'landmark') stops.push({ x: p.x, z: p.z, inset: p.r + 2 });
+      else if (p.type === 'hamlet') stops.push({ x: p.x, z: p.z, inset: p.r * 0.45 });
     }
     for (const s of stops) {
       const pts = this.roadPath(way, s, rng);
@@ -651,9 +914,12 @@ export class WorldGen {
     return this.waystoneSpot(rx, rz);
   }
 
-  // Where a region's waystone stands: near its site, on dry gentle ground. Its own seeded stream,
-  // so a region and its neighbours (drawing roads to it) always agree.
+  // Where a region's waystone stands: near its site, on dry gentle ground (a city's is its heart;
+  // none stands inside a city's walls). Its own seeded stream, so a region and its neighbours
+  // (drawing roads to it) always agree.
   waystoneSpot(rx, rz) {
+    const cities = this.cities();
+    for (const c of cities) if (c.rx === rx && c.rz === rz) return { x: c.x, z: c.z };
     const rng = mulberry32(hash2(rx, rz, this.seed ^ 0x77e1));
     const [sx, sz] = this.site(rx, rz);
     for (let i = 0; i < 40; i++) {
@@ -661,7 +927,9 @@ export class WorldGen {
       const d = rng() * 60;
       const x = sx + Math.cos(a) * d;
       const z = sz + Math.sin(a) * d;
-      if (this.baseHeight(x, z) > WATER_LEVEL + 0.8 && this.mountainMask(x, z) < 0.35 && this.slopeBase(x, z) < 0.45) return { x, z };
+      if (this.baseHeight(x, z) > WATER_LEVEL + 0.8 && this.mountainMask(x, z) < 0.35 && this.slopeBase(x, z) < 0.45) {
+        return cities.some((c) => Math.hypot(c.x - x, c.z - z) < CITY_WALL + 24) ? null : { x, z };
+      }
     }
     return null;
   }
