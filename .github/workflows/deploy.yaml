@@ -3,7 +3,7 @@ name: "[cel-blade] Test, build and push Docker image"
 on:
   push:
     branches:
-      - master
+      - main
   pull_request:
   workflow_dispatch:
 
