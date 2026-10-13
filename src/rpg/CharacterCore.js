@@ -13,7 +13,9 @@
 // Operations: move, select, equip, unequip, scrap, sell, buy, learn, respec, slot, filter, threat,
 // title, feat, accept, attune, respawn, use, choose (predicted) · pick, drop, chest, turnin, talk,
 // rest, travel, enter, leave, dloot, dchest (rolled by the authority) · reward, bonus, visit, camp,
-// stock, reach, defended, dclear (sent by the server).
+// stock, reach, defended, dclear, rclear (sent by the server).
+// Raids (gameplay phase 7) are copies like dungeons (world/raids.js): the same enter and leave, and
+// each arena's chest is a 'dchest' locked for the week (per raid, encounter and tier).
 // Dungeons (gameplay phase 5): going in and out of a copy, and its chests, are rolled by the
 // instance manager (sim/Dungeons.js), which the host plugs in as `dungeons`: enter(ask) ·
 // leave() · current() · claim(id, kind).
@@ -32,6 +34,7 @@ import { ACHIEVEMENTS, ACHIEVEMENT, newRecords, loadRecords } from './achievemen
 import { xpGapMult, TRIVIAL_GAP, TIERS, tierOf } from './balance.js';
 import { HUB } from '../world/Gen.js';
 import { lockDay, lockKey } from '../world/dungeons.js';
+import { RAIDS, lockWeek, raidLockKey } from '../world/raids.js';
 
 export const PREDICTED = new Set(['move', 'select', 'equip', 'unequip', 'scrap', 'sell', 'buy', 'learn', 'respec', 'slot', 'filter', 'threat', 'title', 'feat', 'accept', 'attune', 'respawn', 'use', 'choose']);
 export const ROLLED = new Set(['pick', 'drop', 'chest', 'turnin', 'talk', 'rest', 'travel', 'enter', 'leave', 'dloot', 'dchest']);
@@ -201,11 +204,21 @@ export class CharacterCore {
       case 'dchest': {
         // The reward chest past a private run's final boss: once a day per dungeon per tier.
         const cur = this.dungeons?.current();
-        if (!cur || cur.shared || this.settings.lockouts?.[lockKey(cur.dungeon, cur.tier)] === lockDay()) return null;
+        if (!cur || cur.shared || (!cur.raid && this.settings.lockouts?.[lockKey(cur.dungeon, cur.tier)] === lockDay())) return null;
         const c = this.dungeons.claim(op.id, 'reward');
         if (!c) return null;
         const T = tierOf(c.tier);
         const level = Math.max(c.level, lvl);
+        if (c.raid) {
+          // A raid's chest (one per encounter): once a week per tier. Rare and better, epic and
+          // better from the last; sometimes a piece of the raid's own set — always from the last.
+          const key = raidLockKey(c.dungeon, c.enc, c.tier);
+          if (this.settings.lockouts?.[key] === lockWeek()) return null;
+          const floors = c.final ? [4, 3, 3, 2 + Math.min(1, T.floor)] : [3, 3, 2 + Math.min(1, T.floor)];
+          const items = floors.map((minTier) => ({ gid: this.gid(), recipe: rollItem({ level, luck: 2.5 + T.luck, minTier, theme: c.theme }, 0.45).recipe }));
+          if (c.set && (c.final || Math.random() < 0.35 + 0.1 * c.tier)) items.push({ gid: this.gid(), recipe: generateArmor({ level, set: c.set, rarity: 'legendary' }).recipe });
+          return { gold: Math.round((120 + 60 * level) * (1 + 0.5 * c.tier) * (c.final ? 1.5 : 1)), items, at: c.at, key, day: lockWeek(), tier: c.tier, raid: true };
+        }
         const floors = [3, 2 + Math.min(1, T.floor), 2 + Math.max(0, T.floor - 1)];
         const items = floors.map((minTier) => ({ gid: this.gid(), recipe: rollItem({ level, luck: 2 + T.luck, minTier, theme: c.theme }, 0.45).recipe }));
         return { gold: Math.round((60 + 40 * level) * (1 + 0.5 * c.tier)), items, at: c.at, key: lockKey(c.dungeon, c.tier), day: lockDay(), tier: c.tier };
@@ -425,7 +438,7 @@ export class CharacterCore {
           const locks = (this.settings.lockouts ??= {});
           if (locks[r.key] === r.day) return false;
           locks[r.key] = r.day;
-          fx.push({ k: 'banner', title: 'Reward chest', sub: `${TIERS[r.tier]?.name ?? 'Normal'} · +${r.gold}g` });
+          fx.push({ k: 'banner', title: r.raid ? 'Raid chest' : 'Reward chest', sub: `${TIERS[r.tier]?.name ?? 'Normal'} · +${r.gold}g${r.raid ? ' · back next week' : ''}` });
         }
         s.gold += r.gold;
         for (const { gid, recipe } of r.items) this.spawn(gid, build(recipe), r.at, fx, true);
@@ -440,6 +453,21 @@ export class CharacterCore {
         // [open world, Normal, Veteran, Elite]
         row[Number.isInteger(r.tier) ? Math.min(3, r.tier + 1) : 0]++;
         fx.push({ k: 'banner', title: `${r.name} cleared`, sub: Number.isInteger(r.tier) ? `${TIERS[r.tier].name} run` : 'Open world' });
+        return true;
+      }
+      // From the authority: one of a raid's encounters beaten with this character in it (`final`:
+      // the raid's last — the raid beaten). `flawless`: nobody fell. records.raids: raid id →
+      // { encounter id → [Normal, Veteran, Elite], clears: [...], flawless: [...] }.
+      case 'rclear': {
+        const r = op.roll;
+        const def = RAIDS[r?.raid];
+        if (!def || !Number.isInteger(r.tier) || r.tier < 0 || r.tier > 2 || !def.encounters.some((e) => e.id === r.enc)) return false;
+        const rec = (this.records.raids[r.raid] ??= {});
+        const bump = (k) => { (rec[k] ??= [0, 0, 0])[r.tier]++; };
+        bump(r.enc);
+        if (r.flawless) bump(`${r.enc}:flawless`);
+        if (r.final) bump('clears');
+        fx.push({ k: 'banner', title: r.final ? `${def.name} beaten` : `${r.name} defeated`, sub: `${TIERS[r.tier].name} raid${r.flawless ? ' · nobody fell' : ''}` });
         return true;
       }
       case 'chest': {

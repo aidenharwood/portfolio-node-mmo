@@ -8,7 +8,7 @@ import { FX_TEXTURES } from '../fx/Effects.js';
 import { dealDamage } from './Damage.js';
 import { PERKS } from '../items/perks.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { rayBox } from './Aim.js';
+import { rayBoxCollider } from './Aim.js';
 
 const arrowGeo = (() => {
   const shaft = new THREE.CylinderGeometry(0.015, 0.015, 0.7, 5).rotateX(Math.PI / 2).toNonIndexed();
@@ -277,8 +277,7 @@ export class Projectiles {
       let surface = null;
       for (const c of world.collidersAlongRay(_from, _dir, len)) {
         const pr = p.radius * 0.5;
-        const t = c.box ? rayBox(_from, _dir, c.x - c.hx - pr, c.x + c.hx + pr, c.y, c.y + c.h, c.z - c.hz - pr, c.z + c.hz + pr)
-          : rayCapsuleCyl(_from, _dir, c.x, c.z, c.r + pr, c.y, c.y + c.h);
+        const t = c.box ? rayBoxCollider(_from, _dir, c, pr) : rayCapsuleCyl(_from, _dir, c.x, c.z, c.r + pr, c.y, c.y + c.h);
         if (t < tWorld) { tWorld = t; surface = c; }
       }
       const tg = world.raycastGround(_from, _dir, tWorld);

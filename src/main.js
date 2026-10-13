@@ -391,6 +391,8 @@ class Game {
       pos: [this.player.position.x, this.player.position.y, this.player.position.z],
       records: this.char.records,
       achievements: this.char.achievements,
+      // Down in a dungeon: where we went in (a save there comes back outside).
+      run: this.char.dungeon ? { d: this.char.dungeon.d, back: this.char.dungeon.back } : null,
     };
     // Online the server keeps the character itself; it only takes what's this screen's own.
     if (this.net.inWorld) this.net.send({ t: 'save', data: { discovery: data.discovery, marker: data.marker, tracked: data.tracked, pos: data.pos } });
@@ -501,8 +503,9 @@ class Game {
   // ---------------------------------------------------------------- online realm
   // The online menus, over a flight through the realm's own world.
   useOnline() {
-    this.onlineMode = true;
+    // (Already playing single-player — the realm's answer came late: stay offline, saves and all.)
     if (this.state !== 'title') return;
+    this.onlineMode = true;
     if (this.world.seed !== this.net.status.seed) this.newGame(null, { seed: this.net.status.seed, preview: true });
     this.titleMenu.openOnline();
   }
@@ -647,6 +650,10 @@ class Game {
     window.addEventListener('blur', () => this.onBackground());
     window.addEventListener('focus', () => this.onForeground());
     document.addEventListener('visibilitychange', () => { if (document.hidden) this.onBackground(); else this.onForeground(); });
+    // A hidden window (minimized, behind another, a background tab) draws no frames, and the frame
+    // loop is what reports where we stand: online, keep telling the realm we're here meanwhile, so
+    // other players still see us (and we them, when we're back).
+    setInterval(() => { if (document.hidden && this.net.inWorld) this.net.update(1); }, 1000);
     // Leaving the page mid-session: a last save (best effort; autosaves cover the rest).
     window.addEventListener('pagehide', () => this.save());
     window.addEventListener('keydown', (e) => {
@@ -1115,9 +1122,12 @@ class Game {
       options.push({ label: `Private run · ${T.name}${done ? ' · chest opened today' : ''}`, cls: done ? '' : 'quest', onClick: () => this.enterDungeon(def, 'run', i, via) });
     });
     if (gate) options.push({ label: 'Back', onClick: () => this.gateDialog(gate) });
+    const how = !def.open ? 'It can only be run as a private copy: take'
+      : via === 'entrance' ? 'Its halls are open to anyone who walks in, and what lives there comes back — or take'
+        : 'Its halls are open to anyone who walks in at its own way in. From here, take';
     this.dialogue.open({
       name: def.name, title: `Dungeon · Level ${def.level}+`,
-      text: `${def.blurb} ${def.open ? 'Its halls are open to anyone who walks in, and what lives there comes back' : 'It can only be run as a copy of your own'} — or take your party down a private copy at a tier of your choosing: nothing comes back once it's beaten, and past the last of them stands a reward chest, once a day for each tier.`,
+      text: `${def.blurb} ${how} your party down a private copy at a tier of your choosing: nothing comes back once it's beaten, and past the last of them stands a reward chest, once a day for each tier.`,
       options,
     });
   }
@@ -1324,6 +1334,8 @@ class Game {
   // Fast travel, once allowed (the 'teleport' result of a travel operation).
   arrive(id, at) {
     const w = this.world.poiById(id);
+    // Travelling out of a dungeon: it's left behind.
+    if (this.dungeonView.active) this.dungeonView.teardown();
     this.closeMenus();
     const p = this.player;
     const x = at[0];

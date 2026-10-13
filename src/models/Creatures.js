@@ -8,7 +8,9 @@ import { SCAV_MODELS } from './Scavs.js';
 import { HIVE_MODELS } from './Hive.js';
 import { SYNTH_MODELS } from './Synths.js';
 import { FAUNA_MODELS } from './Fauna.js';
+import { BROOD_MODELS } from './Brood.js';
 
 export { bindAny, legSkeleton, hoverSkeleton } from './Rigs.js';
 
-export const MODELS = { ...SCAV_MODELS, ...HIVE_MODELS, ...SYNTH_MODELS, ...FAUNA_MODELS };
+// (models/Brood.js: what the Brood Mother brings into her raid — her eggs and hearts.)
+export const MODELS = { ...SCAV_MODELS, ...HIVE_MODELS, ...SYNTH_MODELS, ...FAUNA_MODELS, ...BROOD_MODELS };

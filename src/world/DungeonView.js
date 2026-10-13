@@ -7,7 +7,7 @@
 // use, the lift, the traps (each screen's own danger, like an enemy's shot: vents that burst, turrets
 // that track you, spore pods), and the rooms seen so far for the minimap and the map.
 import * as THREE from 'three';
-import { DUNGEONS, THEMES, lockDay, lockKey } from './dungeons.js';
+import { DUNGEONS, THEMES, LIFT_SPEED, lockDay, lockKey } from './dungeons.js';
 import { generateDungeon } from './DungeonGen.js';
 import { Interior } from './Interior.js';
 import { buildInterior } from './InteriorKit.js';
@@ -16,10 +16,11 @@ import { enemyDamage } from '../sim/enemyDefs.js';
 import { dealDamage } from '../combat/Damage.js';
 import { esc } from '../ui/cards.js';
 
-const VENT = { period: 4.6, warn: 1.1, burst: 1.3, r: 1.15, tick: 0.45, dmg: 15 };
-const TURRET = { range: 22, every: 1.5, dmg: 10, speed: 24, warm: 0.8 };
-const POD = { r: 2.4, warn: 0.7, regrow: 24, blast: 3.2, dmg: 24 };
-const LIFT_SPEED = 2.6;
+// Trap damage is an enemy's at the copy's level (a Scav Cutter's slash is 13): a vent's burst
+// stings about as much as one slash, a turret's shot half one, a spore pod's blast one and a half.
+const VENT = { period: 4.6, warn: 1.1, burst: 1.3, r: 1.15, tick: 0.5, dmg: 5 };
+const TURRET = { range: 22, every: 1.6, dmg: 7, speed: 24, warm: 0.8 };
+const POD = { r: 2.4, warn: 0.7, regrow: 24, blast: 3.2, dmg: 20 };
 const ELEMENT = { scav: 'fire', hive: 'corrosive', synth: 'shock', maker: 'frost', fauna: 'corrosive' };
 const _v = new THREE.Vector3();
 const _white = new THREE.Color(0xffffff);
@@ -37,7 +38,6 @@ export class DungeonView {
     this.seen = new Set();    // areas (rooms, then corridors) seen
     this.points = new Map();  // thing / door id → its world position (for prompts)
     this.trapState = new Map();
-    this.liftTarget = null;
     this.liftWait = 0;
     this.saved = null;
   }
@@ -239,7 +239,10 @@ export class DungeonView {
     if (!st) return;
     const it = this.interior;
     const before = this.state;
-    this.state = { open: st.open ?? [], key: !!st.key, nodes: st.nodes ?? [], mini: !!st.mini, boss: !!st.boss, cleared: st.cleared ?? [] };
+    this.state = { open: st.open ?? [], key: !!st.key, nodes: st.nodes ?? [], mini: !!st.mini, boss: !!st.boss, cleared: st.cleared ?? [], lift: st.lift ?? null };
+    // This screen's own copy of the lift (online) settles where the keeper says it rests.
+    const L = this.state.lift;
+    if (L && this.owned && it.lift && L.y === L.to && Math.abs(it.lift.y - L.y) > 0.05) it.setLift(L.y);
     for (const id of this.state.open) {
       it.setDoor(id, true);
       const m = this.mesh?.doors.get(id);
@@ -274,7 +277,8 @@ export class DungeonView {
     for (const d of L.doors) if (d.kind !== 'open' && !s.open.includes(d.id)) out.push({ kind: 'dthing', id: d.id, door: d, name: 'door', position: this.points.get(d.id) });
     // The lift, called from whichever end it isn't at.
     const lift = this.interior.lift;
-    if (lift && this.liftTarget === null) {
+    const rest = this.state.lift && this.state.lift.y === this.state.lift.to;
+    if (lift && rest) {
       const c = lift.cor;
       const sh = c.shaft;
       const across = (c.axis === 'x' ? c.z : c.x) * L.cell + L.cell;
@@ -311,7 +315,7 @@ export class DungeonView {
 
   use(it) {
     const g = this.game;
-    if (it.lift !== undefined) { this.liftTarget = it.lift; this.liftWait = 0; return; }
+    if (it.lift !== undefined) { this.send(it.id); return; }
     if (it.door) {
       if (it.door.kind === 'locked' && this.state.key) this.send(it.id);
       else g.hud.toast(this.prompt(it));
@@ -379,26 +383,23 @@ export class DungeonView {
     else { const c = L.cors[k - nR]; this.seen.add(c.a); this.seen.add(c.b); }
   }
 
+  // The lift is the copy's (sim/Dungeons.js moves it, so everyone in there sees one platform):
+  // standing on it at rest a moment asks it to go; online, this screen rides its own copy of the
+  // platform after the keeper's word (offline the local keeper moves this very one).
   updateLift(dt) {
     const it = this.interior;
     const lift = it.lift;
-    if (!lift) return;
-    const s = lift.cor.shaft;
+    const L = this.state.lift;
+    if (!lift || !L) return;
     const p = this.game.player.position;
     const on = it.inShaft(p.x - it.x0, p.z - it.z0) && Math.abs(p.y - (it.origin.y + lift.y)) < 1.5;
-    if (this.liftTarget === null) {
-      // Standing on it at rest: it goes after a moment.
-      this.liftWait = on ? this.liftWait + dt : Math.min(0, this.liftWait + dt);
-      if (on && this.liftWait > 0.9) this.liftTarget = Math.abs(lift.y - s.top) < 0.2 ? s.bottom : s.top;
-    } else {
-      const dy = this.liftTarget - lift.y;
-      const step = Math.sign(dy) * Math.min(Math.abs(dy), LIFT_SPEED * dt);
-      it.setLift(lift.y + step);
-      if (Math.abs(this.liftTarget - lift.y) < 1e-3) {
-        it.setLift(this.liftTarget);
-        this.liftTarget = null;
-        this.liftWait = -1.5;
-      }
+    if (on && L.y === L.to) {
+      this.liftWait += dt;
+      if (this.liftWait > 0.9) { this.liftWait = -2; this.send('lift'); }
+    } else if (!on) this.liftWait = Math.min(0, this.liftWait + dt);
+    if (this.owned) {
+      const d = L.to - lift.y;
+      if (Math.abs(d) > 1e-3) it.setLift(Math.abs(d) <= LIFT_SPEED * dt ? L.to : lift.y + Math.sign(d) * LIFT_SPEED * dt);
     }
     if (this.mesh.lift) this.mesh.lift.group.position.y = lift.y;
   }
@@ -437,7 +438,11 @@ export class DungeonView {
           this.hurt(enemyDamage(VENT.dmg, lv), el, _v.set(wx, wy, wz));
         }
       } else if (x.kind === 'turret') {
-        // Tracks you while it can see you, and fires.
+        // Tracks you while it can see you, and fires — until its room is cleared: then it slumps.
+        if (this.state.cleared.includes(x.area)) {
+          m.part.head.rotation.x += (0.45 - m.part.head.rotation.x) * Math.min(1, dt * 3);
+          continue;
+        }
         const sees = d < TURRET.range && Math.abs(p.y - wy) < 6 && it.nav.sees(x.x, x.z, p.x - it.x0, p.z - it.z0);
         const want = sees ? Math.atan2(p.x - wx, p.z - wz) - (x.facing ?? 0) : 0;
         const head = m.part.head;

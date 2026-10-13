@@ -6,7 +6,7 @@
 // changes (doors, the lift, the things to use, traps) is kept apart in groups of its own for
 // world/DungeonView.js to animate; everything else is baked into a handful of meshes.
 import * as THREE from 'three';
-import { piece, bakeTree, G, shade } from '../render/ModelKit.js';
+import { piece, bakeTree, flatten, G, shade } from '../render/ModelKit.js';
 import { mulberry32 } from '../core/rng.js';
 import { THEMES } from './dungeons.js';
 
@@ -348,6 +348,9 @@ export function buildInterior(it) {
     traps.set(x.id, { group: g, part, x });
   }
 
+  // Everything that never moves merges by colour: a whole dungeon in a few dozen draw calls.
+  flatten(shell);
+  flatten(lid);
   bakeTree(root);
   // Ceilings light nothing from above and must not darken the rooms with their shadows.
   lid.traverse((o) => { if (o.isMesh) { o.castShadow = false; o.receiveShadow = false; } });

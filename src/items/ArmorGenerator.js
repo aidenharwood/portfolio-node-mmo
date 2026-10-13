@@ -11,7 +11,8 @@ import { GEAR_SETS, WEIGHTS, pickMaker, setOfMaker } from './sets.js';
 import { GROWTH, scale } from '../rpg/balance.js';
 
 let nextUid = 100000;
-const SET_MAKERS = Object.values(GEAR_SETS).map((s) => s.maker);
+// (A raid's own sets never roll on their own: only its chests give them.)
+const SET_MAKERS = Object.values(GEAR_SETS).filter((s) => !s.raid).map((s) => s.maker);
 
 function applyMods(stats, mods) {
   if (!mods) return;

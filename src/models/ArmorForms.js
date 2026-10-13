@@ -26,12 +26,14 @@ const DARK = 0x2a2a30;
 export function armorContext(item) {
   const set = GEAR_SETS[item.set] ?? GEAR_SETS.pathfinder;
   const mfr = MANUFACTURERS[item.manufacturer] ?? MANUFACTURERS[set.maker];
+  // (A raid's set wears colours of its own.)
+  const pal = set.palette ?? mfr.palette;
   const rar = RARITY[item.rarity];
   const part = (slot) => PART_INDEX[item.parts[slot]]?.visual ?? {};
   return {
-    item, set, pal: mfr.palette, rar, tier: rar.tier,
-    main: mfr.palette.primary,
-    accent: mfr.palette.energy,
+    item, set, pal, rar, tier: rar.tier,
+    main: pal.primary,
+    accent: pal.energy,
     rarityColor: rar.color,
     showAccent: true,
     trim: part('trim'),

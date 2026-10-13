@@ -219,6 +219,30 @@ Built beyond the plan:
   operations change, so both copies reach them together; the server's copy is the one saved.
 - Each confirmation carries a hash of the server's copy (quest steps and story flags included), and
   the server sends one every 10 seconds. If the client's copy disagrees, it reloads the server's.
+- Dungeons (gameplay phase 5): each layer has an instance manager (`sim/Dungeons.js`), which
+  offline single-player runs locally too. An open-world dungeon has one shared copy per layer; a
+  private run belongs to a party (or one player): its members who go down the same dungeon at the
+  same tier join it, and a different one is refused while any of them is inside. Each copy is built
+  in a pocket slot of its own far out east (`world/dungeons.js`), so interest management keeps
+  copies apart with no extra rules; the server's world gets its walls and doors (boxes) and the
+  world sim its rooms (as camps, `world.campsNear`), and nothing of the land is loaded, spawned or
+  visited out there. An empty copy closes after ten minutes.
+  - **Rolled ops:** `enter { d, mode: 'open' | 'run', tier, via: 'entrance' | 'gate' }` (the
+    manager checks the way in is within 9 m — the dungeon's own, or a Wardens' waygate — and any
+    story flag it needs, then rolls the copy, where you arrive and where you came from), `leave` (at
+    the entrance portal, or the one past the boss once it's down), `dloot` (a treasure chest, once
+    per character per copy) and `dchest` (the reward chest past a private run's boss: once a day per
+    dungeon per tier, `settings.lockouts`). A refused `enter` comes back with the reason (`err`).
+  - **Server-sent:** `dclear` when the final boss falls, to everyone in that copy (their records).
+  - **`dun` messages:** the copy's state (`open` doors, the `key`, power `nodes`, `mini` and `boss`
+    down, rooms `cleared`) to everyone in it whenever it changes, with a line to show; and from a
+    player, `dun { id }` — something used: the key, a power node, the locked door (checked against
+    where the server has them).
+  - Inside a private run its tier is the Threat that counts (`CharacterCore.tier`), for damage on
+    each screen and for the server's reward rolls. Traps are each screen's own danger, like an
+    enemy's shots; the lift runs on each screen (enemies don't ride it).
+  - Entering and leaving move the character a long way: they open the same window travel does.
+    Someone who drops out down there comes back where they went in (`run.back` in the save).
 - Both sides must run the same rules: `/api/status` names the server's build (a hash of the shared
   code it loaded — `src/world`, `rpg`, `items`, `combat`, `sim`, `core`) and whether the files have
   changed since it started (`stale`). A client won't go online against a stale or unnamed build;

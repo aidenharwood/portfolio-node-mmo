@@ -232,7 +232,9 @@ export class GameMenu {
     const title = this.context === 'title';
     if (!title) {
       const p = g.player;
-      const region = g.world.regionAt(p.position.x, p.position.z);
+      // (Down in a dungeon: the dungeon, and its copy's level.)
+      const below = g.dungeonView?.active;
+      const region = below ? { name: g.dungeonView.def.name, level: g.dungeonView.run.lv } : g.world.regionAt(p.position.x, p.position.z);
       const name = g.net.inWorld ? esc(g.net.character?.name ?? '') : 'Wanderer';
       const hp = p.maxHp ? p.hp / p.maxHp : 1;
       const key = `${name}|${g.stats.level}|${region.name}|${Math.round(hp * 200)}`;
@@ -240,7 +242,7 @@ export class GameMenu {
         this.whoKey = key;
         this.q('.gm-who').innerHTML = `
           <span class="gm-lv">${g.stats.level}</span>
-          <span class="gm-name">${name}<small>${esc(region.name)} · region level ${region.level}</small></span>
+          <span class="gm-name">${name}<small>${esc(region.name)} · ${below ? 'dungeon' : 'region'} level ${region.level}</small></span>
           <span class="gm-hp ${hp < 0.35 ? 'low' : ''}" title="Health"><i style="width:${(hp * 100).toFixed(1)}%"></i><b>${Math.ceil(p.hp)} / ${p.maxHp}</b></span>`;
       }
       this.q('.gm-gold').textContent = `${g.stats.gold}g`;

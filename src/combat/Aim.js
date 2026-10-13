@@ -56,10 +56,26 @@ export function rayBox(o, d, x0, x1, y0, y1, z0, z1) {
   return tmin;
 }
 
+// A ray against a box collider, turned by its `ry` as the world turns them (world/World.js: a
+// point's local coordinates are R(ry)·(point − centre)), so the ray is turned into the box's frame.
+const _lo = new THREE.Vector3();
+const _ld = new THREE.Vector3();
+export function rayBoxCollider(o, d, c, pad = 0, below = 0, above = 0) {
+  const a = c.ry ?? 0;
+  if (!a) return rayBox(o, d, c.x - c.hx - pad, c.x + c.hx + pad, c.y - below, c.y + c.h + above, c.z - c.hz - pad, c.z + c.hz + pad);
+  const cos = Math.cos(a);
+  const sin = Math.sin(a);
+  const ox = o.x - c.x;
+  const oz = o.z - c.z;
+  _lo.set(cos * ox - sin * oz, o.y, sin * ox + cos * oz);
+  _ld.set(cos * d.x - sin * d.z, d.y, sin * d.x + cos * d.z);
+  return rayBox(_lo, _ld, -c.hx - pad, c.hx + pad, c.y - below, c.y + c.h + above, -c.hz - pad, c.hz + pad);
+}
+
 // A ray against any world collider (a round one's side, or a box), widened by `pad` and stretched
 // `below`/`above` its bottom and top.
 export function rayCollider(o, d, c, pad = 0, below = 0, above = 0) {
-  if (c.box) return rayBox(o, d, c.x - c.hx - pad, c.x + c.hx + pad, c.y - below, c.y + c.h + above, c.z - c.hz - pad, c.z + c.hz + pad);
+  if (c.box) return rayBoxCollider(o, d, c, pad, below, above);
   return rayCylinder(o, d, c.x, c.z, c.r + pad, c.y - below, c.y + c.h + above);
 }
 

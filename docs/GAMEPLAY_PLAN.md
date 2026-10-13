@@ -377,6 +377,41 @@ the plan below:
 
 ## 7. Phase 5 — Dungeons
 
+**Status: built** (2026-10-13). `npm test` adds `tools/dungeoncheck.mjs` (every dungeon's layout
+across many private runs, then copies run headlessly through the instance manager, the world sim and
+the character's rules) and the smoke test goes down a dungeon through Brightwater's waygate on a real
+server. Where it differs from the plan below:
+- **Pockets:** copies are built far out east (60 km+, past anywhere the land goes) in slots 400 m
+  apart, on a 2 m grid. There the world's ground is the copy's floors (stairs are ramps under their
+  steps), walls, lintels and doors are box colliders (new), and the ceiling caps the camera and
+  shots. Nothing of the land streams in, spawns, roams or is "visited" out there.
+- **Light:** the land, sky and grass are hidden, the fog closes in to the theme's colour, the sky
+  light and sun take the theme's tint, and the one moving light hangs over you (the light count
+  stays fixed, so no shaders recompile); fixtures glow, with bloom on the higher qualities.
+- **Navigation:** breadth-first flow fields on the copy's grid, shared by everyone heading for the
+  same cell; enemies cut corners to the furthest point in sight, don't see you through walls, and
+  don't ride the lift.
+- **Layout:** every dungeon has the same shape of main route — entrance hall, three halls, the
+  mini-boss's arena (pillars, its seal opens when the mini-boss falls), a hall, the lift down an
+  8 m drop, a hall, the final boss's hall — with a locked door (its key in a side room) and a door
+  that needs power (two nodes in side rooms) before the arena; stairs where a hall is lower. The
+  main route is the dungeon's own; side rooms, residents, traps and treasure are rolled again for
+  every private run. Traps are each screen's own danger (like enemy shots): vents, turrets that
+  track you, and spore pods in organic themes. The lift runs on each screen.
+- **Open-world and private:** the Foundry and the Brood Pits have open-world copies (rooms refill
+  three minutes after they're emptied, the boss too); the Sunken Vault is private-only, sealed until
+  Act I opens it. Private runs are at a tier — the run's Threat for everyone in it — and at least the
+  level of whoever starts it; the reward chest is once a day per dungeon per tier (the UTC day).
+  Waygates: every town and Brightwater got one on the plaza; cities use their gate yard's dungeon
+  gate. Empty copies close after ten minutes (an open-world one starts over).
+- **The launch set:** Ironjaw moved down into the Foundry as its final boss (Act I's "Defeat Ironjaw"
+  now sends you through the furnace hall gate; the stronghold on top is Gorrak the Foreman's); the
+  Vault's boss is the Seal Warden; the Brood Pits are a new story place past Farcall (the Brood
+  Matron). Synth facilities and Wild caverns are built by the generator and reachable from the dev
+  panel until dungeons of their own arrive.
+- **Achievements:** five (Delver, Into Every Dark *(title)*, Private Business, Regular, Deep and Dark
+  *(title)*); clears are recorded per dungeon as open world, Normal, Veteran and Elite.
+
 ### 7.1 Interior tech
 - **Pocket spaces:**
   - interiors are built far outside the playable land, at their own coordinates;

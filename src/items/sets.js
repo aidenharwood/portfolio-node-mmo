@@ -123,6 +123,25 @@ export const GEAR_SETS = {
       { n: 4, name: 'Resonance', perks: ['secondWind'], stats: { manaDiscount: 0.25 }, text: 'Falling below 30% health heals 30% (once a minute).' },
     ],
   },
+  // ---------------------------------------------------------------- raid sets (gameplay phase 7)
+  // Only from a raid's chests (world/raids.js `set`), always legendary; never rolled anywhere else.
+  // `palette`: its own colours over its maker's.
+  broodbane: {
+    name: 'Broodbane', maker: 'hivecraft', weight: 'heavy', raid: 'broodmother',
+    blurb: 'Cut from the Brood Mother\'s own guard, gilded where the chitin cracked. The nests go quiet when it walks by.',
+    palette: { primary: 0x2a1832, secondary: 0x6a2a52, metal: 0xe8c070, energy: 0xff5ad8 },
+    pieces: {
+      head: { name: 'Crown', forms: ['carapace'] },
+      chest: { name: 'Carapace', forms: ['chitin'] },
+      hands: { name: 'Talons', forms: ['claws'] },
+      legs: { name: 'Greaves', forms: ['chitin'] },
+      back: { name: 'Wings', forms: ['wings'] },
+    },
+    bonuses: [
+      { n: 2, stats: { resistCorrosive: 0.25, corrosiveDamage: 0.2, armorPct: 0.08 } },
+      { n: 4, name: 'Queen\'s Guard', perks: ['warded', 'vampiric'], stats: { armorPct: 0.1 }, text: 'The first hit every 8 seconds is halved, and you heal 4% of all the damage you deal.' },
+    ],
+  },
 };
 
 export const SET_IDS = Object.keys(GEAR_SETS);

@@ -132,7 +132,7 @@ export class QuestLog {
     if (!ref || !this.world) return null;
     if (typeof ref === 'string' && (ref.startsWith('n:') || FIXED.has(ref))) {
       const n = this.world.npcById?.(ref);
-      return n ? { x: n.x, z: n.z, r: 3, name: n.name ?? folkName(n), npc: n.id } : null;
+      return n ? { x: n.x, z: n.z, r: 3, name: n.name ?? folkName(n, this.world.placeOf?.(n)), npc: n.id } : null;
     }
     return storyRef(this.world, ref, { home: q?.home });
   }
@@ -165,7 +165,7 @@ export class QuestLog {
     const where = this.placeName(this.placeOf(id));
     if (n.role === 'board') return `the quest board in ${where}`;
     if (n.name) return `${n.name}${where && !n.name.includes(where) ? ` in ${where}` : ''}`;
-    return `${n.role === 'warden' ? 'Warden ' : ''}${folkName(n)} at ${where}`;
+    return `${n.role === 'warden' ? 'Warden ' : ''}${folkName(n, this.placeOf(id))} at ${where}`;
   }
 
   // Who to go back to with a quest (or where it finishes).

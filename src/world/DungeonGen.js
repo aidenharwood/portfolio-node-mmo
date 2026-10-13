@@ -13,6 +13,12 @@
 // sim fills its rooms, world/InteriorKit.js draws it.
 //
 // All positions are metres from the plot's corner (x, z) and its base height (floor heights).
+//
+// A raid (world/raids.js, gameplay phase 7) is laid out by the same generator from a route of its
+// own (`def.route`): halls of trash between its boss arenas (room kind 'arena', `enc`: which of
+// its encounters fights there), a gate into each arena that shuts while its fight is on, and a seal
+// out of it that opens when the encounter falls; each arena has its own reward chest (`enc` on the
+// 'reward'), and the way out stands past the last. No side rooms, keys or lift.
 import { mulberry32 } from '../core/rng.js';
 import { roomUnits } from '../combat/races.js';
 import { CELL, GRID, THEMES } from './dungeons.js';
@@ -50,7 +56,7 @@ const DROPS = [0, 0, 0, 1.5, 2.5, 3];
 const LIFT_DROP = 8;
 
 // ---------------------------------------------------------------- rectangles on the grid
-const inGrid = (r) => r.x >= 2 && r.z >= 2 && r.x + r.w <= GRID - 2 && r.z + r.h <= GRID - 2;
+const inGrid = (r, W) => r.x >= 2 && r.z >= 2 && r.x + r.w <= W - 2 && r.z + r.h <= W - 2;
 function overlaps(rects, r, pad, skip = null) {
   for (const e of rects) {
     if (e === skip) continue;
@@ -82,30 +88,31 @@ function attach(rng, A, dir, len, w, h) {
 
 // The main route, laid out east across the plot with turns north and south (never back west, so
 // it can't wind into itself).
-function placeRoute(rng) {
+function placeRoute(rng, route, W) {
   for (let attempt = 0; attempt < 80; attempt++) {
     const rects = [];
     const rooms = [];
     const cors = [];
-    const S = ROUTE[0];
-    const start = { x: 4, z: Math.floor(GRID / 2) - 4 + between(rng, [-10, 10]), w: between(rng, S.w), h: between(rng, S.h), kind: 'start', ceil: S.ceil, floor: 0, main: true, i: 0 };
+    const S = route[0];
+    const start = { x: 4, z: Math.floor(W / 2) - 4 + between(rng, [-10, 10]), w: between(rng, S.w), h: between(rng, S.h), kind: 'start', ceil: S.ceil, floor: 0, main: true, i: 0 };
     rooms.push(start);
     rects.push(start);
     let ok = true;
     let last = 'E';
-    for (let i = 1; i < ROUTE.length; i++) {
-      const spec = ROUTE[i];
+    for (let i = 1; i < route.length; i++) {
+      const spec = route[i];
       const A = rooms[i - 1];
       let placed = false;
       for (let t = 0; t < 50 && !placed; t++) {
         const r = rng();
         // Mostly onward; a turn north or south now and then (not straight back the way it turned).
         const dir = r < 0.55 ? 'E' : r < 0.78 ? (last === 'S' ? 'E' : 'N') : (last === 'N' ? 'E' : 'S');
-        const len = spec.lift ? 8 : between(rng, [3, 6]);
+        const len = spec.lift ? 8 : between(rng, spec.cor ?? [3, 6]);
         const { cor, room } = attach(rng, A, dir, len, between(rng, spec.w), between(rng, spec.h));
-        if (!inGrid(cor) || !inGrid(room) || overlaps(rects, cor, 1, A) || overlaps(rects, room, 1)) continue;
-        const drop = spec.lift ? LIFT_DROP : pick(rng, DROPS);
+        if (!inGrid(cor, W) || !inGrid(room, W) || overlaps(rects, cor, 1, A) || overlaps(rects, room, 1)) continue;
+        const drop = spec.lift ? LIFT_DROP : pick(rng, spec.drops ?? DROPS);
         Object.assign(room, { kind: spec.kind, ceil: spec.ceil, floor: A.floor - drop, main: true, i });
+        if (spec.enc !== undefined) room.enc = spec.enc;
         Object.assign(cor, { a: i - 1, b: i, door: spec.door, sealFrom: !!spec.sealFrom, lift: !!spec.lift, main: true });
         rooms.push(room);
         cors.push(cor);
@@ -121,16 +128,16 @@ function placeRoute(rng) {
 }
 
 // Side rooms off the route, from the run's own stream.
-function placeSides(rng, rooms, cors, rects) {
+function placeSides(rng, rooms, cors, rects, sides, W) {
   const placedKinds = [];
-  for (const S of SIDES) {
+  for (const S of sides) {
     let placed = false;
     for (let t = 0; t < 70 && !placed; t++) {
       const host = pick(rng, S.hosts);
       const A = rooms[host];
       const dir = pick(rng, ['E', 'W', 'N', 'S']);
       const { cor, room } = attach(rng, A, dir, between(rng, [2, 4]), between(rng, [6, 8]), between(rng, [6, 8]));
-      if (!inGrid(cor) || !inGrid(room) || overlaps(rects, cor, 1, A) || overlaps(rects, room, 1)) continue;
+      if (!inGrid(cor, W) || !inGrid(room, W) || overlaps(rects, cor, 1, A) || overlaps(rects, room, 1)) continue;
       const i = rooms.length;
       Object.assign(room, { kind: S.kind, ceil: SIDE_CEIL, floor: A.floor, main: false, host, i });
       Object.assign(cor, { a: host, b: i, door: 'open', main: false });
@@ -151,9 +158,11 @@ export function generateDungeon(def, { shuffle = def.seed, level = def.level } =
   const theme = THEMES[def.theme];
   const rng = mulberry32(def.seed >>> 0);
   const run = mulberry32((shuffle ^ 0x9e3779b9) >>> 0);
-  const { rooms, cors, rects } = placeRoute(rng);
-  const kinds = placeSides(run, rooms, cors, rects);
-  const W = GRID;
+  const W = def.grid ?? GRID;
+  const { rooms, cors, rects } = placeRoute(rng, def.route ?? ROUTE, W);
+  const kinds = placeSides(run, rooms, cors, rects, def.route ? def.sides ?? [] : SIDES, W);
+  const arenas = rooms.filter((r) => r.kind === 'arena');
+  const specOf = (r) => (def.route ?? ROUTE)[r.i] ?? {};
 
   // Corridor floors: level, a flight of stairs where the rooms differ, or a lift shaft.
   for (const c of cors) {
@@ -228,6 +237,17 @@ export function generateDungeon(def, { shuffle = def.seed, level = def.level } =
     return { x: c.x, z: o.into > 0 ? (r.z + r.h) * CELL - back : r.z * CELL + back };
   };
   const facingInto = (o) => (o.axis === 'x' ? (o.into > 0 ? Math.PI / 2 : -Math.PI / 2) : (o.into > 0 ? 0 : Math.PI));
+  // A point in room `r` at fractions [across, deep] of it as seen coming in by opening `o` (deep
+  // 0: the wall it comes in by), 2 m in from the walls.
+  const arenaPoint = (r, o, [fa, fd]) => {
+    const x0 = r.x * CELL + 2;
+    const x1 = (r.x + r.w) * CELL - 2;
+    const z0 = r.z * CELL + 2;
+    const z1 = (r.z + r.h) * CELL - 2;
+    if (o?.axis === 'x') return { x: o.into > 0 ? x0 + (x1 - x0) * fd : x1 - (x1 - x0) * fd, z: z0 + (z1 - z0) * fa };
+    if (o) return { x: x0 + (x1 - x0) * fa, z: o.into > 0 ? z0 + (z1 - z0) * fd : z1 - (z1 - z0) * fd };
+    return { x: x0 + (x1 - x0) * fa, z: z0 + (z1 - z0) * fd };
+  };
   const start = rooms[0];
   const out = exitOf(start);
   // From the start, facing the way on (the way it goes out of the start room is "into" the corridor).
@@ -240,20 +260,34 @@ export function generateDungeon(def, { shuffle = def.seed, level = def.level } =
       things.push({ id: `t${things.length}`, kind: r.kind === 'treasure' ? 'chest' : r.kind, room: r.i, ...c, floor: r.floor, facing: facingInto(entryOf(r)) + Math.PI });
     }
   }
-  const boss = rooms.find((r) => r.kind === 'boss');
-  const bossIn = entryOf(boss);
-  const back = opposite(boss, bossIn, 3);
-  const side = bossIn.axis === 'x' ? { x: 0, z: 3.2 } : { x: 3.2, z: 0 };
-  const faceIn = facingInto(bossIn) + Math.PI;
-  things.push({ id: `t${things.length}`, kind: 'reward', room: boss.i, x: back.x - side.x, z: back.z - side.z, floor: boss.floor, facing: faceIn });
-  things.push({ id: `t${things.length}`, kind: 'exit', room: boss.i, x: back.x + side.x, z: back.z + side.z, floor: boss.floor, facing: faceIn });
+  // The reward chest past the boss and the way out beside it — in a raid, a chest in each arena
+  // (in a corner by its way on), and the way out past the last.
+  const boss = rooms.find((r) => r.kind === 'boss') ?? arenas[arenas.length - 1];
+  const openAt = (o) => (o.axis === 'x' ? { x: o.line, z: (o.s0 + o.s1) / 2 } : { x: (o.s0 + o.s1) / 2, z: o.line });
+  for (const r of arenas.length ? arenas : [boss]) {
+    const rIn = entryOf(r);
+    const back = opposite(r, rIn, 3);
+    const side = rIn.axis === 'x' ? { x: 0, z: 3.2 } : { x: 3.2, z: 0 };
+    const faceIn = facingInto(rIn) + Math.PI;
+    let at = { x: back.x - side.x, z: back.z - side.z };
+    if (r !== boss) {
+      // (A raid's arena with a way on: the corner furthest from its doorways.)
+      const ways = openings.filter((o) => o.room === r.i).map(openAt);
+      const corners = [[0, 0], [1, 0], [0, 1], [1, 1]].map(([fx, fz]) => ({ x: (r.x + 2 + fx * (r.w - 4)) * CELL, z: (r.z + 2 + fz * (r.h - 4)) * CELL }));
+      at = corners.sort((a, b) => Math.min(...ways.map((w) => Math.hypot(w.x - b.x, w.z - b.z))) - Math.min(...ways.map((w) => Math.hypot(w.x - a.x, w.z - a.z))))[0];
+    }
+    const reward = { id: `t${things.length}`, kind: 'reward', room: r.i, x: at.x, z: at.z, floor: r.floor, facing: faceIn };
+    if (r.enc !== undefined) reward.enc = r.enc;
+    things.push(reward);
+    if (r === boss) things.push({ id: `t${things.length}`, kind: 'exit', room: r.i, x: back.x + side.x, z: back.z + side.z, floor: r.floor, facing: faceIn });
+  }
 
   // Free spots in a room for enemies, traps and clutter: clear of the walls, the openings and the
   // things in it — and of the pillars holding up the two arenas' roofs.
   const pillars = [];
   for (const r of rooms) {
-    if (r.kind !== 'boss' && r.kind !== 'mini') continue;
-    for (const fx of [0.25, 0.75]) for (const fz of [0.25, 0.75]) pillars.push({ room: r.i, x: (r.x + r.w * fx) * CELL, z: (r.z + r.h * fz) * CELL, r: 0.85 });
+    if (r.kind !== 'boss' && r.kind !== 'mini' && !(r.kind === 'arena' && specOf(r).pillars)) continue;
+    for (const fx of [0.25, 0.75]) for (const fz of [0.25, 0.75]) pillars.push({ room: r.i, x: (r.x + r.w * fx) * CELL, z: (r.z + r.h * fz) * CELL, r: r.kind === 'arena' ? 1.2 : 0.85 });
   }
   const taken = pillars.map((p) => ({ x: p.x, z: p.z }));
   const clearOf = (r, x, z, pad) => {
@@ -284,20 +318,28 @@ export function generateDungeon(def, { shuffle = def.seed, level = def.level } =
   const spawns = [];
   for (const r of rooms) {
     let units = [];
-    if (r.kind === 'hall') units = roomUnits(race, level, run, 3 + Math.floor(run() * 2) + (level >= 10 ? 1 : 0), level >= 10 ? 1 : run() < 0.3 ? 1 : 0);
+    const spec = specOf(r);
+    if (r.kind === 'hall' && spec.pack) units = roomUnits(race, level, run, between(run, spec.pack), spec.elites ?? 1);
+    else if (r.kind === 'hall') units = roomUnits(race, level, run, 3 + Math.floor(run() * 2) + (level >= 10 ? 1 : 0), level >= 10 ? 1 : run() < 0.3 ? 1 : 0);
     else if (r.kind === 'key' || r.kind === 'node') units = roomUnits(race, level, run, 2 + Math.floor(run() * 2), level >= 12 && run() < 0.5 ? 1 : 0);
     else if (r.kind === 'treasure') units = run() < 0.5 ? roomUnits(race, level, run, 2) : [];
     else if (r.kind === 'mini') units = [{ type: def.mini.type, opts: { elite: true, champion: true, name: def.mini.name } }, ...roomUnits(race, level, run, 2)];
     else if (r.kind === 'boss') units = [{ type: def.boss.type, opts: { boss: true } }];
+    else if (r.kind === 'arena') {
+      // A raid's encounter: its bosses where it puts them (fractions of the arena, the way in at
+      // the near side), each with its script.
+      units = (def.encounters?.[r.enc]?.units ?? []).map((u) => ({ type: u.type, opts: { boss: true, variant: u.variant ?? null, script: u.script }, f: u.at }));
+    }
     if (!units.length) continue;
     const placed = [];
     for (const u of units) {
       // The boss waits at the far end, the mini-boss in the middle of the arena.
       let at = null;
-      if (u.opts.boss) at = opposite(r, entryOf(r), 7);
+      if (u.f) at = arenaPoint(r, entryOf(r), u.f);
+      else if (u.opts.boss) at = opposite(r, entryOf(r), 7);
       else if (r.kind === 'mini' && u.opts.champion) at = center(r);
       else at = spot(run, r, 2.2);
-      if (at) placed.push({ ...u, x: at.x, z: at.z });
+      if (at) placed.push({ type: u.type, opts: u.opts, x: at.x, z: at.z });
     }
     spawns.push({ room: r.i, units: placed });
   }
@@ -355,7 +397,7 @@ export function generateDungeon(def, { shuffle = def.seed, level = def.level } =
   };
   for (const r of rooms) {
     const lift = Math.min(r.ceil - 1, 3.4);
-    for (const p of wallSpots(r, r.kind === 'boss' || r.kind === 'mini' ? 3 : 4, 0.35)) lights.push({ ...p, y: r.floor + lift, area: r.i });
+    for (const p of wallSpots(r, r.kind === 'boss' || r.kind === 'mini' || r.kind === 'arena' ? 3 : 4, 0.35)) lights.push({ ...p, y: r.floor + lift, area: r.i });
     const spots = wallSpots(r, 2, 1.1);
     const n = Math.min(spots.length, (r.kind === 'start' ? 3 : 5) + Math.floor(run() * 4));
     for (let k = 0; k < n; k++) {
@@ -379,6 +421,8 @@ export function generateDungeon(def, { shuffle = def.seed, level = def.level } =
     id: def.id, name: def.name, theme: def.theme, level, shuffle, W, cell: CELL,
     rooms, cors, cells, openings, doors, things, spawns, traps, lights, props, pillars,
     start: { x: center(start).x, z: center(start).z, floor: start.floor, facing: onward },
-    boss: boss.i, mini: rooms.find((r) => r.kind === 'mini').i, lift: lift ? cors.indexOf(lift) : -1, sides: kinds,
+    boss: boss.i, mini: rooms.find((r) => r.kind === 'mini')?.i ?? -1, lift: lift ? cors.indexOf(lift) : -1, sides: kinds,
+    // A raid's arenas, by encounter, with where in each its back lies (away from the way in).
+    arenas: arenas.map((r) => ({ room: r.i, enc: r.enc, back: arenaPoint(r, entryOf(r), [0.5, 0.88]), centre: center(r) })),
   };
 }

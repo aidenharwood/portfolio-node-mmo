@@ -33,9 +33,19 @@ export class Net {
   }
 
   get online() { return this.mode === 'online'; }
-  get token() { try { return localStorage.getItem(TOKEN_KEY); } catch { return null; } }
+  // The sign-in is this window's own (sessionStorage), so two windows can play two accounts side by
+  // side; the latest one is also remembered (localStorage) for windows opened later.
+  get token() {
+    try { return sessionStorage.getItem(TOKEN_KEY) ?? localStorage.getItem(TOKEN_KEY); } catch { return null; }
+  }
   set token(v) {
-    try { if (v) localStorage.setItem(TOKEN_KEY, v); else localStorage.removeItem(TOKEN_KEY); } catch { /* storage unavailable */ }
+    try {
+      if (v) { sessionStorage.setItem(TOKEN_KEY, v); localStorage.setItem(TOKEN_KEY, v); } else {
+        // Signed out here: forget this window's, and the remembered one only if it was this one's.
+        if (localStorage.getItem(TOKEN_KEY) === sessionStorage.getItem(TOKEN_KEY)) localStorage.removeItem(TOKEN_KEY);
+        sessionStorage.removeItem(TOKEN_KEY);
+      }
+    } catch { /* storage unavailable */ }
   }
 
   // ---------------------------------------------------------------- server and account API

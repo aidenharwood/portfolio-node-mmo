@@ -147,10 +147,27 @@ const ROLE_LINE = {
   smith: 'Talents set wrong? I can strip you back to bare iron and you learn it all again — free for green hands, gold for the rest.',
 };
 
-// A person's name (the same everywhere: the quest log names givers with it too).
-export function folkName(n) {
-  const rnd = mulberry32((n.seed ^ 0x5eed) >>> 0);
-  return FIRST[Math.floor(rnd() * FIRST.length)];
+// A person's name (the same everywhere: the quest log names givers with it too). Given their
+// place, no two of its folk share one: each takes the name their seed picks, or the next free one
+// along, in the place's own order.
+const NAMELESS = new Set(['object', 'board', 'gate', 'warroom', 'story']);
+const seedName = (n) => FIRST[Math.floor(mulberry32((n.seed ^ 0x5eed) >>> 0)() * FIRST.length)];
+export function folkName(n, place = null) {
+  if (!place?.npcs) return seedName(n);
+  let names = place._names;
+  if (!names) {
+    names = new Map();
+    const used = new Set();
+    for (const m of place.npcs) {
+      if (NAMELESS.has(m.role) || m.name) continue;
+      let k = FIRST.indexOf(seedName(m));
+      for (let t = 0; t < FIRST.length && used.has(FIRST[k]); t++) k = (k + 1) % FIRST.length;
+      used.add(FIRST[k]);
+      names.set(m.id, FIRST[k]);
+    }
+    Object.defineProperty(place, '_names', { value: names, enumerable: false });
+  }
+  return names.get(n.id) ?? seedName(n);
 }
 
 // The NPC definition (entities/NPC.js) for one of a place's folk.
@@ -185,7 +202,7 @@ export function settlementFolk(place, n) {
   if (role === 'warden') Object.assign(look, { cape: 0x2a4a34, glow: 0x7aff9a, hat: rnd() < 0.5 ? 'helmet' : null });
   if (role === 'smith') Object.assign(look, { apron: 0x4a3020, hat: null, hairStyle: pick(['short', 'bald']) });
   if (role === 'innkeeper' && rnd() < 0.5) look.belly = true;
-  const name = folkName(n);
+  const name = folkName(n, place);
   const stock = n.stock ?? 'all';
   const title = role === 'trader' ? (STOCK_TITLE[stock] ?? TRADER_TITLE[kind] ?? 'Trader')
     : role === 'warden' ? (place.type === 'district' || place.type === 'city' ? 'High Warden' : 'Post Warden')

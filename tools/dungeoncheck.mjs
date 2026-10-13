@@ -228,6 +228,18 @@ const sealShut = !it.isOpen(seal.id);
 for (const e of [...sim.enemies]) if (e.alive && e.camp?.def.index === L.mini) sim.applyHit(e.id, { by: 1, damage: 1e7, source: 'melee', dir: { x: 0, z: 1 } });
 step(2);
 check(!!champ && champ.displayName === DUNGEONS.foundry.mini.name && sealShut && it.isOpen(seal.id), `${champ?.displayName ?? 'the mini-boss'} down opens the arena's seal`);
+// The lift: one platform for the whole copy — called from the top, it rides up and everyone hears.
+const lc = it.lift.cor;
+const across = (lc.axis === 'x' ? lc.z : lc.x) * L.cell + L.cell;
+const topU = lc.dir > 0 ? lc.shaft.u0 - 1.4 : lc.shaft.u1 + 1.4;
+stand(A, it.x0 + (lc.axis === 'x' ? topU : across), it.z0 + (lc.axis === 'x' ? across : topU));
+const told = sent.length;
+const called = dun.use(1, 'lift:top', A.position, 'A') === 'lift';
+const busy = dun.use(1, 'lift:bottom', A.position, 'A') === null;
+step(5);
+const arrived = Math.abs(run.state.lift.y - lc.shaft.top) < 1e-6 && Math.abs(it.lift.y - lc.shaft.top) < 1e-6;
+const heard = sent.slice(told).filter((m) => m.msg.st?.lift).length >= 2;
+check(called && busy && arrived && heard && !w.blocks({ x: it.x0 + (lc.axis === 'x' ? topU + lc.dir * 1.5 : across), y: it.origin.y + lc.shaft.top + 1, z: it.z0 + (lc.axis === 'x' ? across : topU + lc.dir * 1.5) }), 'the lift: called from the top, it rides up (one platform for everyone, told when it moves and when it arrives), and its top gate opens');
 // The boss: Ironjaw, down in the furnace hall.
 const bossRoom = L.rooms[L.boss];
 stand(A, centre(bossRoom).x, centre(bossRoom).z);

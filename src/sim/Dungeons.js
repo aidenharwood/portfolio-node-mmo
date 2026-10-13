@@ -16,13 +16,19 @@
 //   world, sim                    the world (dungeons are built in it) and its world sim
 //   send(playerId, msg)           to one player
 //   positionOf(playerId)          where they are now (null when they've gone)
-//   cleared?(run)                 the boss is down: the host credits whoever's there
+//   cleared?(run, enc)            the boss is down (a raid's: one of its encounters, `enc`): the
+//                                 host credits whoever's there
 // }
-import { DUNGEONS, THEMES, pocketOrigin, SHARED_SLOTS, CLOSE_AFTER, lockDay, lockKey } from '../world/dungeons.js';
+// Raids (world/raids.js, gameplay phase 7) are copies here too — private runs only, for a raid group
+// (`who.raid`, else the party), up to the raid's size — with their encounters run by sim/RaidRun.js.
+import { DUNGEONS, THEMES, pocketOrigin, SHARED_SLOTS, CLOSE_AFTER, LIFT_SPEED, lockDay, lockKey } from '../world/dungeons.js';
+import { instanceDef } from '../world/raids.js';
 import { generateDungeon } from '../world/DungeonGen.js';
 import { Interior } from '../world/Interior.js';
-import { TIERS } from '../rpg/balance.js';
+import { TIERS, tierOf } from '../rpg/balance.js';
 import { THEMES as LOOT } from '../items/sets.js';
+import { rollAffixes, affixCount } from './affixes.js';
+import { RaidRun } from './RaidRun.js';
 
 const NEAR = 9;        // metres from a way in (a dungeon's entrance, a gate) to go in
 const USE = 4.5;       // metres from something to use it
@@ -61,7 +67,11 @@ export class Dungeons {
     };
     run.interior = new Interior(layout, origin, { id, dungeon: def.id, tier });
     run.interior.camps = this.campsOf(run);
+    // The lift rests at the bottom, and rides when someone calls it or stands on it.
+    const lift = run.interior.lift;
+    if (lift) run.state.lift = { y: lift.y, to: lift.y };
     this.world.addInterior(run.interior);
+    if (def.raid) run.raid = new RaidRun(this, run);
     this.runs.set(id, run);
     if (shared) this.shared.set(def.id, id);
     else this.byKey.set(key, id);
@@ -73,6 +83,9 @@ export class Dungeons {
     const L = run.layout;
     const o = run.origin;
     const race = THEMES[run.def.theme].race;
+    // A private run's tier gives its elites more affixes (rpg/balance.js TIERS).
+    const extra = run.shared ? 0 : tierOf(run.tier).affixes;
+    const opts = (u) => (u.opts.elite && extra ? { ...u.opts, affixes: rollAffixes(race, affixCount(run.level, !!u.opts.champion) + extra) } : u.opts);
     return L.spawns.map((s) => {
       const r = L.rooms[s.room];
       const cx = (r.x + r.w / 2) * L.cell;
@@ -82,7 +95,7 @@ export class Dungeons {
         x: o.x + cx, z: o.z + cz, radius: Math.hypot(r.w, r.h) * L.cell * 0.5, race, level: run.level,
         respawn: run.shared ? RESPAWN : Infinity,
         boss: s.room === L.boss ? run.def.boss : null,
-        units: s.units.map((u) => ({ type: u.type, opts: u.opts, x: o.x + u.x, z: o.z + u.z })),
+        units: s.units.map((u) => ({ type: u.type, opts: opts(u), x: o.x + u.x, z: o.z + u.z })),
       };
     });
   }
@@ -106,7 +119,10 @@ export class Dungeons {
 
   stateOf(run) {
     const s = run.state;
-    return { open: [...s.open], key: s.key, nodes: [...s.nodes], mini: s.mini, boss: s.boss, cleared: [...s.cleared] };
+    const lift = s.lift ? { y: Math.round(s.lift.y * 100) / 100, to: s.lift.to } : null;
+    const out = { open: [...s.open], key: s.key, nodes: [...s.nodes], mini: s.mini, boss: s.boss, cleared: [...s.cleared], lift };
+    if (run.raid) out.raid = run.raid.state();
+    return out;
   }
 
   tell(run, extra = null) {
@@ -132,36 +148,42 @@ export class Dungeons {
   // Can someone at `pos` go in this way? At the dungeon's own entrance, or at a town's or city's
   // dungeon gate.
   atWayIn(def, pos, via) {
-    if (via === 'gate') return this.world.folkNear(pos.x, pos.z, NEAR, 'gate').some((n) => n.gate === 'dungeon');
+    if (via === 'gate') return this.world.folkNear(pos.x, pos.z, NEAR, 'gate').some((n) => n.gate === (def.raid ? 'raid' : 'dungeon'));
     const e = this.entranceOf(def);
     return !!e && Math.hypot(e.x - pos.x, e.z - pos.z) <= NEAR;
   }
 
   fail(why) { this.error = why; return null; }
 
-  // Going in: `who` { id, position, party (a key), level, flags (story flags), dev } and the ask
-  // { d (dungeon), mode ('open' | 'run'), tier, via ('entrance' | 'gate') }. Returns the roll for
-  // the character's 'enter' operation, { run, at, facing, back } — or null (this.error says why).
+  // Going in: `who` { id, position, party (a key), raid (a raid group's key, or null), level, flags
+  // (story flags), dev } and the ask { d (dungeon or raid), mode ('open' | 'run'), tier, via
+  // ('entrance' | 'gate') }. Returns the roll for the character's 'enter' operation, { run, at,
+  // facing, back } — or null (this.error says why).
   enter(who, ask) {
     this.error = null;
-    const def = DUNGEONS[ask?.d];
+    const def = instanceDef(ask?.d);
     if (!def || (def.dev && !who.dev)) return this.fail('No such place.');
     const p = who.position;
     if (!who.dev && !this.atWayIn(def, p, ask.via)) return this.fail('Too far from the way in.');
     if (def.needs?.flag && !who.flags?.[def.needs.flag] && !who.dev) return this.fail(`${def.name} is sealed.`);
+    if (def.raid && !who.dev && (who.level ?? 1) < (def.minLevel ?? def.level)) return this.fail(`${def.name} is for level ${def.minLevel ?? def.level} and up.`);
+    // A raid is its raid group's (or, with none, the party's).
+    const key = def.raid ? who.raid ?? who.party : who.party;
+    const group = def.raid && who.raid ? 'raid' : 'party';
     let run;
     if (ask.mode === 'open') {
       if (!def.open) return this.fail(`${def.name} can only be run as a private copy.`);
       run = this.runs.get(this.shared.get(def.id)) ?? this.create(def);
     } else {
       const tier = Number.isInteger(ask.tier) && ask.tier >= 0 && ask.tier < TIERS.length ? ask.tier : 0;
-      const cur = this.runs.get(this.byKey.get(who.party));
+      const cur = this.runs.get(this.byKey.get(key));
       if (cur && cur.def === def && cur.tier === tier) run = cur;
       else {
-        if (cur && [...cur.players].some((id) => id !== who.id)) return this.fail(`Your party is in ${cur.def.name} (${TIERS[cur.tier].name}) — join them there, or wait for them to come out.`);
+        if (cur && [...cur.players].some((id) => id !== who.id)) return this.fail(`Your ${group} is in ${cur.def.name} (${TIERS[cur.tier].name}) — join them there, or wait for them to come out.`);
         if (cur) this.close(cur);
-        run = this.create(def, { tier, level: Math.max(def.level, who.level ?? 1), key: who.party });
+        run = this.create(def, { tier, level: Math.max(def.level, who.level ?? 1), key });
       }
+      if (def.raid && !run.players.has(who.id) && run.players.size >= (def.size ?? 12)) return this.fail(`${def.name} is full (${def.size ?? 12}).`);
     }
     // (Anyone already in a copy leaves it first, where they came in.)
     const was = this.where.get(who.id);
@@ -202,6 +224,9 @@ export class Dungeons {
   startOf(playerId) {
     const run = this.runOf(playerId);
     if (!run) return null;
+    // (In a raid: the arena of the last encounter beaten, once there is one.)
+    const cp = run.raid?.checkpoint();
+    if (cp) return cp;
     const s = run.layout.start;
     return { x: run.origin.x + s.x, y: run.origin.y + s.floor, z: run.origin.z + s.z, facing: s.facing, name: run.def.name };
   }
@@ -210,13 +235,14 @@ export class Dungeons {
   thingAt(run, id) { return run.layout.things.find((t) => t.id === id) ?? null; }
   doorAt(run, id) { return run.layout.doors.find((d) => d.id === id) ?? null; }
 
-  // Something used: the key picked up, a power node switched on, the locked door unlocked.
-  // Returns a line for the screen, or null when nothing came of it.
+  // Something used: the key picked up, a power node switched on, the locked door unlocked, the lift
+  // called ('lift:top' / 'lift:bottom') or ridden ('lift'). Returns what came of it, or null.
   use(playerId, id, pos, name = 'Someone') {
     const run = this.runOf(playerId);
     if (!run) return null;
     const o = run.origin;
     const s = run.state;
+    if (id === 'lift' || id === 'lift:top' || id === 'lift:bottom') return this.callLift(run, id, pos);
     const t = this.thingAt(run, id);
     if (t) {
       if (Math.hypot(o.x + t.x - pos.x, o.z + t.z - pos.z) > USE) return null;
@@ -249,6 +275,27 @@ export class Dungeons {
     return null;
   }
 
+  // The lift sent up or down, if it's at rest and they're by it (its shaft, or the corridor either
+  // side of it).
+  callLift(run, id, pos) {
+    const L = run.state.lift;
+    const lift = run.interior.lift;
+    if (!L || !lift || L.y !== L.to) return null;
+    const c = lift.cor;
+    const sh = c.shaft;
+    const lx = pos.x - run.origin.x;
+    const lz = pos.z - run.origin.z;
+    const u = c.axis === 'x' ? lx : lz;
+    const across = c.axis === 'x' ? lz : lx;
+    const mid = (c.axis === 'x' ? c.z : c.x) * run.layout.cell + run.layout.cell;
+    if (Math.abs(across - mid) > 3 || Math.abs(u - (sh.u0 + sh.u1) / 2) > 7) return null;
+    const to = id === 'lift:top' ? sh.top : id === 'lift:bottom' ? sh.bottom : Math.abs(L.y - sh.top) < 0.2 ? sh.bottom : sh.top;
+    if (Math.abs(to - L.y) < 0.05) return null;
+    L.to = to;
+    this.tell(run);
+    return 'lift';
+  }
+
   openDoor(run, id) {
     run.state.open.add(id);
     run.interior.setDoor(id, true);
@@ -261,6 +308,11 @@ export class Dungeons {
     if (!run) return;
     const s = run.state;
     s.cleared.add(camp.def.index);
+    // A raid's arena: one of its encounters beaten (sim/RaidRun.js says so).
+    if (run.raid) {
+      if (!run.raid.onRoomCleared(camp)) this.tell(run);
+      return;
+    }
     const L = run.layout;
     let say = null;
     if (camp.def.index === L.mini && !s.mini) {
@@ -296,21 +348,34 @@ export class Dungeons {
     const x = run.origin.x + t.x;
     const z = run.origin.z + t.z;
     if (Math.hypot(x - pos.x, z - pos.z) > USE) return null;
-    if (kind === 'reward' && (run.shared || !run.state.boss)) return null;
+    // (A raid's chests: each arena's opens once its encounter is beaten.)
+    const done = run.raid && t.enc !== undefined ? run.raid.isDown(t.enc) : run.state.boss;
+    if (kind === 'reward' && (run.shared || !done)) return null;
     const mine = run.state.looted.get(charKey) ?? new Set();
     if (mine.has(id)) return null;
     mine.add(id);
     run.state.looted.set(charKey, mine);
-    return {
+    const out = {
       dungeon: run.def.id, tier: run.tier ?? 0, level: run.level, at: [x, run.origin.y + t.floor + 0.8, z],
       theme: LOOT_OF[run.def.theme] ?? null,
     };
+    if (run.raid && t.enc !== undefined) Object.assign(out, { raid: true, enc: run.def.encounters[t.enc].id, final: t.enc === run.def.encounters.length - 1, set: run.def.set ?? null });
+    return out;
   }
 
   // ---------------------------------------------------------------- every tick
   tick(dt) {
     this.time += dt;
     for (const run of [...this.runs.values()]) {
+      // The lift rides to where it was sent (and everyone is told when it gets there).
+      const L = run.state.lift;
+      if (L && L.y !== L.to) {
+        const d = L.to - L.y;
+        L.y = Math.abs(d) <= LIFT_SPEED * dt ? L.to : L.y + Math.sign(d) * LIFT_SPEED * dt;
+        run.interior.setLift(L.y);
+        if (L.y === L.to) this.tell(run);
+      }
+      run.raid?.tick(dt);
       // Anyone gone some other way (fast travel, a fall back to town, gone from the realm).
       for (const id of [...run.players]) {
         const w = this.where.get(id);

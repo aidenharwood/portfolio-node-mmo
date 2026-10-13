@@ -7,6 +7,7 @@
 import { esc } from './cards.js';
 import { readSave } from '../core/Save.js';
 import { typing } from '../core/Input.js';
+import { inPocket } from '../world/dungeons.js';
 import { LOOK_OPTIONS, LOOK_KEYS, DEFAULT_CHOICE, randomChoice } from '../models/heroLooks.js';
 
 const MAX_CHARACTERS = 6;
@@ -283,7 +284,7 @@ export class TitleMenu {
     const g = this.game;
     const save = readSave();
     const p = g.player.position;
-    const region = save ? g.world.regionAt(p.x, p.z) : null;
+    const region = save && !inPocket(p.x) ? g.world.regionAt(p.x, p.z) : null;
     const cont = save ? `
       <button data-act="continue" class="primary">Continue
         <small>Level ${g.stats.level} · ${esc(region?.name ?? 'Brightwater')} · ${g.stats.gold}g</small></button>` : '';

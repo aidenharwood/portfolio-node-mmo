@@ -24,6 +24,8 @@ export const SHARED_SLOTS = 12;
 
 // How long an empty copy waits before it closes (an open-world one starts over).
 export const CLOSE_AFTER = 600;   // seconds
+// How fast a lift's platform rides (m/s): the copy's keeper moves it, every screen follows.
+export const LIFT_SPEED = 2.6;
 
 // Looks and residents of each kind of place. `race`: whose enemies live there; colours for the
 // kit (world/InteriorKit.js) and the light down there (world/DungeonView.js).
@@ -36,9 +38,9 @@ export const THEMES = {
   },
   hive: {
     name: 'Hive tunnels', race: 'hive', key: 'Resin Key',
-    floor: 0x3a2c44, floorEdge: 0x2a2032, wall: 0x4a3458, wallDark: 0x2e2238, trim: 0x6a4a72, ceiling: 0x1e1626,
-    metal: 0x5a4462, accent: 0xc46aff, light: 0xc890ff, glow: 0xb46aff,
-    fog: 0x0e0814, hemi: [0xd8b0ff, 0x1a0e20], hemiK: 0.5, sun: 0xd0a0ff, sunK: 0.55, organic: true,
+    floor: 0x4a3a52, floorEdge: 0x382a40, wall: 0x6a4e78, wallDark: 0x42304e, trim: 0x8a6496, ceiling: 0x241a2c,
+    metal: 0x6a5472, accent: 0xc46aff, light: 0xd8b0ff, glow: 0xb46aff,
+    fog: 0x100a16, hemi: [0xe8ccff, 0x24142a], hemiK: 0.8, sun: 0xe0c0ff, sunK: 0.7, organic: true,
   },
   synth: {
     name: 'Synth facility', race: 'synth', key: 'Access Core',
@@ -48,15 +50,15 @@ export const THEMES = {
   },
   maker: {
     name: 'Maker vault', race: 'synth', key: 'Rune Key',
-    floor: 0x3a3848, floorEdge: 0x2a2836, wall: 0x4e4a62, wallDark: 0x34304a, trim: 0x6a6488, ceiling: 0x201e2c,
-    metal: 0x4a4660, accent: 0x9a7aff, light: 0xb8a0ff, glow: 0x6ae8ff,
-    fog: 0x0b0a14, hemi: [0xc8c0ff, 0x14101e], hemiK: 0.55, sun: 0xc0b0ff, sunK: 0.6,
+    floor: 0x4c4a5e, floorEdge: 0x383648, wall: 0x726e8c, wallDark: 0x4a4662, trim: 0x8e88ae, ceiling: 0x242232,
+    metal: 0x5a5672, accent: 0x9a7aff, light: 0xd0c4ff, glow: 0x6ae8ff,
+    fog: 0x0c0b16, hemi: [0xdcd4ff, 0x1a1426], hemiK: 0.85, sun: 0xd4ccff, sunK: 0.75,
   },
   fauna: {
     name: 'Wild cavern', race: 'fauna', key: 'Bone Key',
-    floor: 0x5a5448, floorEdge: 0x48433a, wall: 0x6a6252, wallDark: 0x4e483c, trim: 0x7a6a50, ceiling: 0x2e2a24,
-    metal: 0x5a5448, accent: 0x6af0c8, light: 0x9af0d8, glow: 0x6af0c8,
-    fog: 0x0a1210, hemi: [0xc8f0e0, 0x141a14], hemiK: 0.55, sun: 0xc0f0e0, sunK: 0.6, organic: true,
+    floor: 0x6a6456, floorEdge: 0x544e44, wall: 0x847a66, wallDark: 0x5e5646, trim: 0x8e7e60, ceiling: 0x322e28,
+    metal: 0x6a6456, accent: 0x6af0c8, light: 0xc0f8e8, glow: 0x6af0c8,
+    fog: 0x0a1210, hemi: [0xd8f8ec, 0x1a2018], hemiK: 0.8, sun: 0xd0f4e8, sunK: 0.7, organic: true,
   },
 };
 

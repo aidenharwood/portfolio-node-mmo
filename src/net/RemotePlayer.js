@@ -40,6 +40,10 @@ export class RemotePlayer extends Player {
     }
   }
 
+  // Their own level, as the server says (the Player class reads this screen's character's).
+  get level() { return this.netLevel; }
+  set level(v) { this.netLevel = v; }
+
   get aimY() { return this.netAimY; }
   get perks() { return []; }
 

@@ -107,6 +107,32 @@ export const BESTIARY = {
     strengths: 'Mauling combos, charges, a rearing stomp, and its pack on call.',
     weaknesses: 'Every attack is broad and heavy: read it and it can be danced around.',
   },
+  // ---------------------------------------------------------------- the Brood Mother's raid
+  broodwarden: {
+    lore: 'The first door of the deep nest is a guard grown to fill it: a praetorian fed until its carapace became a wall.',
+    strengths: 'Its guard turns frontal blows; a sweep clears everything before it; it rushes whoever strays furthest.',
+    weaknesses: 'Behind it the guard is no guard at all. Break its hardened shell before the burst.',
+  },
+  choir: {
+    lore: 'Three psions so long joined they sing with one voice — Vael\'s dirge, Kzhar\'s shriek, Ixa\'s lullaby. When they resonate the air itself tears.',
+    strengths: 'Each throws its own song; together they string seams of force between them.',
+    weaknesses: 'They can be killed one at a time — but each one lost makes the others louder.',
+  },
+  broodmother: {
+    lore: 'The Hive came down with the old ships, and this is what it came down as. Every drone on this world is her child.',
+    strengths: 'Clutches that hatch, a shield drawn from the nest\'s hearts, spore rain, and a frenzy when she\'s wounded.',
+    weaknesses: 'Her hearts are her shield: tear them out. Burst her eggs before they open. Share what she marks.',
+  },
+  eggsac: {
+    lore: 'A clutch of Hive eggs, warm and twitching. Leave it and it opens.',
+    strengths: 'Hatches drones and spitters if left alone.',
+    weaknesses: 'It can\'t move or fight back. Burst it early.',
+  },
+  broodheart: {
+    lore: 'A knot of the nest\'s flesh the size of a cart, beating. The Brood Mother draws her shield from it.',
+    strengths: 'Pulses acid at anyone close; while any heart beats, she can\'t be hurt.',
+    weaknesses: 'It can\'t move. Every heart torn out weakens her shield.',
+  },
 };
 
 // Kinds of landmark, as the codex tells them.

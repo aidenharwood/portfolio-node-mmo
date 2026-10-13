@@ -213,6 +213,18 @@ async function run() {
   a.say(`/w ${b.name} psst`);
   await b.until((m) => m.t === 'chat' && m.ch === 'whisper' && m.text === 'psst', 'a whisper');
   check(true, 'a whisper arrives');
+  // Standing near each other at Brightwater, each is told the other is there and sees them move.
+  // (A third player, so the first can still jump straight to a far camp below.)
+  if (!cluster) {
+    const c = await player(port, `Smokec${TAG}`);
+    const at = (bot, x, z) => bot.ws.send(JSON.stringify({ t: 's', p: [x, 0.5, z], f: 0, v: [0, 0, 0], gr: 1, st: 'move', sT: 0, ci: 0, aq: 0, fl: 0, hp: 1 }));
+    for (let i = 0; i < 8; i++) { at(c, 2 + i * 0.2, 6); at(b, -2, 6 + i * 0.2); await sleep(80); }
+    const ab = await c.until((m) => m.t === 'add' && m.id === b.welcome.id, 'the other player appearing');
+    const ba = await b.until((m) => m.t === 'add' && m.id === c.welcome.id, 'the other player appearing');
+    const moves = await b.until((m) => m.t === 'snap' && (m.ps ?? []).some((x) => x[0] === c.welcome.id), 'the other player moving');
+    c.ws.close();
+    check(!!ab && !!ba && !!moves, 'two players near each other see each other, and each other\'s moves');
+  }
   a.ws.send(JSON.stringify({ t: 'op', seq: 1, op: { op: 'filter', v: 2 } }));
   await a.until((m) => m.t === 'opr' && m.seq === 1, 'an op answer');
   check(true, 'the character answers ops');

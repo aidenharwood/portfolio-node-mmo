@@ -299,7 +299,8 @@ export class MapUI {
   }
 
   click() {
-    if (!this.mouse) return;
+    // (A dungeon's map is only its rooms: nothing to travel to or mark.)
+    if (!this.mouse || this.game.dungeonView?.active) return;
     const hit = this.pick(this.mouse.x, this.mouse.y);
     if ((hit?.kind === 'location' || hit?.kind === 'waystone' || hit?.kind === 'town' || hit?.kind === 'city' || hit?.kind === 'settlement') && hit.active) {
       this.game.travelTo(hit.id);
@@ -321,6 +322,7 @@ export class MapUI {
     if (g.dungeonView?.active) {
       g.dungeonView.drawMap(ctx, W, H);
       this.label(W / 2, 46, g.dungeonView.def.name.toUpperCase(), '#ffe2a8', 18);
+      this.info.textContent = `${g.dungeonView.def.name} · Lv ${g.dungeonView.run.lv} — the rooms you've seen so far`;
       return;
     }
     const [x0, z0, x1, z1] = this.viewRect();

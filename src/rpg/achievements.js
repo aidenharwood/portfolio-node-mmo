@@ -28,9 +28,15 @@ const flag = (c, f) => +!!c.quests?.flags?.[f];
 // Dungeons beaten (records.dungeons: id → [open world, Normal, Veteran, Elite] clears).
 const LAUNCH = ['foundry', 'vault', 'brood'];
 const clears = (r, from = 0, to = 3) => Object.values(r.dungeons ?? {}).reduce((s, row) => s + row.slice(from, to + 1).reduce((a, b) => a + b, 0), 0);
+// Raids (records.raids: raid id → { encounter id → [Normal, Veteran, Elite] kills, `<id>:flawless`
+// the same with nobody falling, `clears` the raid beaten }).
+const raidKills = (r, raid, key, from = 0) => (r.raids?.[raid]?.[key] ?? []).slice(from).reduce((a, b) => a + b, 0);
+const flawless = (r) => Object.values(r.raids ?? {}).reduce((s, rec) => s + Object.entries(rec).filter(([k]) => k.endsWith(':flawless')).reduce((a, [, row]) => a + row.reduce((x, y) => x + y, 0), 0), 0);
+// The sets that drop anywhere (a raid's own sets have achievements of their own).
+const OPEN_SETS = Object.keys(GEAR_SETS).filter((id) => !GEAR_SETS[id].raid);
 
 export const CATEGORIES = {
-  story: 'Story', dungeons: 'Dungeons', combat: 'Combat', exploration: 'Exploration', collections: 'Collections', progression: 'Progression', feats: 'Feats',
+  story: 'Story', dungeons: 'Dungeons', raids: 'Raids', combat: 'Combat', exploration: 'Exploration', collections: 'Collections', progression: 'Progression', feats: 'Feats',
 };
 
 export const ACHIEVEMENTS = [
@@ -48,6 +54,14 @@ export const ACHIEVEMENTS = [
   { id: 'dungeon_run', cat: 'dungeons', name: 'Private Business', desc: 'Finish a private run.', goal: 1, points: 10, stat: (r) => clears(r, 1) },
   { id: 'dungeon_10', cat: 'dungeons', name: 'Regular', desc: 'Finish 10 private runs.', goal: 10, points: 15, stat: (r) => clears(r, 1) },
   { id: 'dungeon_elite', cat: 'dungeons', name: 'Deep and Dark', desc: 'Finish a private run on Elite.', goal: 1, points: 25, title: 'Deepdelver', stat: (r) => clears(r, 3) },
+  // ---------------------------------------------------------------- raids
+  { id: 'raid_warden', cat: 'raids', name: 'Through the Gate', desc: 'Defeat the Brood Warden.', goal: 1, points: 10, stat: (r) => raidKills(r, 'broodmother', 'warden') },
+  { id: 'raid_choir', cat: 'raids', name: 'Silence', desc: 'Defeat the Psion Choir.', goal: 1, points: 15, stat: (r) => raidKills(r, 'broodmother', 'choir') },
+  { id: 'raid_mother', cat: 'raids', name: 'Matricide', desc: 'Defeat the Brood Mother.', goal: 1, points: 25, title: 'the Matricide', stat: (r) => raidKills(r, 'broodmother', 'mother') },
+  { id: 'raid_veteran', cat: 'raids', name: 'Into the Deep Nest', desc: 'Beat the Brood Mother\'s raid on Veteran or Elite.', goal: 1, points: 20, stat: (r) => raidKills(r, 'broodmother', 'clears', 1) },
+  { id: 'raid_elite', cat: 'raids', name: 'The Brood Ends', desc: 'Beat the Brood Mother\'s raid on Elite.', goal: 1, points: 30, title: 'Queenslayer', stat: (r) => raidKills(r, 'broodmother', 'clears', 2) },
+  { id: 'raid_flawless', cat: 'raids', name: 'Untouched', desc: 'Defeat a raid boss without anyone in the raid falling.', goal: 1, points: 20, stat: (r) => flawless(r) },
+  { id: 'raid_set', cat: 'raids', name: 'Broodbane', desc: 'Wear all five pieces of the Broodbane set.', goal: 1, points: 25, title: 'Broodbane', stat: (r) => +!!r.fullSets.broodbane },
   // ---------------------------------------------------------------- combat
   { id: 'kills_1', cat: 'combat', name: 'First Blood', desc: 'Defeat an enemy.', goal: 1, points: 5, stat: (r) => r.kills },
   { id: 'kills_250', cat: 'combat', name: 'Hunter', desc: 'Defeat 250 enemies.', goal: 250, points: 10, stat: (r) => r.kills },
@@ -86,7 +100,7 @@ export const ACHIEVEMENTS = [
   { id: 'legendary_1', cat: 'collections', name: 'Legendary', desc: 'Pick up a legendary.', goal: 1, points: 10, stat: (r) => r.legendaries },
   { id: 'legendary_10', cat: 'collections', name: 'Hoarder', desc: 'Pick up 10 legendaries.', goal: 10, points: 20, title: 'the Gilded', stat: (r) => r.legendaries },
   { id: 'fullset_1', cat: 'collections', name: 'Matching', desc: 'Wear all five pieces of a set.', goal: 1, points: 10, stat: (r) => n(r.fullSets) },
-  { id: 'fullset_all', cat: 'collections', name: 'Outfitter', desc: 'Wear all five pieces of each of the seven sets.', goal: Object.keys(GEAR_SETS).length, points: 25, title: 'the Outfitted', stat: (r) => n(r.fullSets) },
+  { id: 'fullset_all', cat: 'collections', name: 'Outfitter', desc: 'Wear all five pieces of each of the seven makers\' sets.', goal: OPEN_SETS.length, points: 25, title: 'the Outfitted', stat: (r) => OPEN_SETS.filter((id) => r.fullSets[id]).length },
   { id: 'makers_all', cat: 'collections', name: 'Connoisseur', desc: 'Carry gear from all seven makers.', goal: MAKER_IDS.length, points: 15, stat: (r) => n(r.makers) },
   // ---------------------------------------------------------------- progression
   { id: 'level_10', cat: 'progression', name: 'Rising', desc: 'Reach level 10.', goal: 10, points: 10, stat: (r, c) => c.stats.level },
@@ -107,7 +121,7 @@ export const TITLES = ACHIEVEMENTS.filter((a) => a.title);
 export function newRecords() {
   return {
     kills: 0, race: {}, types: {}, variants: {}, typeAffixes: {}, elites: 0, champions: 0, bosses: {}, affixes: {}, threat: [0, 0, 0],
-    warbands: 0, strongholds: 0, quests: 0, biomes: {}, landmarks: [], landmarkKinds: {}, settlements: [], regionLevel: 0, dungeons: {},
+    warbands: 0, strongholds: 0, quests: 0, biomes: {}, landmarks: [], landmarkKinds: {}, settlements: [], regionLevel: 0, dungeons: {}, raids: {},
     legendaries: 0, fullSets: {}, makers: {}, bestCombo: 0, bestMulti: 0, airKills: 0,
   };
 }

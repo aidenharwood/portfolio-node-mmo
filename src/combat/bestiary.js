@@ -13,6 +13,9 @@
 //            hunch (stoop), armSwing (walking), offPose ('cast': the off arm raised too);
 //            muzzle { y, f, tip }: where shots leave — y × height up, f metres forward (the
 //            sim's estimate), or tip metres out along the weapon (as the view draws it).
+// Raid bosses and what they bring with them are combat/bosses.js's (RAID_TYPES), merged in below.
+import { RAID_TYPES } from './bosses.js';
+
 export const ENEMY_TYPES = {
   // ======================================================== The Scav clans: raiders in salvaged
   // armour. Blade swarms, riot shields, grenades and a tech holding it together, with
@@ -220,6 +223,9 @@ export const ENEMY_TYPES = {
       { id: 'call', kind: 'summon', range: 30, windup: 1.0, active: 0.2, recover: 0.6, summon: 'hound', count: 3, maxMinions: 4, cooldown: 18, hpBelow: 0.7, howl: true },
     ],
   },
+
+  // ======================================================== Raids (gameplay phase 7)
+  ...RAID_TYPES,
 };
 
 // Factions as they were called before the futuristic redesign (saved quests still name them).
