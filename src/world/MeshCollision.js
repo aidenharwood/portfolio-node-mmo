@@ -117,6 +117,25 @@ function standsUp(collider, a, b, c) {
   return !(maxY <= collider.y + 0.035 && (ny >= 0 || maxY < collider.y - 0.035 || ny * ny < 0.25 * len2));
 }
 
+// Are a triangle's corners all inside the volume colliderPlanes(collider, MESH_PAD, MESH_PAD_TOP)
+// bounds? (Then it meets it, with no clipping: a circle's 20 sides stand outside the circle.)
+function within(collider, ...corners) {
+  const y0 = collider.y - MESH_PAD;
+  const y1 = collider.y + collider.h + MESH_PAD_TOP;
+  const angle = collider.ry ?? 0;
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  for (const p of corners) {
+    if (p.y < y0 || p.y > y1) return false;
+    const dx = p.x - collider.x;
+    const dz = p.z - collider.z;
+    if (collider.box) {
+      if (Math.abs(cos * dx - sin * dz) > collider.hx + MESH_PAD || Math.abs(sin * dx + cos * dz) > collider.hz + MESH_PAD) return false;
+    } else if (dx * dx + dz * dz > (collider.r + MESH_PAD) ** 2) return false;
+  }
+  return true;
+}
+
 // Does triangle (a, b, c) reach into the volume `planes` bound?
 function meets(planes, a, b, c) {
   let poly = [[a.x, a.y, a.z], [b.x, b.y, b.z], [c.x, c.y, c.z]];
@@ -630,28 +649,50 @@ export function buildMeshColliderData(colliders, group) {
   const pa = new THREE.Vector3();
   const pb = new THREE.Vector3();
   const pc = new THREE.Vector3();
+  const seen = new Uint32Array(data.length / 9); // the last collider (its stamp) to list each triangle
+  let stamp = 0;
   for (const collider of colliders) {
     const x0 = collider.x - collider.r - MESH_PAD;
     const x1 = collider.x + collider.r + MESH_PAD;
     const z0 = collider.z - collider.r - MESH_PAD;
     const z1 = collider.z + collider.r + MESH_PAD;
-    const ids = new Set(longTriangles);
+    // The triangles that might be its own, each once, in the order they're first found.
+    const ids = longTriangles.slice();
+    stamp++;
+    for (const id of ids) seen[id] = stamp;
     for (let ix = Math.floor(x0 / CELL); ix <= Math.floor(x1 / CELL); ix++) {
       for (let iz = Math.floor(z0 / CELL); iz <= Math.floor(z1 / CELL); iz++) {
-        for (const id of bins.get(cellKey(ix, iz)) ?? []) ids.add(id);
+        for (const id of bins.get(cellKey(ix, iz)) ?? []) {
+          if (seen[id] === stamp) continue;
+          seen[id] = stamp;
+          ids.push(id);
+        }
       }
     }
-    if (!ids.size) continue;
+    if (!ids.length) continue;
     // Whole triangles that reach into the collider (grown a little: what it stands for is often
     // a bit bigger than its outline), never cut — a cut wall is a hole to walk in through.
     const planes = colliderPlanes(collider, MESH_PAD, MESH_PAD_TOP);
+    // The volume's bounds, a hair past meets' tolerance: a triangle wholly outside them can't
+    // reach in, and most of those near a collider are (clipping each is the costly part).
+    const reach = (collider.box ? Math.hypot(collider.hx + MESH_PAD, collider.hz + MESH_PAD) : collider.r + MESH_PAD) + 1e-3;
+    const bx0 = collider.x - reach;
+    const bx1 = collider.x + reach;
+    const bz0 = collider.z - reach;
+    const bz1 = collider.z + reach;
+    const by0 = collider.y - MESH_PAD - 1e-3;
+    const by1 = collider.y + collider.h + MESH_PAD_TOP + 1e-3;
     const positions = [];
     for (const id of ids) {
       const o = id * 9;
+      if (Math.max(data[o], data[o + 3], data[o + 6]) < bx0 || Math.min(data[o], data[o + 3], data[o + 6]) > bx1
+        || Math.max(data[o + 2], data[o + 5], data[o + 8]) < bz0 || Math.min(data[o + 2], data[o + 5], data[o + 8]) > bz1
+        || Math.max(data[o + 1], data[o + 4], data[o + 7]) < by0 || Math.min(data[o + 1], data[o + 4], data[o + 7]) > by1) continue;
       pa.set(data[o], data[o + 1], data[o + 2]);
       pb.set(data[o + 3], data[o + 4], data[o + 5]);
       pc.set(data[o + 6], data[o + 7], data[o + 8]);
-      if (standsUp(collider, pa, pb, pc) && meets(planes, pa, pb, pc)) positions.push(...data.slice(o, o + 9));
+      if (!standsUp(collider, pa, pb, pc) || !(within(collider, pa, pb, pc) || meets(planes, pa, pb, pc))) continue;
+      for (let k = o; k < o + 9; k++) positions.push(data[k]);
     }
     if (positions.length < 9) continue;
     const geometry = new THREE.BufferGeometry();
