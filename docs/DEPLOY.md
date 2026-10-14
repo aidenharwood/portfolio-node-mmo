@@ -310,7 +310,15 @@ To measure it yourself:
 node tools/bot.mjs Spread http://localhost:8080 150 600   # 150 bots spread over 600 m
 ```
 
-Run it against a throwaway realm started with `AUTH_LIMIT=1000`.
+Run it against a throwaway realm started with `AUTH_LIMIT=1000`. Or, with a report of ping,
+bandwidth per player, tick times and the server's processor and memory:
+
+```
+npm run load:players -- http://localhost:8080 --bots=150 --spread=600
+```
+
+With no url, `npm run load:players` starts a throwaway realm of its own. `npm run load:http` and
+`npm run load:auth` load the HTTP side and sign-ins (see the README's Dev tools).
 
 Costs grow with:
 - **Enemies.** Every camp near a player is awake and every player brings roaming packs, so players
