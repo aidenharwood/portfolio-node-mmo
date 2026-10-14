@@ -1,6 +1,6 @@
 // Physical melee: a swing lands where the weapon's model meets a target's model. Each frame of a
 // strike, points over the weapon's striking surface are traced from where they were last frame to
-// where they are now, against the target's animated mesh (skinned here on the CPU, the gear it
+// where they are now, against the target's animated mesh (skinned on the CPU, the gear it
 // holds left out); the first crossing is the contact, and the anatomical component there
 // (HitComponents.componentAtPoint, as for shots) is what takes the hit. No reach or arc check:
 // what the blade passes through is hit, and nothing else.
