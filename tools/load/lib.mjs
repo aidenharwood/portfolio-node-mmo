@@ -20,10 +20,11 @@ export function options(usage, defaults) {
     if (!m) { opts.url = arg; continue; }
     const key = m[1].replace(/-(.)/g, (_, c) => c.toUpperCase());
     if (key === 'help') { console.log(`${usage}\n\nOptions (defaults):\n${Object.entries(defaults).map(([k, v]) => `  --${k.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}=${v}`).join('\n')}`); process.exit(0); }
-    if (!(key in defaults)) throw new Error(`unknown option --${m[1]} (try --help)`);
+    const bad = (why) => { console.error(`${why} (try --help)`); process.exit(2); };
+    if (!(key in defaults)) bad(`unknown option --${m[1]}`);
     const d = defaults[key];
     opts[key] = typeof d === 'number' ? Number(m[2]) : typeof d === 'boolean' ? m[2] !== 'false' && m[2] !== '0' : (m[2] ?? '');
-    if (typeof d === 'number' && !Number.isFinite(opts[key])) throw new Error(`--${m[1]} wants a number`);
+    if (typeof d === 'number' && !(opts[key] >= 0)) bad(`--${m[1]} wants a number`);
   }
   return opts;
 }
