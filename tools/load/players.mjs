@@ -59,9 +59,10 @@ async function signIn(account, name) {
       let auth = await api('POST', '/api/login', { name: account, password: password(account) });
       if (auth.status === 401) auth = await api('POST', '/api/register', { name: account, password: password(account) });
       if (auth.status === 200) { token = auth.token; break; }
+      if (auth.status === 409) throw new Error('sign-in: the account exists with another password (made elsewhere, or .load-data/ lost?): try another --prefix');
       if (auth.status !== 429 || tries >= 30 || stopped()) throw new Error(`sign-in: ${auth.error ?? auth.status}`);
       if (!warned) { warned = true; console.log('  (sign-ins rate limited: waiting it out; for a local server, start it with AUTH_LIMIT=1000)'); }
-      await sleep(5000 + Math.random() * 2000);
+      await wait(5000 + Math.random() * 2000);
     }
     creds.tokens[key] = token;
     list = await api('GET', '/api/characters', null, token);
@@ -69,7 +70,7 @@ async function signIn(account, name) {
   let ch = list.characters?.find((c) => c.name === name);
   if (!ch) {
     const made = await api('POST', '/api/characters', { name, look: randomChoice() }, token);
-    if (made.status !== 200) throw new Error(`character: ${made.error ?? made.status}`);
+    if (made.status !== 200) throw new Error(`character: ${made.error ?? made.status}${made.status === 409 ? ' (try another --prefix)' : ''}`);
     ch = made.character;
   }
   return { token, ch };
