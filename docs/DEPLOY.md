@@ -20,7 +20,7 @@ npm install
 npm start                      # http://localhost:8080
 ADMINS=youraccount npm start   # the same, with your account as an admin
 npm run dev                    # restarts when server/ changes
-npm test                       # smoke test: sign up, join, chat
+npm test                       # every Node check, then the smoke test: sign up, join, chat, a raid group, a dungeon
 ```
 
 Open the address, register an account on the title screen and make a character. Anyone on your

@@ -30,40 +30,17 @@ Anything marked *(default)* below is my assumption. Change it when you review.
 - **Phase 6 (public world events):** 6a is built (see 8): the director, Hive Surges, Scav
   Sieges, Maker Anomalies, overrun settlements and the Retake. 6b (the war-walker and the
   stampede) isn't.
-- **Phase 8 (Acts II–IV and the endgame):** not started. Act II's surges can now be public events.
-- **The test suite was red** after the "Current progress" commit: its mesh colliders read the
-  scenery meshes, and the server's headless world (`server/world.js`) has none, so every check
-  that builds the world crashed. The collision work since then (`53e24d6`) keeps plain colliders
-  there, and `npm test` passes again, with `tools/physicscheck.mjs` added. See 11 for what that
-  leaves open.
-- **Next:** 6b (the two events that move: the war-walker and the stampede), or straight on to 8a
-  (Act II), which only needs 6a's Hive Surge. Then the rest of phase 8 in the order in 10.
+- **Phase 8 (Acts II–IV and the endgame):** Act II (8a) is under way: its story design and the
+  first quests, on their own branch.
+- **Stabilising:** a pass over what the phases left open (WORK_PLAN S-1 to S-4): the server's
+  scenery colliders matched to the client's, the deploy files and docs matched to the real
+  pipeline, and trades and mail made safe against a layer crashing. Each is on its own branch
+  waiting for review, not yet on `main`.
+- **Next:** what's left, in order and by who's on it, is in [WORK_PLAN.md](WORK_PLAN.md) (its
+  lanes table), with the reasons in [ROADMAP.md](ROADMAP.md).
 
-The sections below this one are the plan as first written, kept for reference.
-
-### The power curve is the main problem
-A melee player at each level, all attribute points in Might, gear of their level at a typical
-rarity, against a same-level Scav Cutter (measured with the game's own formulas):
-
-| Level | Gear rarity | Player damage | Enemy health | Swings to kill | Hits to die |
-|---|---|---|---|---|---|
-| 1 | common | 1× | 1× | 2.5 | 25 |
-| 5 | uncommon | 3.6× | 1.8× | 1.3 | 34 |
-| 10 | rare | 12.9× | 3.8× | 0.75 | 45 |
-| 20 | epic | 98× | 17× | 0.43 | 80 |
-| 30 | legendary | 688× | 74× | 0.27 | 199 |
-
-By level 8 everything dies in one hit, and you can stand in a camp for a minute. The causes:
-- **Attributes stack linearly:** 3 points a level at +5% each, so +135% damage by level 10.
-- **A per-level damage bonus** (+3% a level) sits on top of weapon level growth.
-- **Rarity spreads too wide:** a legendary deals 1.55× a common, and maker and part bonuses stack on top.
-- **Armour reduction isn't measured against the attacker's level:** `100 / (100 + armour)` with armour growing 12% a level, so it keeps rising until enemies barely hurt.
-
-### Other gaps
-- **Fights are small:** camps are 4–8 enemies, roaming packs 2–4, and strongholds a boss plus 6.
-- **Settlements are one size:** five kinds, each a few buildings, a few folk and sometimes a trader.
-- **Quests are a handful:** three fixed ones, generated contracts and hunts, and a bounty. There's no story.
-- **No endgame and no goals beyond the next level:** no dungeons, events, raids, achievements or abilities.
+The sections below this one are the plan as first written, kept for reference. Where it started
+(the power curve as measured then, and the other gaps) is in [Appendix A](#appendix-a--where-the-plan-started).
 
 ---
 
@@ -779,3 +756,34 @@ surges on settlements and the endgame's rotating schedule. Proposed order:
 - **Raid size:** 12, as up to three parties [yes].
 - **Ability keys:** X, G and T, rebindable later [yes].
 - **The story draft above:** tone, names and the ending choice [your call].
+
+---
+
+## Appendix A — Where the plan started
+
+Measured before phase 1, and kept as the plan's starting point (phase 1 replaced attribute
+points with talents and re-tuned the curve; see 3).
+
+### The power curve was the main problem
+A melee player at each level, all attribute points in Might, gear of their level at a typical
+rarity, against a same-level Scav Cutter (measured with the game's own formulas):
+
+| Level | Gear rarity | Player damage | Enemy health | Swings to kill | Hits to die |
+|---|---|---|---|---|---|
+| 1 | common | 1× | 1× | 2.5 | 25 |
+| 5 | uncommon | 3.6× | 1.8× | 1.3 | 34 |
+| 10 | rare | 12.9× | 3.8× | 0.75 | 45 |
+| 20 | epic | 98× | 17× | 0.43 | 80 |
+| 30 | legendary | 688× | 74× | 0.27 | 199 |
+
+By level 8 everything dies in one hit, and you can stand in a camp for a minute. The causes:
+- **Attributes stack linearly:** 3 points a level at +5% each, so +135% damage by level 10.
+- **A per-level damage bonus** (+3% a level) sits on top of weapon level growth.
+- **Rarity spreads too wide:** a legendary deals 1.55× a common, and maker and part bonuses stack on top.
+- **Armour reduction isn't measured against the attacker's level:** `100 / (100 + armour)` with armour growing 12% a level, so it keeps rising until enemies barely hurt.
+
+### Other gaps
+- **Fights are small:** camps are 4–8 enemies, roaming packs 2–4, and strongholds a boss plus 6.
+- **Settlements are one size:** five kinds, each a few buildings, a few folk and sometimes a trader.
+- **Quests are a handful:** three fixed ones, generated contracts and hunts, and a bounty. There's no story.
+- **No endgame and no goals beyond the next level:** no dungeons, events, raids, achievements or abilities.
