@@ -62,6 +62,8 @@ export class LegAnimator {
 
   update(dt, s) {
     if (dt <= 0) return;
+    // A body at rest only keeps lying where it lies.
+    if (s.mode === 'dead' && this.ragdoll?.asleep) { this.ragdoll.update(dt, null); return; }
     dt = Math.min(dt, 1 / 20);
     const r = this.rig;
     const c = this.cfg;
@@ -260,6 +262,7 @@ export class HoverAnimator {
 
   update(dt, s) {
     if (dt <= 0) return;
+    if (s.mode === 'dead' && this.ragdoll?.asleep) { this.ragdoll.update(dt, null); return; }
     dt = Math.min(dt, 1 / 20);
     const r = this.rig;
     const sp = this.sp;
@@ -297,6 +300,11 @@ export class HoverAnimator {
 }
 
 // ---------------------------------------------------------------- ragdolls
+// Which ways a body's outline is found (model frame): all six, and the edges between.
+const SHELL = [];
+for (let x = -1; x <= 1; x++) for (let y = -1; y <= 1; y++) for (let z = -1; z <= 1; z++) {
+  if (Math.abs(x) + Math.abs(y) + Math.abs(z) === 1 || (Math.abs(x) + Math.abs(y) + Math.abs(z) === 2 && y !== 1)) SHELL.push(new THREE.Vector3(x, y, z));
+}
 // A many-legged body's ragdoll: its torso a braced block (middle, front, back, sides, back-ridge),
 // the neck and head and tail chains hanging off it, each leg two rods from its hip; knees fold
 // only so far, and the head and tail bend only so far.
@@ -323,16 +331,17 @@ function legRagdoll(r, s) {
     headFrom = rd.point(r.neck, null, core * 0.45);
     fix(headFrom);
   }
-  const headAt = r.head ? rd.point(r.head, null, core * 0.55) : -1;
-  const tip = r.head ? rd.point(r.head, V(0, 0, len * 0.3), core * 0.4) : -1;
-  if (headAt >= 0) {
-    if (headFrom >= 0) {
-      rd.link(headFrom, headAt);
-      rd.range(front, headAt, 0.75, 1.1);
-      rd.range(top, headAt, 0.75, 1.1);
-    } else fix(headAt);
-    rd.link(headAt, tip);
-    rd.range(headFrom >= 0 ? headFrom : front, tip, 0.8, 1.02);
+  // The head (and jaw) one stiff piece, as wide as it is, on the neck (or the body).
+  let skull = null;
+  if (r.head) {
+    const base = headFrom >= 0 ? rd.point(r.neck, V(0, 0, 0.001), core * 0.3) : -1;
+    const root = rd.point(r.head, null, core * 0.3);
+    if (headFrom >= 0) { rd.link(headFrom, root); rd.link(base, root); } else fix(root);
+    skull = rd.piece(r.head, [r.head, r.jaw].filter(Boolean), root, V(0, 0, 1), V(1, 0, 0), core * 0.25, 10, 0.12);
+    rd.range(front, skull.pivot, 0.75, 1.1);
+    rd.range(top, skull.pivot, 0.75, 1.1);
+    if (skull.end >= 0) rd.range(headFrom >= 0 ? headFrom : front, skull.end, 0.8, 1.02);
+    if (base >= 0) fix(base);
   }
   // Tail: a chain from its root on the torso, stiff enough to curve rather than fold.
   const tail = (r.tail ?? []).map((b) => rd.point(b, null, core * 0.3));
@@ -348,25 +357,40 @@ function legRagdoll(r, s) {
     const hip = rd.point(leg.upper, null, core * 0.35);
     const knee = rd.point(leg.lower, null, core * 0.25);
     const ankle = rd.point(leg.foot, null, core * 0.22);
+    // A paw or hoof reaching past the ankle: balls on its sole, toe and heel, one stiff piece
+    // that bends at the ankle only so far.
+    const paw = rd.tip(leg.foot, new THREE.Vector3(0, -1, 0.3), core * 0.18, core * 0.3);
+    const toe = rd.tip(leg.foot, new THREE.Vector3(0, -0.5, 1), core * 0.15, core * 0.3);
+    const heel = rd.tip(leg.foot, new THREE.Vector3(0, -0.5, -1), core * 0.15, core * 0.3);
     fix(hip);
+    rd.thick(hip, leg.upper, knee, core * 0.8);
+    rd.thick(knee, leg.lower, ankle, core * 0.6);
     rd.link(hip, knee, 1, true);
     rd.link(knee, ankle, 1, true);
+    rd.group([ankle, paw, toe, heel]);
+    rd.range(knee, paw, 0.9, 1.05);
     rd.apart(hip, ankle, 0.3);
     rd.apart(knee, mid, 0, core * 1.1);
     rd.apart(ankle, mid, 0, core * 1.1);
-    return { leg, hip, knee, ankle };
+    return { leg, hip, knee, ankle, paw, toe };
   });
-  rd.group(block);
+  // The body's outline (its bulk, hide, shell) is balls too.
+  const torso = [r.body, r.chest].filter(Boolean);
+  const trunk = rd.group([...block, ...rd.shell(torso, SHELL, core * 0.3, r.body, 16)]);
+  if (skull?.ok) rd.twist(trunk, skull.group, [skull.pivot, skull.end], [right, left], [skull.right, skull.left], 1.0);
   rd.drive(r.body, 'root', mid, top, { side: [right, left] });
-  if (r.neck && headAt >= 0) rd.drive(r.neck, 'aim', headFrom, headAt, { cone: 1.7 });
-  if (r.head) rd.drive(r.head, 'aim', headAt, tip, { cone: 1.7 });
-  for (let i = 0; i + 1 < tail.length; i++) rd.drive(r.tail[i], 'aim', tail[i], tail[i + 1], { cone: 1.7 });
-  for (const { leg, hip, knee, ankle } of legs) {
+  if (r.neck && skull) rd.drive(r.neck, 'aim', headFrom, skull.pivot, { cone: 2.4 });
+  if (skull?.ok) rd.drive(r.head, 'frame', skull.pivot, skull.end, { side: [skull.right, skull.left], cone: 2.4 });
+  else if (skull?.end >= 0) rd.drive(r.head, 'aim', skull.pivot, skull.end, { cone: 2.4 });
+  for (let i = 0; i + 1 < tail.length; i++) rd.drive(r.tail[i], 'aim', tail[i], tail[i + 1], { cone: 2.4 });
+  for (const { leg, hip, knee, ankle, paw, toe } of legs) {
     rd.drive(leg.upper, 'aim', hip, knee);
     rd.drive(leg.lower, 'aim', knee, ankle);
+    if (paw >= 0 && toe >= 0) rd.drive(leg.foot, 'frame', ankle, paw, { side: [ankle, toe], cone: 2.4 });
+    else if (paw >= 0) rd.drive(leg.foot, 'aim', ankle, paw, { cone: 2.4 });
   }
   const { velocity, kick } = deathKick(s);
-  rd.start(velocity, kick.multiplyScalar(0.8), [top, front, headAt, tip]);
+  rd.start(velocity, kick.multiplyScalar(0.8), [top, front, skull?.pivot ?? -1, skull?.end ?? -1]);
   return rd;
 }
 
@@ -399,14 +423,16 @@ function hoverRagdoll(r, s) {
     rd.drive(arm.fore, 'aim', el, wr);
   }
   if (r.robe) {
+    // A robe or skirt as wide as it hangs: one loose piece swinging from the body.
     const hang = rd.point(r.robe, null, ball * 0.4);
-    const hem = rd.point(r.robe, V(0, -(c.height ?? 1) * 0.3, 0), ball * 0.5);
     fix(hang);
-    rd.link(hang, hem, 1, true);
-    rd.range(mid, hem, 0.8, 1.02);
-    rd.drive(r.robe, 'aim', hang, hem, { cone: 1.8 });
+    const robe = rd.piece(r.robe, [r.robe], hang, V(0, -1, 0), V(1, 0, 0), ball * 0.35, 12, 0.25);
+    if (robe.end >= 0) rd.range(mid, robe.end, 0.8, 1.02);
+    if (robe.ok) rd.drive(r.robe, 'frame', robe.pivot, robe.end, { side: [robe.right, robe.left], cone: 2.4 });
+    else if (robe.end >= 0) rd.drive(r.robe, 'aim', robe.pivot, robe.end, { cone: 2.4 });
   }
-  rd.group(block);
+  const body = [r.body, ...(r.spin ?? [])];
+  rd.group([...block, ...rd.shell(body, SHELL, ball * 0.4, r.body, 16)]);
   const { velocity, kick } = deathKick(s);
   rd.start(velocity, kick.multiplyScalar(0.6), [top, front]);
   return rd;

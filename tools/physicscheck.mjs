@@ -14,6 +14,11 @@ import { generateDungeon } from '../src/world/DungeonGen.js';
 import { Interior } from '../src/world/Interior.js';
 import { DUNGEONS, pocketOrigin } from '../src/world/dungeons.js';
 import { stopAgainst } from '../src/world/MeshCollision.js';
+import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
+import { MODELS, bindAny } from '../src/models/Creatures.js';
+import { Animator, makeAnimState } from '../src/anim/Animator.js';
+import { LegAnimator, makeLegState, HoverAnimator, makeHoverState } from '../src/anim/LegAnimator.js';
+import { prepareRagdoll } from '../src/anim/Ragdoll.js';
 
 let failed = 0;
 const check = (ok, what) => {
@@ -201,6 +206,107 @@ function ringGeometry(radius, thick, height, n = 16) {
     }
   }
   check(!!fence.tris && !through, 'a plank-thin fence stops movers from either side at up to 60 m/s');
+}
+
+// ---------------------------------------------------------------- ragdolls
+console.log('Ragdolls:');
+{
+  // Seeded, so every run kicks every body the same way.
+  let seed = 9001;
+  const random = Math.random;
+  Math.random = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296);
+  const w = new HeadlessWorld(7);
+  const at = (x, z) => new THREE.Vector3(x, w.groundHeight(x, z), z);
+  // A crate (a mesh prop) to fall onto, and a wall to fall against.
+  const crateAt = at(720, 700);
+  const crateTop = crateAt.y + 0.7;
+  w.addCollider(crateAt.x, crateAt.z, 1.0, 0.8, crateAt.y, 'planks', { meshGeometry: new THREE.BoxGeometry(1.6, 0.7, 1.6).translate(0, 0.35, 0), meshMatrix: new THREE.Matrix4().makeTranslation(crateAt.x, crateAt.y, crateAt.z) });
+  const wallAt = at(760, 700);
+  w.addBox(wallAt.x + 0.9, wallAt.z, 0.3, 4, 4, wallAt.y - 1);
+  // A dungeon's floor, far out in its pocket.
+  const L = generateDungeon(DUNGEONS.foundry);
+  const it = w.addInterior(new Interior(L, pocketOrigin(1)));
+  const room = L.rooms[0];
+  const inRoom = new THREE.Vector3(it.x0 + (room.x + room.w / 2) * L.cell, 0, it.z0 + (room.z + room.h / 2) * L.cell);
+  inRoom.y = it.floorAt(inRoom.x, inRoom.z);
+
+  const MODELS_TO_TRY = ['scav:cutter', 'scav:juggernaut', 'hive:queen', 'synth:colossus', 'fauna:hound', 'fauna:crawler', 'fauna:behemoth', 'hive:psion', 'hive:broodheart'];
+  const kill = (key, where, kick) => {
+    const tpl = MODELS[key]();
+    prepareRagdoll(tpl.model);
+    const model = cloneSkinned(tpl.model);
+    let sk = null;
+    model.traverse((o) => { if (o.isSkinnedMesh) { if (!sk) sk = o.skeleton; else if (o.skeleton !== sk) o.bind(sk, o.bindMatrix); } });
+    const rig = bindAny(model);
+    const kind = rig.kind ?? 'biped';
+    const root = new THREE.Group();
+    root.position.copy(where);
+    root.add(model);
+    const an = kind === 'legs' ? new LegAnimator(rig) : kind === 'hover' ? new HoverAnimator(rig) : new Animator(rig);
+    const s = kind === 'legs' ? makeLegState() : kind === 'hover' ? makeHoverState() : makeAnimState();
+    s.ground = (x, z) => w.groundHeight(x, z);
+    s.world = w;
+    let settled = null;
+    for (let i = 0; i < 60 * 8; i++) {
+      s.mode = i >= 20 ? 'dead' : 'ground';
+      if (i === 20) { s.vx = kick.x; s.vz = kick.z; }
+      if (i > 23) { s.vx *= 0.9; s.vz *= 0.9; }
+      root.updateMatrixWorld(true);
+      an.update(DT, s);
+      if (settled === null && an.ragdoll?.asleep) settled = (i - 20) / 60;
+    }
+    model.updateMatrixWorld(true);
+    return { rd: an.ragdoll, model, rig, settled };
+  };
+  // Every bone above what's under it, and the skeleton where its balls are.
+  const survey = ({ rd, model }, floorAt) => {
+    let low = Infinity;
+    let off = 0;
+    let nan = false;
+    model.traverse((o) => {
+      if (!o.isBone) return;
+      const p = o.getWorldPosition(new THREE.Vector3());
+      if (!Number.isFinite(p.x + p.y + p.z)) nan = true;
+      low = Math.min(low, p.y - floorAt(p));
+    });
+    for (const d of rd.drives) {
+      if (d.off) continue;
+      const to = rd.points[d.to];
+      const posed = to.offset ? to.bone.localToWorld(to.offset.clone()) : to.bone.getWorldPosition(new THREE.Vector3());
+      off = Math.max(off, posed.distanceTo(to.p) / rd.size);
+    }
+    const stretch = Math.max(...rd.links.filter((l) => l.kind === 0 && l.len > 0.05).map((l) => Math.abs(rd.points[l.a].p.distanceTo(rd.points[l.b].p) - l.len) / l.len));
+    return { low, off, nan, stretch };
+  };
+  const terrain = (p) => w.groundHeight(p.x, p.z);
+  let worst = { low: Infinity, off: 0, stretch: 0, settle: 0 };
+  let bad = [];
+  for (const [k, key] of MODELS_TO_TRY.entries()) {
+    const a = (k / MODELS_TO_TRY.length) * Math.PI * 2;
+    const r = kill(key, at(700 + k * 9, 640), new THREE.Vector3(Math.sin(a) * 3, 0, Math.cos(a) * 3));
+    const m = survey(r, terrain);
+    worst = { low: Math.min(worst.low, m.low), off: Math.max(worst.off, m.off), stretch: Math.max(worst.stretch, m.stretch), settle: Math.max(worst.settle, r.settled ?? 99) };
+    if (m.nan || m.low < -0.03 || m.off > 0.15 || m.stretch > 0.08 || r.settled === null) bad.push(`${key} (low ${m.low.toFixed(2)}, off ${m.off.toFixed(2)}, stretch ${(m.stretch * 100).toFixed(0)}%, ${r.settled === null ? 'never rests' : `rests at ${r.settled.toFixed(1)} s`})`);
+  }
+  check(!bad.length, `bodies of every kind fall onto the ground, keep their bones out of it and their skeletons on their joints, and come to rest (worst: bone ${worst.low.toFixed(2)} m, skeleton ${worst.off.toFixed(2)} of its size off, rods ${(worst.stretch * 100).toFixed(1)}%, rest by ${worst.settle.toFixed(1)} s)${bad.length ? `: ${bad.join('; ')}` : ''}`);
+
+  // Onto a crate: something of it ends up lying on the top, and nothing of it inside.
+  const onCrate = kill('scav:cutter', at(crateAt.x - 1.3, crateAt.z), new THREE.Vector3(3.5, 0, 0));
+  const balls = onCrate.rd.points.filter((p) => !p.off);
+  const resting = balls.filter((p) => Math.abs(p.p.x - crateAt.x) < 0.8 && Math.abs(p.p.z - crateAt.z) < 0.8 && Math.abs(p.p.y - p.r - crateTop) < 0.05);
+  const inside = balls.filter((p) => Math.abs(p.p.x - crateAt.x) < 0.8 - p.r * 0.5 && Math.abs(p.p.z - crateAt.z) < 0.8 - p.r * 0.5 && p.p.y < crateTop - 0.02 && p.p.y > crateAt.y);
+  check(resting.length >= 3 && !inside.length, `a body falling on a crate lies across its top (${resting.length} joints on it, ${inside.length} inside it)`);
+
+  // Against a wall: nothing of it goes through.
+  const byWall = kill('scav:juggernaut', at(wallAt.x - 0.6, wallAt.z), new THREE.Vector3(5, 0, 0));
+  const through = byWall.rd.points.filter((p) => !p.off && p.p.x > wallAt.x + 0.6);
+  check(!through.length, `a body knocked into a wall stays on its side of it (${through.length} joints through)`);
+
+  // In a dungeon: it lies on the room's floor, not in the void under the pocket.
+  const below = kill('fauna:hound', inRoom, new THREE.Vector3(1, 0, 2));
+  const m = survey(below, (p) => it.floorAt(p.x, p.z));
+  check(m.low > -0.03 && below.rd.centre.y - inRoom.y < 0.6, `a body in a dungeon lies on its floor (centre ${(below.rd.centre.y - inRoom.y).toFixed(2)} m up)`);
+  Math.random = random;
 }
 
 console.log(failed ? `${failed} problem(s)` : 'physicscheck: ok');

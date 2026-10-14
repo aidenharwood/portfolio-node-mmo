@@ -19,6 +19,9 @@ const DRAG = 0.003;
 const STICK = 0.25;          // m/s: a joint sliding slower than this on the ground stops
 const SLEEP_MOVE = 0.025;  // m: moved less than this in SLEEP_TIME and it lies still
 const SLEEP_TIME = 0.5;
+const SETTLE_FROM = 1.5;   // s after death the motion starts dying away…
+const SETTLE_DRAG = 0.12;  // …to this much lost each step, two seconds on
+const REST_BY = 6;         // s: lying still by now, whatever (corpses fade from 8 s)
 
 const _v = new THREE.Vector3();
 const _w = new THREE.Vector3();
@@ -30,6 +33,7 @@ const _q2 = new THREE.Quaternion();
 const _q3 = new THREE.Quaternion();
 const _q4 = new THREE.Quaternion();
 const _qp = new THREE.Quaternion();
+const _pv = new THREE.Vector3();
 const _m = new THREE.Matrix4();
 const _m2 = new THREE.Matrix4();
 const _foot = new THREE.Vector3();
@@ -75,6 +79,114 @@ function capTwist(q, rest, axis, max) {
   return q;
 }
 
+// ---------------------------------------------------------------- the body's outline
+// For each mesh of a model (shared by every clone of it), per bone: its surface thinned out to a
+// point every OUTLINE_CELL or so, and the vertices standing out furthest along 26 directions — in
+// the bone's frame for skinned meshes (by the bone each vertex follows most), in the mesh's own
+// for pieces parented to a bone. Bodies are shaped by these, not by the joints alone, so armour,
+// bellies and skirts rest on the ground rather than sinking into it.
+const OUTLINE_CELL = 0.09;
+const DIRS = [];
+for (let x = -1; x <= 1; x++) for (let y = -1; y <= 1; y++) for (let z = -1; z <= 1; z++) {
+  if (x || y || z) DIRS.push(new THREE.Vector3(x, y, z).normalize());
+}
+const outlines = new WeakMap();
+function outlineOf(mesh) {
+  let out = outlines.get(mesh.geometry);
+  if (out) return out;
+  out = new Map(); // bone index (-1: rigid) → Float32Array of points (xyz)
+  const g = mesh.geometry;
+  const pos = g.getAttribute('position');
+  const si = mesh.isSkinnedMesh ? g.getAttribute('skinIndex') : null;
+  const sw = mesh.isSkinnedMesh ? g.getAttribute('skinWeight') : null;
+  // Picked as bound (the mesh's own frame), then only the picks are taken into their bones'.
+  const per = new Map(); // bone → { score, at (extremes), cells: Map(key → xyz) }
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    const y = pos.getY(i);
+    const z = pos.getZ(i);
+    let bone = -1;
+    if (si) {
+      let w = 0;
+      for (let k = 0; k < 4; k++) if (sw.getComponent(i, k) > w) { w = sw.getComponent(i, k); bone = si.getComponent(i, k); }
+    }
+    let b = per.get(bone);
+    if (!b) per.set(bone, (b = { score: new Float64Array(26).fill(-Infinity), at: new Float32Array(78), cells: new Map() }));
+    for (let d = 0; d < 26; d++) {
+      const D = DIRS[d];
+      const sc = x * D.x + y * D.y + z * D.z;
+      if (sc > b.score[d]) { b.score[d] = sc; b.at[d * 3] = x; b.at[d * 3 + 1] = y; b.at[d * 3 + 2] = z; }
+    }
+    const key = `${Math.floor(x / OUTLINE_CELL)},${Math.floor(y / OUTLINE_CELL)},${Math.floor(z / OUTLINE_CELL)}`;
+    if (!b.cells.has(key)) b.cells.set(key, [x, y, z]);
+  }
+  const v = new THREE.Vector3();
+  for (const [bone, b] of per) {
+    const list = new Float32Array(78 + b.cells.size * 3);
+    list.set(b.at);
+    let k = 78;
+    for (const c of b.cells.values()) { list[k++] = c[0]; list[k++] = c[1]; list[k++] = c[2]; }
+    if (bone >= 0) {
+      // Into the bone's frame, as bound.
+      const toBone = new THREE.Matrix4().multiplyMatrices(mesh.skeleton.boneInverses[bone], mesh.bindMatrix);
+      for (let j = 0; j < list.length; j += 3) v.fromArray(list, j).applyMatrix4(toBone).toArray(list, j);
+    }
+    out.set(bone, list);
+  }
+  outlines.set(mesh.geometry, out);
+  return out;
+}
+
+// Works out a model's outlines ahead (a template, before any copy of it dies).
+export function prepareRagdoll(model) {
+  model.traverse((mesh) => {
+    if (mesh.isMesh && !mesh.material?.isShaderMaterial && mesh.geometry?.getAttribute('position') && (!mesh.isSkinnedMesh || mesh.skeleton)) outlineOf(mesh);
+  });
+}
+
+// World positions now of the outline candidates of the whole model, by the bone each moves with.
+function outlineByBone(model) {
+  const byBone = new Map();
+  const add = (bone, p) => {
+    let list = byBone.get(bone);
+    if (!list) byBone.set(bone, (list = []));
+    list.push(p);
+  };
+  model.updateWorldMatrix(true, true);
+  model.traverse((mesh) => {
+    if (!mesh.isMesh || mesh.material?.isShaderMaterial || !mesh.visible || !mesh.geometry?.getAttribute('position')) return;
+    if (mesh.isSkinnedMesh) {
+      if (!mesh.skeleton) return;
+      for (const [bi, at] of outlineOf(mesh)) {
+        const bone = mesh.skeleton.bones[bi];
+        if (!bone) continue;
+        for (let k = 0; k < at.length; k += 3) add(bone, new THREE.Vector3(at[k], at[k + 1], at[k + 2]).applyMatrix4(bone.matrixWorld));
+      }
+      return;
+    }
+    let b = mesh.parent;
+    while (b && !b.isBone) b = b.parent;
+    if (!b) return;
+    const at = outlineOf(mesh).get(-1);
+    if (at) for (let k = 0; k < at.length; k += 3) add(b, new THREE.Vector3(at[k], at[k + 1], at[k + 2]).applyMatrix4(mesh.matrixWorld));
+  });
+  return byBone;
+}
+
+// The way a limb along `line` folds, turned with it about frame `m`'s side axis (column 0) from
+// `way` (a knee's forward when the leg hangs straight down); kept as it is where the limb points
+// along that axis and the turn can't say.
+const _sw = new THREE.Vector3();
+const _sx = new THREE.Vector3();
+function swungWay(way, m, line) {
+  _sx.setFromMatrixColumn(m, 0);
+  _sw.crossVectors(line, _sx);
+  const len = _sw.length() / (line.length() || 1);
+  const k = smoothstep(0.2, 0.5, len);
+  if (k > 0) way.multiplyScalar(1 - k).addScaledVector(_sw.normalize(), k).normalize();
+  return way;
+}
+
 export class Ragdoll {
   // `model`: the rig's root object (its bones' frames are read from it as it stands now).
   // `size`: how big the body is against a person's (balls and the stillness it rests at grow
@@ -107,14 +219,162 @@ export class Ragdoll {
 
   // Balls that move as one rigid piece (a torso, a pelvis): each step they're put back in the
   // shape they have now, wherever and however turned the rest have pushed them.
+  // (Every ball of a group counts the same in it, so one at its edge touching the ground lifts and
+  // turns the whole as much as one at its middle.)
   group(list) {
-    const ids = list.filter((i) => i >= 0);
+    const ids = [...new Set(list.filter((i) => i >= 0))];
     const P = this.points;
-    let m = 0;
     const c = new THREE.Vector3();
-    for (const i of ids) { c.addScaledVector(P[i].p, 1 / P[i].w); m += 1 / P[i].w; }
-    c.divideScalar(m);
-    this.groups.push({ ids, rest: ids.map((i) => P[i].p.clone().sub(c)), q: new THREE.Quaternion(), off: false });
+    for (const i of ids) c.add(P[i].p);
+    c.divideScalar(ids.length);
+    // Its weight shared out evenly, so the rods pulling on it see the same body.
+    let m = 0;
+    for (const i of ids) m += 1 / P[i].w;
+    for (const i of ids) P[i].w = ids.length / m;
+    const g = { ids, rest: ids.map((i) => P[i].p.clone().sub(c)), q: new THREE.Quaternion(), off: false };
+    this.groups.push(g);
+    return g;
+  }
+
+  // Keeps stiff piece `b` from turning against piece `a` about the line from ball `axis[0]` to
+  // `axis[1]` (a spine, a neck) more than `max` radians either way from how they are now; each
+  // piece's way round is the line between two of its balls (`sideA`, `sideB`).
+  twist(a, b, axis, sideA, sideB, max) {
+    if (!a || !b || [...axis, ...sideA, ...sideB].some((i) => i < 0)) return;
+    const l = { kind: 5, a: axis[0], b: axis[1], ga: a, gb: b, axis, sideA, sideB, max, limb: false };
+    l.rest = this.turn(l);
+    this.links.push(l);
+  }
+
+  // How far piece gb is turned from piece ga about the twist's axis now (signed radians).
+  turn(l) {
+    const P = this.points;
+    _v.subVectors(P[l.axis[1]].p, P[l.axis[0]].p).normalize();
+    _a.subVectors(P[l.sideA[1]].p, P[l.sideA[0]].p);
+    _a.addScaledVector(_v, -_a.dot(_v));
+    _b.subVectors(P[l.sideB[1]].p, P[l.sideB[0]].p);
+    _b.addScaledVector(_v, -_b.dot(_v));
+    return Math.atan2(_c.crossVectors(_a, _b).dot(_v), _a.dot(_b));
+  }
+
+  // The outline candidates (world, as it stands now) of what moves with `bones`.
+  outline(bones) {
+    this.byBone ??= outlineByBone(this.model);
+    const pts = [];
+    for (const bone of bones) for (const p of this.byBone.get(bone) ?? []) pts.push(p);
+    return pts;
+  }
+
+  // Balls on the outline of what moves with `bones` (a torso, a creature's body), where it stands
+  // out furthest each way of `dirs` (in the model's frame), each `r` across and just inside the
+  // surface; attached to `bone`. Put them in the bones' rigid group. Returns their indices.
+  // After the extremes, up to `extra` more are spread over the rest of the outline, each as far
+  // from those already placed as it can be, until none of it is more than `gap` (model units)
+  // from one (a long abdomen, a shell's flanks, a skirt).
+  shell(bones, dirs, r, bone, extra = 0, gap = 0.2) {
+    const pts = this.outline(bones);
+    if (!pts.length) return [];
+    const q = this.model.getWorldQuaternion(_q);
+    const radius = r * this.scale * this.size;
+    const chosen = [];
+    for (const d of dirs) {
+      _v.copy(d).normalize().applyQuaternion(q);
+      let top = -Infinity;
+      let at = null;
+      for (const p of pts) {
+        const sc = p.dot(_v);
+        if (sc > top) { top = sc; at = p; }
+      }
+      if (!chosen.includes(at)) chosen.push(at);
+    }
+    for (let k = 0; k < extra; k++) {
+      let far = 0;
+      let at = null;
+      for (const p of pts) {
+        let near = Infinity;
+        for (const c of chosen) near = Math.min(near, p.distanceToSquared(c));
+        if (near > far) { far = near; at = p; }
+      }
+      if (!at || far < (Math.max(radius * 2, gap * this.scale * this.size)) ** 2) break;
+      chosen.push(at);
+    }
+    // Each just inside the surface: in from it toward the middle of the outline.
+    const mid = new THREE.Vector3();
+    for (const p of pts) mid.add(p);
+    mid.divideScalar(pts.length);
+    return chosen.map((p) => {
+      _w.subVectors(mid, p);
+      const len = _w.length();
+      _w.multiplyScalar(len > radius ? radius / len : 0).add(p);
+      return this.point(bone, bone.worldToLocal(_w.clone()), r);
+    });
+  }
+
+  // A ball at the far end of what moves with `bone` alone, the way `dir` (in the bone's frame)
+  // points: a fist's knuckles, the toe of a boot, a paw, a robe's hem. -1 if it has nothing on it
+  // reaching further than `min` (model units) from the bone.
+  tip(bone, dir, r, min = 0, of = [bone]) {
+    const pts = this.outline(of);
+    if (!pts.length) return -1;
+    bone.updateWorldMatrix(true, false);
+    _v.copy(dir).normalize().transformDirection(bone.matrixWorld);
+    bone.getWorldPosition(_w);
+    let top = -Infinity;
+    let at = null;
+    for (const p of pts) {
+      const sc = _a.subVectors(p, _w).dot(_v);
+      if (sc > top) { top = sc; at = p; }
+    }
+    const radius = r * this.scale * this.size;
+    if (top < min * this.scale + radius) return -1;
+    _a.copy(at).addScaledVector(_v, -radius);
+    return this.point(bone, bone.worldToLocal(_a.clone()), r);
+  }
+
+  // A stiff part on a ball joint at ball `from` (a head on its neck, a robe from a body): a pivot
+  // ball there, balls on the outline of what moves with `of`, and balls at its far end (`axis`,
+  // the bone's frame) and its two sides (± `side`) — the frame its bone is turned by (call
+  // drive(bone, 'frame', pivot, end, { side: [right, left] }) in its place among the drives).
+  piece(bone, of, from, axis, side, r, extra = 8, gap = 0.15) {
+    const pivot = this.point(bone, null, r);
+    this.link(from, pivot);
+    const end = this.tip(bone, axis, r, 0, of);
+    const left = this.tip(bone, side, r, 0, of);
+    const right = this.tip(bone, side.clone().negate(), r, 0, of);
+    const all = [pivot, end, left, right, ...this.shell(of, [], r, bone, extra, gap)].filter((i) => i >= 0);
+    const group = this.group(all);
+    return { pivot, end, left, right, all, group, ok: end >= 0 && left >= 0 && right >= 0 && left !== right };
+  }
+
+  // Grows ball i (at the root of `bone`) to the thickness of what moves with the bone round the
+  // line from it to ball j (a pauldron, a heavy forearm, a haunch), up to `max` model units.
+  thick(i, bone, j, max) {
+    if (i < 0 || j < 0) return;
+    const pt = this.points[i];
+    const a = pt.p;
+    _v.subVectors(this.points[j].p, a);
+    const len2 = _v.lengthSq();
+    let far = 0;
+    for (const p of this.outline([bone])) {
+      const t = len2 > 1e-10 ? clamp(_w.subVectors(p, a).dot(_v) / len2, 0, 1) : 0;
+      far = Math.max(far, _w.copy(a).addScaledVector(_v, t).distanceTo(p));
+    }
+    const r = Math.min(far * 0.9, max * this.scale * this.size);
+    if (r > pt.r) {
+      pt.r = r;
+      pt.w = 1 / (r * r * 100);
+    }
+  }
+
+  // Grows ball i to reach the outline of what moves with `bones` (a helmeted head), up to `max`.
+  fit(i, bones, max) {
+    const pt = this.points[i];
+    let far = 0;
+    for (const p of this.outline(bones)) far = Math.max(far, p.distanceTo(pt.p));
+    if (far > pt.r) {
+      pt.r = Math.min(far * 0.85, max * this.scale * this.size);
+      pt.w = 1 / (pt.r * pt.r * 100);
+    }
   }
 
   // A rod between two balls at their distance now (`stiff` < 1 gives a little).
@@ -135,9 +395,11 @@ export class Ragdoll {
   // front of its hip and ankle, so the leg folds the way a knee does and splays only so far.
   // `like` ([a, b, c] of another joint) takes the way that joint bends instead, wherever it bends
   // enough to say: a foot points the way its knee does.
-  hinge(a, b, c, fr, dir, spread = 1.0, like = null) {
+  // `swing`: the way it folds turns with the limb as it swings about the frame's side (a knee
+  // faces forward standing, up with the thigh raised).
+  hinge(a, b, c, fr, dir, spread = 1.0, like = null, swing = false) {
     if (a < 0 || b < 0 || c < 0) return;
-    this.links.push({ kind: 3, a, b, c, fr, dir: dir.clone(), cos: Math.cos(spread), sin: Math.sin(spread), like, limb: false });
+    this.links.push({ kind: 3, a, b, c, fr, dir: dir.clone(), cos: Math.cos(spread), sin: Math.sin(spread), like, swing, limb: false });
   }
 
   // Keeps ball b no further than `min` (model units, negative: behind) along `dir` (in the frame
@@ -145,6 +407,17 @@ export class Ragdoll {
   reach(a, b, fr, dir, min) {
     if (a < 0 || b < 0) return;
     this.links.push({ kind: 4, a, b, fr, dir: dir.clone(), len: min * this.scale, limb: false });
+  }
+
+  // Lets the joint at b bend at most `max` radians from straight (a, b and c along the limb): its
+  // ends kept at least that far apart.
+  bend(a, b, c, max) {
+    if (a < 0 || b < 0 || c < 0) return;
+    const P = this.points;
+    const l1 = P[a].p.distanceTo(P[b].p);
+    const l2 = P[b].p.distanceTo(P[c].p);
+    const min = Math.sqrt(Math.max(0, l1 * l1 + l2 * l2 + 2 * l1 * l2 * Math.cos(max)));
+    this.links.push({ a, b: c, len: Math.min(min, P[a].p.distanceTo(P[c].p)), stiff: 1, kind: 1, limb: false });
   }
 
   // Lets two balls' distance range between lo and hi times what it is now (a spine that bends).
@@ -186,6 +459,7 @@ export class Ragdoll {
 
   // Sets it moving: every ball at `velocity`, and `kick` added to the balls listed in `kicked`.
   start(velocity, kick = null, kicked = []) {
+    this.byBone = null;
     for (const pt of this.points) pt.q.copy(pt.p).addScaledVector(velocity, -STEP);
     if (kick) for (const i of kicked) if (i >= 0) this.points[i].q.addScaledVector(kick, -STEP);
   }
@@ -201,10 +475,9 @@ export class Ragdoll {
       g.rest = keep.map(([, r]) => r);
       if (g.ids.length < 2) { g.off = true; continue; }
       // The shape about its own middle again.
-      let m = 0;
       _c.set(0, 0, 0);
-      g.ids.forEach((i, j) => { const k = 1 / this.points[i].w; _c.addScaledVector(g.rest[j], k); m += k; });
-      _c.divideScalar(m);
+      for (const r of g.rest) _c.add(r);
+      _c.divideScalar(g.rest.length);
       for (const r of g.rest) r.sub(_c);
     }
     for (const d of this.drives) if (!d.off && under(d.bone)) d.off = true;
@@ -221,13 +494,15 @@ export class Ragdoll {
     if (!this.asleep) {
       this.carry = Math.min(this.carry + dt, MAX_STEPS * STEP);
       let near = null;
+      if (!this.placed && world?.move) this.unstick(world);
       if (world?.collidersNear) {
         let x0 = Infinity; let x1 = -Infinity; let z0 = Infinity; let z1 = -Infinity;
         for (const pt of this.points) {
           x0 = Math.min(x0, pt.p.x); x1 = Math.max(x1, pt.p.x);
           z0 = Math.min(z0, pt.p.z); z1 = Math.max(z1, pt.p.z);
         }
-        near = world.collidersNear((x0 + x1) / 2, (z0 + z1) / 2, Math.hypot(x1 - x0, z1 - z0) / 2 + 1);
+        // (Bounded, should anything ever fly apart.)
+        near = world.collidersNear((x0 + x1) / 2, (z0 + z1) / 2, Math.min(Math.hypot(x1 - x0, z1 - z0) / 2 + 1, 12 * this.size));
       }
       while (this.carry >= STEP) {
         this.carry -= STEP;
@@ -240,7 +515,7 @@ export class Ragdoll {
       if (this.still >= SLEEP_TIME) {
         let moved = 0;
         this.points.forEach((pt, i) => { if (!pt.off) moved = Math.max(moved, pt.p.distanceTo(this.mark[i])); });
-        if (moved < SLEEP_MOVE * this.scale * this.size && this.time > 1) this.asleep = true;
+        if ((moved < SLEEP_MOVE * this.scale * this.size && this.time > 1) || this.time > REST_BY) this.asleep = true;
         this.points.forEach((pt, i) => this.mark[i].copy(pt.p));
         this.still = 0;
       }
@@ -248,11 +523,32 @@ export class Ragdoll {
     this.pose();
   }
 
+  // Limbs alive can reach through a wall or into a crate (the animation doesn't look); a body
+  // that dies like that has each joint brought back to its own side, swept out from the middle of
+  // the body (its first ball) to where the joint is, stopping where the world's colliders do.
+  unstick(world) {
+    this.placed = true;
+    const P = this.points;
+    const mid = P[0].p;
+    for (const pt of P) {
+      if (pt.off || pt === P[0]) continue;
+      _foot.set(mid.x, pt.p.y - pt.r * 0.7, mid.z);
+      world.move(_foot, pt.p.x - mid.x, pt.p.z - mid.z, pt.r, 0, pt.r * 1.4);
+      _v.set(_foot.x - pt.p.x, 0, _foot.z - pt.p.z);
+      if (_v.lengthSq() < 1e-6) continue;
+      pt.p.add(_v);
+      pt.q.add(_v);
+    }
+  }
+
   step(world, near, ground) {
     const P = this.points;
+    // Once the fall is over, what's left of the motion dies away (joints pressed against each
+    // other and the ground would otherwise tremble on).
+    const drag = DRAG + SETTLE_DRAG * smoothstep(SETTLE_FROM, SETTLE_FROM + 2, this.time);
     for (const pt of P) {
       if (pt.off) continue;
-      _v.subVectors(pt.p, pt.q).multiplyScalar(1 - DRAG);
+      _v.subVectors(pt.p, pt.q).multiplyScalar(1 - drag);
       pt.q.copy(pt.p);
       pt.p.add(_v);
       pt.p.y -= GRAVITY * STEP * STEP;
@@ -260,7 +556,7 @@ export class Ragdoll {
     for (let it = 0; it < ITERATIONS; it++) {
       this.solveGroups();
       this.solveLinks();
-      if (it === ITERATIONS / 2 - 1 || it === ITERATIONS - 1) this.collide(world, near, ground, it === ITERATIONS - 1);
+      if (it % 2 === 1) this.collide(world, near, ground, it === ITERATIONS - 1);
     }
   }
 
@@ -270,19 +566,17 @@ export class Ragdoll {
     const P = this.points;
     for (const g of this.groups) {
       if (g.off) continue;
-      let m = 0;
       _c.set(0, 0, 0);
-      for (const i of g.ids) { const k = 1 / P[i].w; _c.addScaledVector(P[i].p, k); m += k; }
-      _c.divideScalar(m);
-      // A = Σ m (p − c) restᵀ, by columns.
+      for (const i of g.ids) _c.add(P[i].p);
+      _c.divideScalar(g.ids.length);
+      // A = Σ (p − c) restᵀ, by columns.
       const A = _A;
       A.fill(0);
       g.ids.forEach((i, j) => {
-        const k = 1 / P[i].w;
         const r = g.rest[j];
-        const dx = (P[i].p.x - _c.x) * k;
-        const dy = (P[i].p.y - _c.y) * k;
-        const dz = (P[i].p.z - _c.z) * k;
+        const dx = P[i].p.x - _c.x;
+        const dy = P[i].p.y - _c.y;
+        const dz = P[i].p.z - _c.z;
         A[0] += dx * r.x; A[1] += dy * r.x; A[2] += dz * r.x;
         A[3] += dx * r.y; A[4] += dy * r.y; A[5] += dz * r.y;
         A[6] += dx * r.z; A[7] += dy * r.z; A[8] += dz * r.z;
@@ -315,6 +609,10 @@ export class Ragdoll {
       const a = P[l.a];
       const b = P[l.b];
       if (a.off || b.off) continue;
+      if (l.kind === 5) {
+        this.solveTwist(l);
+        continue;
+      }
       if (l.kind >= 3) {
         this.solveSide(l, a, b);
         continue;
@@ -334,6 +632,25 @@ export class Ragdoll {
     }
   }
 
+  // A twist limit (kind 5): past it, both pieces are turned back about the axis, half each.
+  solveTwist(l) {
+    if (l.ga.off || l.gb.off) return;
+    let d = this.turn(l) - l.rest;
+    d = Math.atan2(Math.sin(d), Math.cos(d));
+    if (Math.abs(d) <= l.max) return;
+    const over = d - Math.sign(d) * l.max;
+    const P = this.points;
+    _v.subVectors(P[l.axis[1]].p, P[l.axis[0]].p).normalize();
+    // (A copy: the pivot can be one of the balls being turned.)
+    const pivot = _pv.copy(P[l.axis[0]].p);
+    const spin = (g, angle) => {
+      _q.setFromAxisAngle(_v, angle);
+      for (const i of g.ids) P[i].p.sub(pivot).applyQuaternion(_q).add(pivot);
+    };
+    spin(l.gb, -over / 2);
+    spin(l.ga, over / 2);
+  }
+
   // A hinge or reach limit (kinds 3 and 4): the frame's direction now, and how far b is short of
   // its side.
   solveSide(l, a, b) {
@@ -345,6 +662,7 @@ export class Ragdoll {
     if (l.kind === 3) {
       const c = P[l.c];
       if (c.off) return;
+      if (l.swing) swungWay(_c, _m, _v.subVectors(c.p, a.p));
       if (l.like) {
         // The other joint's bend: its middle's offset from the line through its ends.
         const [ka, kb, kc] = l.like.map((i) => P[i].p);
@@ -376,11 +694,13 @@ export class Ragdoll {
       if (lat > 1e-6) _a.divideScalar(lat);
       else _a.set(0, 0, 0);
       _b.copy(_c).multiplyScalar(off * l.cos).addScaledVector(_a, off * (lat > 1e-6 ? l.sin : 0)).sub(_w);
-      // Mostly the middle joint moves; the ends give a little.
-      const k = 1 / (b.w + (a.w + c.w) * 0.25);
+      // Mostly the middle joint moves; the ends give a little (not when the way is taken from
+      // another joint, which the ends would turn: a foot following its knee moves alone).
+      const give = l.like ? 0 : 0.25;
+      const k = 1 / (b.w + (a.w + c.w) * give);
       b.p.addScaledVector(_b, k * b.w);
-      a.p.addScaledVector(_b, -k * a.w * 0.25);
-      c.p.addScaledVector(_b, -k * c.w * 0.25);
+      a.p.addScaledVector(_b, -k * a.w * give);
+      c.p.addScaledVector(_b, -k * c.w * give);
       return;
     }
     short = l.len - _w.subVectors(b.p, a.p).dot(_c);
@@ -421,7 +741,7 @@ export class Ragdoll {
       const b = P[l.b];
       if (a.off || b.off) continue;
       _v.addVectors(a.p, b.p).multiplyScalar(0.5);
-      const r = Math.min(a.r, b.r);
+      const r = (a.r + b.r) / 2;
       const floor = this.floorAt(world, near, ground, _v.x, _v.z, _v.y + r);
       const under = floor + r - _v.y;
       if (under > 0) {
@@ -482,7 +802,9 @@ export class Ragdoll {
             if (d.ref && k < 1) {
               const f = d.ref;
               frame(_a.subVectors(P[f[1]].p, P[f[0]].p), _c.subVectors(P[f[3]].p, P[f[2]].p), _m);
-              _a.copy(d.refDir).applyMatrix4(_m).applyQuaternion(_qp);
+              _a.copy(d.refDir).applyMatrix4(_m);
+              if (d.refSwing) swungWay(_a.negate(), _m, _c.subVectors(P[d.to].p, P[d.from].p)).negate();
+              _a.applyQuaternion(_qp);
               _a.addScaledVector(dir, -_a.dot(dir));
               if (_a.lengthSq() > 1e-6) {
                 _b.multiplyScalar(k).addScaledVector(_a.normalize(), 1 - k);

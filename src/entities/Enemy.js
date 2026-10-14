@@ -19,6 +19,7 @@ import { MODELS, bindAny } from '../models/Creatures.js';
 import { applyComic } from '../render/Toon.js';
 import { Animator, makeAnimState } from '../anim/Animator.js';
 import { LegAnimator, makeLegState, HoverAnimator, makeHoverState } from '../anim/LegAnimator.js';
+import { prepareRagdoll } from '../anim/Ragdoll.js';
 import { AFFIXES, RALLY } from '../sim/affixes.js';
 import { detachComponent, updateDetachedParts } from './Dismemberment.js';
 
@@ -67,6 +68,7 @@ function instantiate(key) {
   let tpl = TEMPLATES.get(key);
   if (!tpl) {
     tpl = MODELS[key]();
+    prepareRagdoll(tpl.model);
     TEMPLATES.set(key, tpl);
   }
   const model = cloneSkinned(tpl.model);

@@ -227,14 +227,30 @@ const _from = new THREE.Vector3();
 const MESH_REACH = 0.6;
 
 // Pushes a circle (`pos`, `radius`) out of box collider `c`: away from the box's nearest point, or
-// (its centre inside) out by the shortest way.
-function pushOutOfBox(pos, radius, c) {
+// (its centre inside) back out the side it came in by (`from`, where it was before), else out by
+// the shortest way.
+function pushOutOfBox(pos, radius, c, from = null) {
   const angle = c.ry ?? 0;
   const cos = Math.cos(angle);
   const sin = Math.sin(angle);
   const dx = pos.x - c.x;
   const dz = pos.z - c.z;
   const local = { x: cos * dx - sin * dz, z: sin * dx + cos * dz };
+  if (from && Math.abs(local.x) < c.hx && Math.abs(local.z) < c.hz) {
+    const fx = from.x - c.x;
+    const fz = from.z - c.z;
+    const lx = cos * fx - sin * fz;
+    const lz = sin * fx + cos * fz;
+    const outX = Math.abs(lx) - c.hx;
+    const outZ = Math.abs(lz) - c.hz;
+    if (outX > 0 || outZ > 0) {
+      if (outX >= outZ) local.x = Math.sign(lx) * (c.hx + radius);
+      else local.z = Math.sign(lz) * (c.hz + radius);
+      pos.x = c.x + cos * local.x + sin * local.z;
+      pos.z = c.z - sin * local.x + cos * local.z;
+      return;
+    }
+  }
   const qx = Math.min(c.hx, Math.max(-c.hx, local.x));
   const qz = Math.min(c.hz, Math.max(-c.hz, local.z));
   const ox = local.x - qx;
@@ -548,14 +564,19 @@ export class World {
         if (pos.y + stepUp >= c.y + c.h || pos.y + height <= c.y) continue;
         const bx = pos.x;
         const bz = pos.z;
-        if (c.box) pushOutOfBox(pos, radius, c);
+        if (c.box) pushOutOfBox(pos, radius, c, from);
         else {
-          const dx = pos.x - c.x;
-          const dz = pos.z - c.z;
+          let dx = pos.x - c.x;
+          let dz = pos.z - c.z;
           const min = c.r + radius;
           const d2 = dx * dx + dz * dz;
           if (d2 >= min * min) continue;
-          const d = Math.sqrt(d2) || 0.001;
+          // Gone past the middle since `from`: back out on the side it came from.
+          if (from && dx * (from.x - c.x) + dz * (from.z - c.z) < 0) {
+            dx = from.x - c.x;
+            dz = from.z - c.z;
+          }
+          const d = Math.hypot(dx, dz) || 0.001;
           pos.x = c.x + (dx / d) * min;
           pos.z = c.z + (dz / d) * min;
         }
