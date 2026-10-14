@@ -11,7 +11,8 @@
     "start": "node --disable-warning=ExperimentalWarning server/main.js",
     "dev": "node --disable-warning=ExperimentalWarning --watch-path=server server/main.js",
     "test": "node tools/powercurve.mjs --quiet && node tools/hordecheck.mjs && node tools/progresscheck.mjs && node tools/poicheck.mjs && node tools/placecheck.mjs && node tools/questcheck.mjs && node tools/dungeoncheck.mjs && node tools/surfacecheck.mjs && node tools/buildcheck.mjs && node tools/effectcheck.mjs && node tools/raidcheck.mjs && node tools/physicscheck.mjs && node tools/smoke.mjs",
-    "test:cluster": "node tools/smoke.mjs cluster"
+    "test:cluster": "node tools/smoke.mjs cluster",
+    "load:http": "node tools/load/http.mjs"
   },
   "dependencies": {
     "pg": "8.16.3",
