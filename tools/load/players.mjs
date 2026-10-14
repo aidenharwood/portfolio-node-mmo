@@ -174,7 +174,7 @@ take();
 rtt = new Timings();
 const before = await serverStats(server.base);
 const t0 = performance.now();
-const ticks = new Timings();
+const worst = { p50: 0, p95: 0, max: 0 }; // the server's tick times (ms), worst seen
 for (let s = 0, lastAt = t0; s < opts.duration && !stopped(); s += 5) {
   const ping = new Timings();
   const seen = rtt.v.length;
@@ -186,8 +186,11 @@ for (let s = 0, lastAt = t0; s < opts.duration && !stopped(); s += 5) {
   const got = take();
   const n = Math.max(1, online());
   const st = await serverStats(server.base);
-  if (st.tickMs) ticks.add(st.tickMs);
-  console.log(`  ${Math.round((now - t0) / 1000)} s: ${online()} online · ${(got.snaps / n / secs).toFixed(1)} snaps/s each · ${(got.wire / n / secs / 1024).toFixed(1)} KB/s each on the wire · ping p50 ${Math.round(ping.pct(50))} ms p95 ${Math.round(ping.pct(95))} ms${st.tickMs !== undefined ? ` · server: ${st.players} players, ${st.enemies} enemies, tick ${st.tickMs} ms` : ''}`);
+  worst.p50 = Math.max(worst.p50, st.tickMs ?? 0);
+  worst.p95 = Math.max(worst.p95, st.tick_ms_p95 ?? 0);
+  worst.max = Math.max(worst.max, st.tick_ms_max ?? 0);
+  const tick = st.tick_ms_p95 !== undefined ? `tick p50 ${st.tickMs} p95 ${st.tick_ms_p95} ms` : `tick p50 ${st.tickMs} ms`;
+  console.log(`  ${Math.round((now - t0) / 1000)} s: ${online()} online · ${(got.snaps / n / secs).toFixed(1)} snaps/s each · ${(got.wire / n / secs / 1024).toFixed(1)} KB/s each on the wire · ping p50 ${Math.round(ping.pct(50))} ms p95 ${Math.round(ping.pct(95))} ms${st.tickMs !== undefined ? ` · server: ${st.players} players, ${st.enemies} enemies, ${tick}` : ''}`);
 }
 take();
 const secs = (performance.now() - t0) / 1000;
@@ -204,7 +207,7 @@ console.log(`  into world     ${welcomeT}`);
 console.log(`  ping           ${rtt}`);
 console.log(`  each received  ${(totals.snaps / n / secs).toFixed(1)} snapshots/s, ${(totals.wire / n / secs / 1024).toFixed(1)} KB/s on the wire (${(totals.bytes / n / secs / 1024).toFixed(1)} KB/s of JSON)`);
 if (totals.corrections) console.log(`  position corrections: ${totals.corrections}`);
-if (ticks.n) console.log(`  server tick    median ${ticks.pct(50)} ms (budget 50 ms)${after.tick_ms_p95 !== undefined ? `, p95 ${after.tick_ms_p95} ms, slowest ${after.tick_ms_max} ms` : ''}`);
+if (worst.p50) console.log(`  server tick    worst p50 ${worst.p50} ms${worst.p95 ? `, worst p95 ${worst.p95} ms, slowest ${worst.max} ms` : ''} (budget 50 ms)`);
 if (after.cpu_seconds_total && before.cpu_seconds_total) console.log(`  server process ${((after.cpu_seconds_total - before.cpu_seconds_total) / secs).toFixed(2)} cores, ${Math.round(after.rss_bytes / 1048576)} MB resident`);
 for (const [what, map] of [['failed', failures], ['disconnected', closes]]) for (const [k, v] of map) console.log(`  ${what}: ${k} ×${v}`);
 const errors = reportErrors(server);
