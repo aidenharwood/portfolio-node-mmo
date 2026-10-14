@@ -124,7 +124,7 @@ about 110 players. Gateways put players on them.
 | 5 | Binary delta snapshots | 🟡 deltas and distance tiers, but JSON with compression rather than binary |
 | 5 | Per-region simulation in worker threads | 🟡 scaled out with layers (processes) instead; regions within a layer are still a [next step](DEPLOY.md#further-not-built) |
 | 5 | Database hot standby, or Postgres | ✅ Postgres for the cluster (SQLite stays for one process), nightly dumps; no standby |
-| 5 | Container image; TLS through a reverse proxy | ✅ Dockerfile, Compose with Caddy, and Kubernetes manifests with CI for the portfolio cluster (the image hasn't been built here: no Docker) |
+| 5 | Container image; TLS through a reverse proxy | ✅ Dockerfile, Compose with Caddy, and Kubernetes manifests (in `portfolio-helm-website`) with CI for the portfolio cluster; CI builds and pushes the image on every push to `main` |
 | 5 | Health checks, metrics, structured logs | ✅ |
 | 5 | Crash reporting | 🟡 caught and logged, not sent to an external service |
 | — | PvP areas | ➖ left out for now |
