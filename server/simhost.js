@@ -50,6 +50,7 @@ export class SimHost {
   constructor(realm, seed) {
     this.realm = realm;
     this.world = new HeadlessWorld(seed);
+    this.arriving = []; // proxies placed but waiting on the world round them, in the order they came
     this.sim = new WorldSim(this);
     // The dungeons' copies on this layer (sim/Dungeons.js): built in the world, their rooms filled
     // by the sim.
@@ -208,11 +209,13 @@ export class SimHost {
   }
 
   join(session) {
-    session.proxy = { id: session.id, session, position: new THREE.Vector3(), velocity: new THREE.Vector3(), radius: 0.45, height: 2.0, alive: false, placed: false };
+    // `placed`: they've said where they are; `ready`: the world round them is built (see tick).
+    session.proxy = { id: session.id, session, position: new THREE.Vector3(), velocity: new THREE.Vector3(), radius: 0.45, height: 2.0, alive: false, placed: false, ready: false };
     session.knownEnemies = new Map(); // enemy id → { s: last state sent, at: when }
   }
 
   leave(session) {
+    this.arriving = this.arriving.filter((p) => p !== session.proxy);
     this.dungeons.out(session.id);
     this.sim.forgetPlayer(session.id);
     this.refreshPlayers();
@@ -241,16 +244,17 @@ export class SimHost {
     p.velocity.set(st.v[0], 0, st.v[2]);
     p.alive = !(st.fl & 16);
     if (!p.placed) {
-      // First word from this player: build the world around them before anything spawns.
+      // First word from this player: the world round them is built over the next ticks (a slice
+      // a tick, so nobody else waits on it), and only then do they count — before anything
+      // spawns round them.
       p.placed = true;
-      this.world.prime([p.position]);
-      this.refreshPlayers();
+      this.arriving.push(p);
     }
     return true;
   }
 
   refreshPlayers() {
-    this.sim.setPlayers([...this.realm.sessions.values()].map((s) => s.proxy).filter((p) => p?.placed));
+    this.sim.setPlayers([...this.realm.sessions.values()].map((s) => s.proxy).filter((p) => p?.placed && p.ready));
   }
 
   // ---------------------------------------------------------------- per tick
@@ -272,14 +276,24 @@ export class SimHost {
       this.questTimer = 1;
       for (const s of this.realm.sessions.values()) {
         const p = s.proxy;
-        if (!p?.placed || !p.alive || !s.core || inPocket(p.position.x)) continue;
+        if (!p?.ready || !p.alive || !s.core || inPocket(p.position.x)) continue;
         for (const [id, i] of reachedPlaces(s.core.quests, p.position.x, p.position.z)) this.give(s, { op: 'reach', roll: { id, i } });
         const d = defenceAt(s.core.quests, this.world, p.position.x, p.position.z);
         if (d) this.sim.encounters.defend(d);
       }
     }
-    const foci = this.sim.players.map((p) => p.position);
-    if (foci.length) this.world.track(foci);
+    // The world round everyone, those who just arrived first; then whoever's surroundings are
+    // built joins the simulation.
+    const foci = [...this.realm.sessions.values()].filter((s) => s.proxy?.placed).map((s) => s.proxy.position);
+    if (foci.length) this.world.track(foci, this.arriving.map((p) => p.position));
+    if (this.arriving.length) {
+      const ready = this.arriving.filter((p) => this.world.ready(p.position));
+      if (ready.length) {
+        for (const p of ready) p.ready = true;
+        this.arriving = this.arriving.filter((p) => !p.ready);
+        this.refreshPlayers();
+      }
+    }
     this.dungeons.tick(dt);
     this.sim.update(dt);
     this.grid.clear();
