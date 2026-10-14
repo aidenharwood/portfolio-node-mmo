@@ -13,6 +13,7 @@
 export const ACTS = [
   { act: 0, title: 'Prologue', sub: 'The Last Sleeper', levels: '1–3' },
   { act: 1, title: 'Act I', sub: 'Signal Fire', levels: '3–8' },
+  { act: 2, title: 'Act II', sub: 'The Brood', levels: '8–16' },
 ];
 
 export const STORY = [

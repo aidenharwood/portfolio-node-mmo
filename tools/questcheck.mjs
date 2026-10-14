@@ -12,7 +12,7 @@ import { Stats } from '../src/rpg/Stats.js';
 import { Inventory } from '../src/items/Inventory.js';
 import { QuestLog } from '../src/rpg/Quests.js';
 import { CharacterCore } from '../src/rpg/CharacterCore.js';
-import { STORY } from '../src/rpg/storyline.js';
+import { ACTS, STORY } from '../src/rpg/storyline.js';
 import { SIDE_CHAINS } from '../src/rpg/sidequests.js';
 import { reachedPlaces, defenceAt, heldObjectives, questDrops } from '../src/rpg/questWatch.js';
 import { storyRef } from '../src/world/story.js';
@@ -111,6 +111,24 @@ function playStage(id) {
       for (let k = 0; k < 40 && left() > 0 && (quests.stage[id] ?? 0) === stage; k++) kill({ race: o.race ?? o.from?.race ?? 'scav', tag: o.tag ?? o.from?.tag });
     }
   }
+}
+
+// ---------------------------------------------------------------- lines keyed by story flags
+console.log('Lines keyed by story flags:');
+{
+  const log = new QuestLog(host);
+  log.defs.set('zz', { id: 'zz', kind: 'story', giver: 'warden', stages: [{ text: 't', objectives: [{ type: 'talk', npc: 'warden' }], say: { warden: { trusted_ysolde: 'A', default: 'B' } } }] });
+  const heard = (flag) => {
+    log.flags.trusted_ysolde = flag;
+    log.begin('zz');
+    log.events = [];
+    log.talkTo('warden');
+    return log.events.find((e) => e.k === 'say')?.text;
+  };
+  check(heard(true) === 'A', 'a line keyed by a flag the character has is the one said');
+  check(heard(false) === 'B', 'and without it, the default');
+  const act2 = ACTS.find((A) => A.act === 2);
+  check(act2?.title === 'Act II' && act2.sub === 'The Brood' && act2.levels === '8–16', 'Act II, The Brood (8–16), is in the journal\'s acts');
 }
 
 // ---------------------------------------------------------------- the story
