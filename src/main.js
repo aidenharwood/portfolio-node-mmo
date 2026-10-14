@@ -56,11 +56,12 @@ import { Remotes } from './net/Remotes.js';
 import { ChatUI } from './ui/ChatUI.js';
 import { PartyUI } from './ui/PartyUI.js';
 import { RaidUI } from './ui/RaidUI.js';
+import { EventUI } from './ui/EventUI.js';
 import { Telegraphs } from './fx/Telegraphs.js';
 import { TradeUI } from './ui/TradeUI.js';
 import { SocialUI } from './ui/SocialUI.js';
 import { TouchControls } from './ui/TouchControls.js';
-import { CharacterCore, rewardRoll, bonusRoll, visitRoll, stockFor, fineStockFor } from './rpg/CharacterCore.js';
+import { CharacterCore, rewardRoll, bonusRoll, visitRoll, eventRoll, stockFor, fineStockFor } from './rpg/CharacterCore.js';
 import { ACHIEVEMENT } from './rpg/achievements.js';
 import { strongholdXp } from './sim/WorldSim.js';
 import { CharacterLink } from './net/CharacterLink.js';
@@ -191,6 +192,8 @@ class Game {
     // marks a raid boss puts on the floor.
     this.raidUI = new RaidUI(this);
     this.telegraphs = new Telegraphs(this);
+    // Public events (gameplay phase 6): what's going on near us, on the HUD and the maps.
+    this.eventUI = new EventUI(this);
     this.tradeUI = new TradeUI(this);
     this.socialUI = new SocialUI(this);
     // Every change to the character goes through the shared rules (rpg/CharacterCore.js).
@@ -347,6 +350,9 @@ class Game {
       chests: this.openedChests, shop: this.shop, settings: this.settings, position: this.player.position, world: this.world,
     });
     this.char.inCombat = () => this.inCombat();
+    // Inside a public event under way, its voted tier is our Threat.
+    this.char.eventTier = () => this.eventUI.tierAt(this.player.position);
+    this.eventUI.reset();
     if (!opts.online) this.char.dungeons = this.localDungeons();
     this.char.loadProgress(save);
     this.charLink.attach(this.char);
@@ -538,6 +544,7 @@ class Game {
       this.newGame(c.data, { seed: welcome.seed, look: c.look, online: true });
       // The realm's enemies come from the server, and so does what lies on the ground for us.
       this.enemyLayer.startRemote(welcome.camps);
+      this.eventUI.reset(welcome.ovr ?? []);
       this.loadGround(welcome.ground);
       this.chat.clear();
       this.chat.add({ ch: 'system', text: `Welcome, ${c.name}. ${this.touchActive ? 'Tap the chat button to talk' : 'Enter to chat'}: /s nearby, /w Name to whisper, /who for who's online.` });
@@ -890,6 +897,7 @@ class Game {
     this.adaptResolution();
     this.partyUI.update(realDt);
     this.raidUI.update(realDt);
+    if (this.state !== 'title') this.eventUI.update(realDt);
     this.tradeUI.update(realDt);
     this.menu.update(realDt);
     document.body.classList.toggle('mouse-free', this.state === 'playing' && this.input.lockSupported && !this.input.locked);
@@ -1032,8 +1040,9 @@ class Game {
     let bd = FOLK_NEAR;
     for (const f of this.folk.values()) {
       const d = Math.hypot(f.n.x - p.x, f.n.z - p.z);
-      // Story folk who only appear at their moment (Krell, kneeling once Ironjaw has fallen).
-      const here = !f.n.when || this.quests.whenHolds(f.n.when);
+      // Story folk who only appear at their moment (Krell, kneeling once Ironjaw has fallen); and
+      // nobody stays in an overrun settlement.
+      const here = (!f.n.when || this.quests.whenHolds(f.n.when)) && !this.world.overrun?.has(f.place.id);
       if (f.npc) {
         if (d > FOLK_FAR || !here) this.dropFolk(f);
       } else if (here && d < bd) {
@@ -1302,7 +1311,8 @@ class Game {
 
   // ---------------------------------------------------------------- interaction
   interactables() {
-    const list = [...this.npcs, ...this.props.values(), this.campfire, ...this.dungeonView.interactables()];
+    const props = [...this.props.values()].filter((pr) => !this.world.overrun?.has(pr.place.id));
+    const list = [...this.npcs, ...props, this.campfire, ...this.dungeonView.interactables(), ...this.eventUI.interactables()];
     for (const w of this.world.waystones.values()) list.push({ kind: 'waystone', name: w.name, id: w.id, position: w.position });
     for (const c of this.world.chests.values()) if (!c.open) list.push({ kind: 'chest', name: 'Treasure Chest', id: c.id, position: c.position, level: c.level });
     return list;
@@ -1310,6 +1320,7 @@ class Game {
 
   interactPrompt(it) {
     if (it.kind === 'dthing') return this.dungeonView.prompt(it);
+    if (it.kind === 'beacon') return this.eventUI.prompt(it);
     if (it.kind === 'gate' && it.n.gate === 'dungeon') return PROPS.waygate.prompt;
     if (it.kind === 'gate' && it.n.gate === 'raid') return 'Use the raid gate';
     if (it.kind === 'object' && this.dungeonAt(it)) return `Go down into ${this.dungeonAt(it).name}`;
@@ -1332,6 +1343,7 @@ class Game {
     else if (it.kind === 'warroom') this.openMenu(() => this.warTable(it));
     else if (it.kind === 'object') this.useObject(it);
     else if (it.kind === 'dthing') this.dungeonView.use(it);
+    else if (it.kind === 'beacon') this.openMenu(() => this.eventUI.voteDialog(it));
     else this.openMenu(() => this.talk(it));
   }
 
@@ -1934,6 +1946,14 @@ class Game {
       }
     }
     this.hud.toast(`${camp.def.name} cleared`);
+  }
+
+  // Offline: a public event won with us in it — the chest, if we earned it (online the server
+  // rolls it: server/simhost.js).
+  onEventEnd(ev) {
+    if (this.net.inWorld) return;
+    const me = ev.result.people.find((p) => p.id === 0);
+    if (me) this.charLink.do({ op: 'event', roll: eventRoll(ev, me, this.stats.level, () => this.char.gid()) });
   }
 
   // Offline: a warband wiped out (online the server rolls the bonus).

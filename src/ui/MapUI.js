@@ -489,6 +489,21 @@ export class MapUI {
       }
     }
 
+    // Public events (ui/EventUI.js): where each one is, and what it is.
+    for (const m of g.eventUI?.markers() ?? []) {
+      const [sx, sy] = this.toScreen(m.x, m.z);
+      const color = m.stage === 'gather' ? '#ffd25a' : '#ff6a4a';
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(sx, sy, Math.max(7, m.r * this.zoom), 0, Math.PI * 2);
+      ctx.fillStyle = `${color}22`;
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = color;
+      ctx.stroke();
+      ctx.restore();
+      this.label(sx, sy - Math.max(7, m.r * this.zoom) - 6, m.name, color, 12);
+    }
     const wp = g.questWaypoint();
     if (wp) {
       const [sx, sy] = this.toScreen(wp.x, wp.z);

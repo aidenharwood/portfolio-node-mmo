@@ -510,6 +510,7 @@ export class DevTools {
         <div class="row"><select id="dev-dun">${Object.values(DUNGEONS).map((d) => `<option value="${d.id}">${esc(d.name)} (${esc(d.theme)}, Lv ${d.level})</option>`).join('')}${Object.values(RAIDS).map((d) => `<option value="${d.id}">Raid: ${esc(d.name)} (Lv ${d.level})</option>`).join('')}</select><select id="dev-dun-mode"><option value="open">Open world</option><option value="run:0">Run · Normal</option><option value="run:1">Run · Veteran</option><option value="run:2">Run · Elite</option></select><button data-act="dungeon">Go down</button></div>
         <div class="row"><button data-act="tp-reticle">Teleport to reticle</button><button data-act="reveal">Reveal map</button><button data-act="attune">Attune all waystones</button></div>
         <div class="row"><button data-act="kill-all">Kill all enemies</button><button data-act="respawn">Respawn camps</button><button data-act="clear-loot">Clear ground loot</button></div>
+        <div class="row"><select id="dev-event"><option value="surge">Hive Surge</option><option value="siege">Scav Siege</option><option value="anomaly">Maker Anomaly</option></select><button data-act="event">Start event nearby</button><button data-act="event-win">Win it</button><button data-act="event-lose">Lose it</button></div>
         <div class="grid2">${chk('freezeAI', 'Freeze enemy AI', f.freezeAI)}<label class="chk"><input type="checkbox" data-act="pause" ${this.paused ? 'checked' : ''}> Pause simulation</label></div>
         <div class="row"><span>Time scale</span><input type="range" id="dev-time" min="0.05" max="2" step="0.05" value="${g.timeScale ?? 1}"><b id="dev-time-v">${(g.timeScale ?? 1).toFixed(2)}×</b></div>`;
     } else if (this.tab === 'Spawn') {
@@ -631,6 +632,16 @@ export class DevTools {
         g.hud.toast('All waystones attuned');
         break;
       case 'kill-all': this.killAll(); break;
+      // Public events (sim/WorldEvents.js), offline: one at the nearest place that suits it, and
+      // the nearest one won or lost on the spot.
+      case 'event': case 'event-win': case 'event-lose': {
+        const d = g.enemyLayer.sim?.director;
+        if (!d) { g.hud.toast('Offline only (online: /admin event)'); break; }
+        const pp = p.position;
+        const ev = act === 'event' ? d.startNear(pp.x, pp.z, $('#dev-event').value) : d.force(pp.x, pp.z, act === 'event-win');
+        g.hud.toast(ev ? `${act === 'event' ? 'Started' : act === 'event-win' ? 'Won' : 'Lost'}: ${ev.name}` : 'No event near');
+        break;
+      }
       case 'respawn': g.encounters.respawnAll(); g.hud.toast('Camps respawned'); break;
       case 'clear-loot': for (const d of [...g.drops]) g.removeDrop(d); break;
       case 'pause': this.paused = el.checked; return;

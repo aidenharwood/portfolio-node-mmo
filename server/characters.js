@@ -35,6 +35,7 @@ export function loadCharacter(session, data, simhost) {
     position, world: simhost.world, strict: true,
   });
   core.inCombat = () => simhost.inCombat(session);
+  core.eventTier = () => simhost.eventTier(session);
   core.dungeons = simhost.dungeonPort(session);
   const extras = { discovery: data?.discovery ?? null, marker: data?.marker ?? null, tracked: data?.tracked ?? null, pos: data?.pos ?? null };
   // Left in a dungeon (its copy may be gone): back where they went in.

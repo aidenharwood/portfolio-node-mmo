@@ -209,6 +209,7 @@ chat, and reach players on any layer:
 | `/admin tp Name` · `/admin summon Name` | Go to them, or bring them to you (moving one of you to the other's layer). |
 | `/admin inspect Name` | Account, level, layer, gold, position, mute or ban. |
 | `/admin reports` · `/admin resolve id` | Player reports (`/report Name reason`) and closing them. |
+| `/admin event surge\|siege\|anomaly` · `/admin event win\|lose` | Starts a public event at the nearest place that suits it (on your layer), or wins or loses the one nearest you now. For trying them out. |
 
 ## Data and backups
 

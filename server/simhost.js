@@ -21,13 +21,18 @@
 //                     rb { id, s, dmg, kb, el, fail? } it lands · hz { id, s, life, dps, el } a pool ·
 //                     hzx { id } it's gone · rph { id, ph, name } a phase · renr { id } enraged ·
 //                     rimm { id } a hit on an immune boss (combat/shapes.js packs the shapes)
+//   public events (sim/WorldEvents.js), twice a second when they've changed:
+//                     wev { l: [event view], me: { id: [points, vote, chest] } } — the events near
+//                     a player, and their own part in each · ovr { id, on } — a settlement overrun
+//                     or free again (the list comes with welcome)
 //   client → server:  hit { id, d, src, po, kb, dx, dz }   ·   st { id, el, po }
 //                     dun { id } — something in their dungeon used (a key, a power node, a door)
+//                     evote { id, tier } — a vote at an event's beacon
 import * as THREE from 'three';
 import { HeadlessWorld } from './world.js';
 import { WorldSim, strongholdXp } from '../src/sim/WorldSim.js';
 import { STATE_CODE, FLAG } from '../src/sim/enemyDefs.js';
-import { rewardRoll, bonusRoll, visitRoll } from '../src/rpg/CharacterCore.js';
+import { rewardRoll, bonusRoll, visitRoll, eventRoll } from '../src/rpg/CharacterCore.js';
 import { reachedPlaces, defenceAt, heldObjectives, questDrops } from '../src/rpg/questWatch.js';
 import { maxHit } from './characters.js';
 import { PARTY_RANGE } from './parties.js';
@@ -49,12 +54,14 @@ const STATUSES = new Set(['fire', 'frost', 'corrosive', 'shock']);
 const MAX_SPEED = 50;      // m/s across the ground (bullet-jump chains top out around 36)
 const MOVE_BANK = 2;       // seconds of movement a player may bank (delayed, bunched-up states)
 const r2 = (v) => Math.round(v * 100) / 100;
+const EVENT_SEND = 0.5;    // seconds between public-event updates to each player
 
 export class SimHost {
   constructor(realm, seed) {
     this.realm = realm;
     this.world = new HeadlessWorld(seed);
     this.arriving = []; // proxies placed but waiting on the world round them, in the order they came
+    this.worldEvents = true; // the sim runs public events here (sim/WorldEvents.js)
     this.sim = new WorldSim(this);
     // The dungeons' copies on this layer (sim/Dungeons.js): built in the world, their rooms filled
     // by the sim.
@@ -102,6 +109,59 @@ export class SimHost {
     for (const s of this.sharers(last.position)) {
       const roll = bonusRoll({ title: 'Warband broken', kind: 'warband', xp: pack.xp * 0.5, level: pack.level, race: pack.race, items: 1, at }, s.core.stats.level, () => s.core.gid(), s.core.settings.threat);
       this.give(s, { op: 'bonus', roll });
+    }
+  }
+
+  // ---------------------------------------------------------------- public events
+  // An event won: each participant who earned it gets the chest, rolled for them.
+  onEventEnd(ev) {
+    metrics.inc(ev.res === 'won' ? 'events_won' : 'events_lost');
+    for (const person of ev.result.people) {
+      const s = this.realm.sessions.get(person.id);
+      if (s?.core) this.give(s, { op: 'event', roll: eventRoll(ev, person, s.core.stats.level, () => s.core.gid()) });
+    }
+  }
+
+  // A settlement overrun (or free again): everyone's screen hides (or brings back) its folk.
+  onOverrun(place, on) {
+    for (const s of this.realm.sessions.values()) s.send({ t: 'ovr', id: place.id, on: on ? 1 : 0 });
+  }
+
+  get overrun() { return this.sim.director.overrunList(); }
+
+  // The tier of the event a player's in (their Threat while it lasts), else null.
+  eventTier(session) {
+    const p = session.proxy;
+    return p?.placed ? this.sim.director.tierFor(session.id, p.position) : null;
+  }
+
+  vote(s, m) {
+    if (s.proxy?.placed && typeof m.id === 'string') this.sim.director.vote(s.id, m.id.slice(0, 16), Number(m.tier));
+  }
+
+  // Twice a second, each player hears about the events near them, when anything's changed: each
+  // event's view (worked out once however many it goes to) and their own part in it.
+  sendEvents(dt) {
+    if ((this.eventTimer = (this.eventTimer ?? 0) - dt) > 0) return;
+    this.eventTimer = EVENT_SEND;
+    const d = this.sim.director;
+    const views = new Map();
+    for (const s of this.realm.sessions.values()) {
+      const p = s.proxy;
+      if (!p?.placed) continue;
+      const list = inPocket(p.position.x) ? [] : d.near(p.position.x, p.position.z);
+      if (!list.length && !s.eventsSent) continue;
+      const parts = [];
+      const me = {};
+      for (const ev of list) {
+        if (!views.has(ev)) views.set(ev, JSON.stringify(d.view(ev)));
+        parts.push(views.get(ev));
+        me[ev.id] = d.personal(ev, s.id);
+      }
+      const text = `{"t":"wev","l":[${parts.join(',')}],"me":${JSON.stringify(me)}}`;
+      if (text === s.eventsSent) continue;
+      s.eventsSent = list.length ? text : null;
+      s.send(text);
     }
   }
 
@@ -310,6 +370,7 @@ export class SimHost {
     this.sim.update(dt);
     this.grid.clear();
     for (const e of this.sim.enemies) this.grid.add(e, e.position.x, e.position.z);
+    this.sendEvents(dt);
   }
 
   // What one player should hear this tick: enemies coming into and out of range, their states,

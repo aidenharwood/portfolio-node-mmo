@@ -91,6 +91,7 @@ button { font-family: var(--ui); cursor: pointer; }
 #compass .cd.n { color: var(--accent-2); }
 #compass .mk { position: absolute; top: 9px; width: 9px; height: 9px; margin-left: -4.5px; transform: rotate(45deg); background: var(--accent-2); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.7), 0 0 8px rgba(240, 198, 116, 0.8); }
 #compass .mk.custom { background: var(--accent); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.7), 0 0 8px rgba(94, 230, 255, 0.8); }
+#compass .mk.event { background: var(--event); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.7), 0 0 8px rgba(255, 106, 74, 0.85); }
 #compass .caret { position: absolute; left: 50%; bottom: 0; margin-left: -5px; border: 5px solid transparent; border-bottom-color: var(--accent); filter: drop-shadow(0 0 3px var(--accent)); }
 
 /* ---------- vitals (bottom-left) ---------- */
@@ -167,6 +168,37 @@ button { font-family: var(--ui); cursor: pointer; }
 .quest.story b { color: #ffcf7a; }
 .quest.tracked { box-shadow: inset 3px 0 0 var(--accent), inset 0 0 0 1px rgba(94, 230, 255, 0.45); }
 .quest.more { padding: 3px 11px 4px 13px; font-size: 10.5px; font-weight: 600; letter-spacing: 1.5px; text-transform: uppercase; opacity: 0.75; }
+
+/* ---------- public events (ui/EventUI.js): the tracker over the quests, plates over pylons ---------- */
+:root { --event: #ff6a4a; }
+#event { width: 250px; align-self: flex-end; }
+#event:empty { display: none; }
+.ev-card {
+  background: var(--halftone), var(--glass); padding: 7px 11px 8px 13px; font-size: 12.5px; font-weight: 500;
+  clip-path: var(--cut-s); box-shadow: inset 3px 0 0 var(--event), inset 0 0 0 1px rgba(255, 106, 74, 0.45);
+}
+.ev-card.gather { box-shadow: inset 3px 0 0 #ffd25a, inset 0 0 0 1px rgba(255, 210, 90, 0.45); }
+.ev-card.over { opacity: 0.85; }
+.ev-card b { display: block; font-family: var(--display); font-size: 14px; font-weight: 600; letter-spacing: 1.5px; text-transform: uppercase; color: #ffb39e; text-shadow: var(--outline); }
+.ev-card.gather b { color: #ffe08a; }
+.ev-card.won b { color: #9fffc0; }
+.ev-card p { margin: 2px 0 0; font-size: 11.5px; font-style: italic; opacity: 0.85; }
+.ev-card ul { margin: 3px 0 0; padding-left: 14px; }
+.ev-card li { margin: 1px 0; }
+.ev-card li::marker { color: var(--event); }
+.ev-card li.done { opacity: 0.45; text-decoration: line-through; }
+.ev-card small { display: block; margin-top: 4px; font-size: 10.5px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; opacity: 0.75; }
+.ev-card .ev-bars { display: flex; align-items: center; gap: 4px; list-style: none; margin-left: -14px; }
+.ev-card .ev-bars span { margin-right: 2px; font-size: 10.5px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; opacity: 0.8; }
+.ev-hp { flex: 1; height: 5px; background: rgba(6, 8, 14, 0.8); box-shadow: inset 0 0 0 1px var(--line); }
+.ev-hp em { display: block; height: 100%; background: linear-gradient(90deg, #2a9fff, #58cfff); transition: width 0.3s; }
+.ev-hp.beacon em { background: linear-gradient(90deg, #c89a3a, #ffd27a); }
+.ev-hp.down { box-shadow: inset 0 0 0 1px rgba(255, 77, 94, 0.6); }
+#labels > .ev-plate span { font-family: var(--display); font-size: 11px; font-weight: 600; letter-spacing: 1.5px; text-transform: uppercase; color: #a8e8ff; text-shadow: var(--outline); }
+#labels > .ev-plate i { display: block; width: 80px; height: 5px; margin: 3px auto 0; background: rgba(6, 8, 14, 0.8); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6); }
+#labels > .ev-plate em { display: block; height: 100%; background: linear-gradient(#d8f6ff 0 30%, #58cfff 30%); }
+body.touch #event { max-height: 18vh; overflow: hidden; }
+@media (max-width: 720px) { #event, .ev-card { width: 210px; } }
 
 /* ---------- boss ---------- */
 #bossbar { position: absolute; top: 52px; left: 50%; transform: translateX(-50%); width: min(600px, 62vw); text-align: center; }

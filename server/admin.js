@@ -4,7 +4,8 @@
 // All under /admin (so they never clash with players' own commands, like the party's /kick):
 //   /admin kick Name [reason] · ban Name hours [reason] · unban Name · mute Name minutes ·
 //   unmute Name · announce text · tp Name (go to them) · summon Name (bring them here) ·
-//   inspect Name · reports · resolve id
+//   inspect Name · reports · resolve id · event surge|siege|anomaly (one at the nearest place that
+//   suits it) · event win|lose (the nearest one, now)
 // Bans and mutes belong to the account (every character on it); a ban also ends their sessions.
 // They reach players on any layer (over the bus); tp and summon move one of you to the other's
 // layer first.
@@ -120,8 +121,21 @@ export class Admin {
         await this.store.handleReport(Number(name));
         return this.tell(s, `Report #${name} resolved.`);
       }
+      // Public events (sim/WorldEvents.js), for trying them out.
+      case 'event': {
+        const d = this.realm.simhost.sim.director;
+        const at = s.proxy?.placed ? s.proxy.position : null;
+        const what = String(name ?? '').toLowerCase();
+        if (!at) return this.tell(s, 'Not in the world yet.');
+        if (what === 'win' || what === 'lose') {
+          const ev = d.force(at.x, at.z, what === 'win');
+          return ev ? this.log(s, `${what === 'win' ? 'won' : 'lost'} ${ev.name}`) : this.tell(s, 'No event under way near you.');
+        }
+        const ev = d.startNear(at.x, at.z, what);
+        return ev ? this.log(s, `started ${ev.name}`) : this.tell(s, 'Usage: /admin event surge|siege|anomaly|win|lose');
+      }
       default:
-        return this.tell(s, 'Admin: /admin kick · ban · unban · mute · unmute · announce · tp · summon · inspect · reports · resolve');
+        return this.tell(s, 'Admin: /admin kick · ban · unban · mute · unmute · announce · tp · summon · inspect · reports · resolve · event');
     }
   }
 

@@ -107,6 +107,17 @@ export const BESTIARY = {
     strengths: 'Mauling combos, charges, a rearing stomp, and its pack on call.',
     weaknesses: 'Every attack is broad and heavy: read it and it can be danced around.',
   },
+  // ---------------------------------------------------------------- public events
+  sporepod: {
+    lore: 'Where the Hive means to take a place, it roots these first: bladders of spawn the size of a cart, pulsing, each one a nest.',
+    strengths: 'Hatches drones until it\'s burst, and spits acid at anyone who comes close.',
+    weaknesses: 'It can\'t move. Burst the pods and the surge runs dry.',
+  },
+  siegeengine: {
+    lore: 'Scav mortars on scrap carriages, hauled into range by their crews. They don\'t aim at people: they aim at walls.',
+    strengths: 'Shells that land from sixty metres off, and a blast of exhaust for anyone who climbs on.',
+    weaknesses: 'Rooted where they were set down, and slow to reload. Get past the crew and they\'re yours.',
+  },
   // ---------------------------------------------------------------- the Brood Mother's raid
   broodwarden: {
     lore: 'The first door of the deep nest is a guard grown to fill it: a praetorian fed until its carapace became a wall.',

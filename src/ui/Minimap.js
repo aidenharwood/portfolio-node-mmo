@@ -1,5 +1,5 @@
 // Rotating minimap (camera-forward is up): explored terrain tiles under fog, roads, camps,
-// waystones, chests, enemies, notable loot, NPCs, quest target and custom marker.
+// waystones, chests, enemies, notable loot, NPCs, public events, quest target and custom marker.
 import { RARITY } from '../items/rarity.js';
 import { CHUNK } from '../world/Chunks.js';
 import { PARTY_COLOR } from './PartyUI.js';
@@ -245,6 +245,15 @@ export class Minimap {
       ctx.arc(horde.x, horde.z, 10 + Math.sin(performance.now() / 260) * 1.5, 0, Math.PI * 2);
       ctx.stroke();
     }
+    // Public events (ui/EventUI.js): their area, pulsing — gilt while gathering, red under way.
+    const events = game.eventUI?.markers() ?? [];
+    for (const m of events) {
+      ctx.strokeStyle = m.stage === 'gather' ? 'rgba(255, 210, 90, 0.95)' : 'rgba(255, 106, 74, 0.95)';
+      ctx.lineWidth = 2.4;
+      ctx.beginPath();
+      ctx.arc(m.x, m.z, m.r + 2 + Math.sin(performance.now() / 300) * 1.5, 0, Math.PI * 2);
+      ctx.stroke();
+    }
     for (const n of game.npcs) this.dot(n.position.x, n.position.z, 1.3, n.marker ? '#ffd23f' : '#ffffff');
     for (const s of game.props?.values() ?? []) this.dot(s.position.x, s.position.z, 1.5, s.marker ? '#ffd23f' : '#e8d4a0');
     for (const r of game.remotes?.list ?? []) if (!game.partyUI?.isMate(r.netId)) this.dot(r.position.x, r.position.z, 1.6, '#5ee6ff');
@@ -262,6 +271,8 @@ export class Minimap {
     if (wp) this.rimArrow(wp, p, yaw, '#ffd23f');
     if (game.customMarker) this.rimArrow(game.customMarker, p, yaw, '#4ad2ff');
     if (horde) this.rimArrow(horde, p, yaw, '#ff4632');
+    const ev = game.eventUI?.compassTarget();
+    if (ev) this.rimArrow(ev, p, yaw, '#ff6a4a');
     for (const m of mates) this.rimArrow(m, p, yaw, PARTY_COLOR);
 
     ctx.save();

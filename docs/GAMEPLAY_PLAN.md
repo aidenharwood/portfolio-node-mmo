@@ -27,15 +27,17 @@ Anything marked *(default)* below is my assumption. Change it when you review.
 ### Status, 2026-10-14
 - **Built:** phases 1–5 and 7 (balance and hordes, talents and achievements, settlements, the
   quest system and Act I, dungeons, the Brood Mother raid). Each has its Node check in `npm test`.
-- **Not built:** phase 6 (public world events). Phase 8 (Acts II–IV and the endgame) waits on
-  it, because Act II's Hive surges and the endgame's event schedule both need the event director.
+- **Phase 6 (public world events):** 6a is built (see 8): the director, Hive Surges, Scav
+  Sieges, Maker Anomalies, overrun settlements and the Retake. 6b (the war-walker and the
+  stampede) isn't.
+- **Phase 8 (Acts II–IV and the endgame):** not started. Act II's surges can now be public events.
 - **The test suite was red** after the "Current progress" commit: its mesh colliders read the
   scenery meshes, and the server's headless world (`server/world.js`) has none, so every check
   that builds the world crashed. The collision work since then (`53e24d6`) keeps plain colliders
   there, and `npm test` passes again, with `tools/physicscheck.mjs` added. See 11 for what that
   leaves open.
-- **Next:** phase 6, split into 6a (the director, three event types, failure and retaking) and 6b
-  (the two events that move: the war-walker and the stampede). Then phase 8 in the order in 10.
+- **Next:** 6b (the two events that move: the war-walker and the stampede), or straight on to 8a
+  (Act II), which only needs 6a's Hive Surge. Then the rest of phase 8 in the order in 10.
 
 The sections below this one are the plan as first written, kept for reference.
 
@@ -74,7 +76,7 @@ By level 8 everything dies in one hit, and you can stand in a camp for a minute.
 | 3 | Settlements of every size | Hamlets to cities with services, quest boards and side quests | M | built |
 | 4 | Quest system v2 and Story Act I | Story-led play from level 1 to about 8 | L | built |
 | 5 | Dungeons | Interiors, a generator, open-world and instanced dungeons with tiers | XL | built |
-| 6 | Public world events | Faction offensives everyone nearby joins | L | 6a in progress |
+| 6 | Public world events | Faction offensives everyone nearby joins | L | 6a built, 6b next |
 | 7 | Raids | 8–16 player instances with scripted multi-phase bosses | L | built |
 | 8 | Story Acts II–IV and the endgame loop | The rest of the story, more dungeons and raids, and the tiered endgame | XL | waits on 6 |
 
@@ -472,8 +474,37 @@ server. Where it differs from the plan below:
 
 ## 8. Phase 6 — Public world events
 
-**Status: 6a in progress** (2026-10-14). The detailed design is in 8.1–8.6 below; the original
-outline follows it, for reference.
+**Status: 6a built** (2026-10-14); 6b not started. `npm test` adds `tools/eventcheck.mjs`, which
+covers:
+- the director on a real world;
+- the vote;
+- each event won, lost and abandoned through the world sim, with stand-in players;
+- scaling and contribution;
+- an overrun closing a settlement's services under the server's rules, and the Retake;
+- the chest and achievements through the character's rules;
+- the server's side, with a stand-in realm: `wev`, votes, the tier, the chest as a server op,
+  and `ovr`.
+
+The design is in 8.1–8.6 below, and the original outline after it. Where 6a differs from the design:
+- **Chest XP** is a third of what the event's enemies were worth, between 40 and 120 × the
+  event's level (half was up to three levels at once).
+  - *Rarity:* the chest uses the same roll as a stormed stronghold, which adds the tier's rarity
+    floor on top of rare, so an Elite event's items are legendary.
+- **Health of things to defend:** a pylon takes 160 on-level blows of 14 damage, the beacon 220.
+  Shells count 2.5 blows against them.
+  - *Measured with stand-in defenders:* a defended surge takes 1½–3 minutes and an anomaly about
+    2. An undefended siege falls in about 2½ minutes.
+- **An anomaly nobody guards** is usually wrecked by its guardians within a minute, rather than
+  fading. Either way nothing is overrun.
+- **Stragglers (added):**
+  - wave enemies that stay 45 m from the fight for 20 seconds give up;
+  - a minute after the last wave, two or fewer left break and run;
+  - so one stuck attacker can't hold an event open.
+- **Sites:** settlements are picked twice as often as landmarks and ruins, which are far more
+  common. Ruins are named after their region.
+- **Admins** can start and settle events online with `/admin event surge|siege|anomaly|win|lose`.
+  The dev panel does the same offline.
+- **Server restart:** 6a changes server code, so your 8080 server needs a restart to run events.
 
 ### 8.1 Split
 - **6a (now):**
@@ -688,8 +719,8 @@ and talks in raid chat. Where it differs from the plan below:
 
 ## 10. Phase 8 — Story Acts II–IV and the endgame loop
 
-**Status: not started.** It depends on phase 6, which hasn't been built: Act II's Hive surges on
-settlements and the endgame's rotating event schedule both need the event director. Proposed order:
+**Status: not started.** Phase 6a built the event director this phase needs, for Act II's Hive
+surges on settlements and the endgame's rotating schedule. Proposed order:
 1. **Phase 6 first**, so Act II's surges are public events rather than one-off quest waves (6a's
    Hive Surge is the one Act II will call on; 6b's war-walker is Act III's).
 2. **8a: Act II, *The Brood*** (levels 8–16). Farcall as its hub, the Farcall Array as a new story

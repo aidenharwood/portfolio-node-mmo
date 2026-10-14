@@ -180,6 +180,8 @@ export class Net {
       case 'snap': g.remotes.snap(msg); g.enemyLayer.onSnap(msg); break;
       case 'camp': g.enemyLayer.onCamp(msg); break;
       case 'dun': g.dungeonView.onState(msg); break;
+      case 'wev': g.eventUI.onState(msg); break;
+      case 'ovr': g.eventUI.onOverrun(msg); break;
       case 'party': g.partyUI.set(msg.party); break;
       case 'invite': g.partyUI.invited(msg); break;
       case 'pp': g.partyUI.positions(msg.pp); break;

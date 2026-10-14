@@ -74,6 +74,9 @@ export class EnemyLayer {
     };
     this.sim = new WorldSim({
       world: g.world,
+      worldEvents: true, // public events, here as the server runs them online (sim/WorldEvents.js)
+      onEventEnd: (ev) => g.onEventEnd(ev),
+      onOverrun: () => {},
       emit: (ev) => this.onEvent(ev),
       onSpawn: (e) => this.addView(e),
       onRemove: (e) => this.removeView(e.id),
@@ -306,6 +309,20 @@ export class EnemyLayer {
         break;
       case 'wave':
         g.hud.toast(ev.of ? `Wave ${ev.wave} of ${ev.of}: ${ev.n} coming for ${ev.name}` : `Reinforcements: ${ev.n} more from ${ev.name}`);
+        break;
+      // Public events (sim/WorldEvents.js): a spore pod hatching, a pylon or beacon falling, a turn
+      // in the fight.
+      case 'hatch':
+        if (v) { g.effects.spawnPuff(v.position, { size: 2.2, life: 0.8, color: 0x6a3a7a }); g.effects.spawnRing(v.position, 3, RACE_GLOW.hive); }
+        break;
+      case 'evfall':
+        _p.fromArray(ev.p);
+        g.effects.spawnSparks(_p.clone().setY(_p.y + 2.5), 0x58cfff, 24);
+        g.effects.spawnRing(_p, 4, 0x58cfff);
+        g.hud.toast(ev.kind === 'beacon' ? 'The beacon is falling apart!' : 'A pylon has fallen!');
+        break;
+      case 'evstep':
+        g.hud.toast(ev.text);
         break;
       case 'defend':
         g.hud.banner(`Hold ${ev.name}`, `${ev.waves} waves are coming`);

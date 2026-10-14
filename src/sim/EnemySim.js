@@ -44,6 +44,7 @@ const TARGET_RANGE = 60;   // players further than this aren't considered as tar
 const CROWD_RANGE = 40;    // players this close count towards the fight's size...
 const CROWD_HP = 0.6;      // ...each one past the first adding this much to its health
 const BURN_TICK = 0.5;
+const STRUCTURE_LURE = 20; // how much more an event's attackers want what they came for than a player
 
 export class EnemySim {
   // `split`: one of the two halves of a Splitting elite (worth what a summoned minion is);
@@ -221,6 +222,9 @@ export class EnemySim {
     for (const p of this.sim.players) consider(p, 0);
     // A holo-decoy close enough draws them off.
     for (const p of this.sim.decoys) if (this.dist2(p) < 20) consider(p, 60);
+    // A public event's attackers go for what they came to destroy (sim/WorldEvents.js) unless
+    // someone hurts them enough to draw them off.
+    for (const s of this.camp?.structures ?? []) consider(s, this.type.lure ?? STRUCTURE_LURE);
     if (best !== this.foe) {
       this.sim.releaseToken(this);
       this.foe = best;
@@ -732,6 +736,8 @@ export class EnemySim {
 
   release(a, p) {
     const L = this.live;
+    // A blow at something an event's defenders hold (no screen takes it: the sim counts it).
+    if (p.structure) p.event.director.strike(p, this, L);
     switch (a.kind) {
       case 'swing': case 'combo': case 'bite': case 'bash':
         this.landed = false;

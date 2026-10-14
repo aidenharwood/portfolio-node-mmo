@@ -137,7 +137,8 @@ export class HUD {
     e.wpnCard.classList.toggle('quiet', !e.ammo.innerHTML);
   }
 
-  // Compass strip: ticks every 15°, cardinal letters, and diamonds for the quest/custom markers.
+  // Compass strip: ticks every 15°, cardinal letters, and diamonds for the quest/custom markers
+  // and the public event near us.
   buildCompass() {
     const strip = this.el.compass;
     const parts = [];
@@ -145,7 +146,7 @@ export class HUD {
       const card = { 0: 'N', 90: 'E', 180: 'S', 270: 'W', 45: 'NE', 135: 'SE', 225: 'SW', 315: 'NW' }[d];
       parts.push(card ? `<span class="cd ${d === 0 ? 'n' : ''}" data-b="${d}">${card}</span>` : `<i class="tick ${d % 45 === 0 ? 'major' : ''}" data-b="${d}"></i>`);
     }
-    parts.push('<i class="mk" data-mk="quest"></i><i class="mk custom" data-mk="custom"></i>');
+    parts.push('<i class="mk" data-mk="quest"></i><i class="mk custom" data-mk="custom"></i><i class="mk event" data-mk="event"></i>');
     // Party members (up to three others).
     for (let i = 0; i < 3; i++) parts.push(`<i class="mk party" data-mk="party${i}"></i>`);
     strip.innerHTML = parts.join('');
@@ -161,7 +162,7 @@ export class HUD {
     for (const it of this.compassItems) {
       let b = it.b;
       if (it.mk) {
-        const t = it.mk === 'quest' ? qw : it.mk === 'custom' ? cm : mates[+it.mk.slice(5)];
+        const t = it.mk === 'quest' ? qw : it.mk === 'custom' ? cm : it.mk === 'event' ? game.eventUI?.compassTarget() : mates[+it.mk.slice(5)];
         if (!t) { it.el.style.display = 'none'; continue; }
         it.el.style.display = '';
         b = Math.atan2(t.x - p.x, -(t.z - p.z));

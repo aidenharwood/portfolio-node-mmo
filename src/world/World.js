@@ -699,7 +699,8 @@ export class World {
       const n = p.npcs?.find((m) => m.id === id);
       if (n) {
         n.place ??= p.id;
-        return n;
+        // An overrun settlement's folk have fled (sim/WorldEvents.js).
+        return this.overrun?.has(p.id) ? null : n;
       }
     }
     return null;
@@ -720,7 +721,7 @@ export class World {
     for (const n of NPCS) if (n.role === role && Math.hypot(n.x - x, n.z - z) <= reach) out.push(n);
     for (const r of this.gen.regionsNear(x, z, this._fr ??= [])) {
       for (const p of r.pois) {
-        if (!p.npcs || Math.hypot(p.x - x, p.z - z) > reach + 40) continue;
+        if (!p.npcs || Math.hypot(p.x - x, p.z - z) > reach + 40 || this.overrun?.has(p.id)) continue;
         for (const n of p.npcs) if (n.role === role && Math.hypot(n.x - x, n.z - z) <= reach) out.push(n);
       }
     }
