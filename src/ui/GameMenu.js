@@ -73,7 +73,8 @@ const CONTROLS = [
     ['Interact · pick up', 'Tap the prompt · tap the loot card (hold to swap)'],
     ['Weapons', 'Tap a weapon slot'],
     ['Abilities', 'The three buttons over the action cluster'],
-    ['Menu · chat · view', 'The buttons at the top'],
+    ['Map · journal', 'Tap the minimap · tap the tracked quest'],
+    ['Menu · chat · view', 'The buttons at the top left (a dot on the menu: talent points to spend)'],
   ]],
 ];
 
@@ -196,6 +197,10 @@ export class GameMenu {
     const g = this.game;
     this.q('.gm-tabs').innerHTML = this.tabs.map((t) => `
       <button role="tab" class="gm-tab ${t.id === tab ? 'on' : ''}" aria-selected="${t.id === tab}" data-tab="${t.id}">${t.id === 'inventory' && this.shop ? 'Trade' : t.label}${t.key && this.context === 'game' ? `<kbd>${t.key}</kbd>` : ''}</button>`).join('');
+    // (On a narrow screen the tabs scroll sideways: the open one is brought into sight.)
+    const nav = this.q('.gm-tabs');
+    const on = nav.querySelector('.gm-tab.on');
+    if (on && nav.scrollWidth > nav.clientWidth) nav.scrollLeft = on.offsetLeft - (nav.clientWidth - on.offsetWidth) / 2;
     const title = this.context === 'title';
     this.q('.gm-quit').textContent = title ? 'Back to Title' : g.net.inWorld ? 'Leave World' : 'Quit to Title';
     this.q('.gm-quit').dataset.act = title ? 'back' : 'quit';

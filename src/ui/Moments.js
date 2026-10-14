@@ -17,7 +17,7 @@ export class Moments {
     this.el = document.createElement('div');
     this.el.id = 'moment';
     this.el.className = 'hidden';
-    this.el.innerHTML = '<div class="mo-bar top"></div><div class="mo-title"></div><div class="mo-line"></div><div class="mo-bar bottom"><small>Esc · Space · click to skip</small></div>';
+    this.el.innerHTML = '<div class="mo-bar top"></div><div class="mo-title"></div><div class="mo-line"></div><div class="mo-bar bottom"><small><span class="kb-only">Esc · Space · click to skip</span><span class="touch-only">Tap to skip</span></small></div>';
     document.body.appendChild(this.el);
     this.el.addEventListener('pointerdown', (e) => { e.preventDefault(); this.skip(); });
     this.playing = null;

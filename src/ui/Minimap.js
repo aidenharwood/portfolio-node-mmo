@@ -2,8 +2,8 @@
 // waystones, chests, enemies, notable loot, NPCs, quest target and custom marker.
 import { RARITY } from '../items/rarity.js';
 import { CHUNK } from '../world/Chunks.js';
-import { FOG_CELL, FOG_PER_CHUNK } from '../world/Discovery.js';
 import { PARTY_COLOR } from './PartyUI.js';
+import { FogLayer } from './MapFog.js';
 
 // Settlements of every size on the minimap: their ground, a little brighter the smaller they are.
 const PLACE_FILL = {
@@ -21,6 +21,7 @@ export class Minimap {
     canvas.height = SIZE * 2;
     this.ctx = canvas.getContext('2d');
     this.timer = 0;
+    this.fog = new FogLayer([18, 14, 26, 235]);
   }
 
   dot(x, z, r, color) {
@@ -180,20 +181,14 @@ export class Minimap {
     }
     ctx.restore();
 
-    // Fog over unexplored cells (soft-edged).
-    ctx.filter = 'blur(5px)';
-    ctx.fillStyle = 'rgba(18,14,26,0.92)';
-    for (let cx = cx0; cx <= cx1; cx++) {
-      for (let cz = cz0; cz <= cz1; cz++) {
-        const m = d.mask(cx, cz);
-        if (!m) { ctx.fillRect(cx * CHUNK, cz * CHUNK, CHUNK, CHUNK); continue; }
-        for (let b = 0; b < 64; b++) {
-          if ((m[b >> 5] >>> (b & 31)) & 1) continue;
-          ctx.fillRect(cx * CHUNK + (b % FOG_PER_CHUNK) * FOG_CELL, cz * CHUNK + Math.floor(b / FOG_PER_CHUNK) * FOG_CELL, FOG_CELL, FOG_CELL);
-        }
-      }
+    // Fog over unexplored cells: one cached picture, soft-edged by being scaled up (ui/MapFog.js).
+    if (this.fog.cover(d, cx0, cz0, cx1, cz1)) {
+      const f = this.fog.bounds;
+      ctx.save();
+      ctx.scale(1, -1);
+      ctx.drawImage(this.fog.canvas, f.x, -f.zTop, f.w, f.h);
+      ctx.restore();
     }
-    ctx.filter = 'none';
 
     const regions = world.gen.regionsNear(p.x, p.z, this._rn ??= []);
     ctx.strokeStyle = 'rgba(214,180,120,0.95)';

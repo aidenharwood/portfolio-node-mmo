@@ -540,7 +540,7 @@ class Game {
       this.enemyLayer.startRemote(welcome.camps);
       this.loadGround(welcome.ground);
       this.chat.clear();
-      this.chat.add({ ch: 'system', text: `Welcome, ${c.name}. Enter to chat: /s nearby, /w Name to whisper, /who for who's online.` });
+      this.chat.add({ ch: 'system', text: `Welcome, ${c.name}. ${this.touchActive ? 'Tap the chat button to talk' : 'Enter to chat'}: /s nearby, /w Name to whisper, /who for who's online.` });
       // A realm in layers (copies of the world, run side by side) says which one this is.
       if (Number.isInteger(welcome.layer)) this.chat.add({ ch: 'system', text: `You're on layer ${welcome.layer + 1}.` });
       this.start();
@@ -897,13 +897,16 @@ class Game {
     this.aim.update(this);
     this.hud.update(realDt, this);
     this.labels.update(this);
-    this.minimap.update(realDt, this);
+    // (The full-screen menu hides the HUD's minimap.)
+    if (!this.menu.isOpen) this.minimap.update(realDt, this);
     this.mapUI.draw();
     this.audio.update(realDt);
     WIND.time.value += realDt;
     this.grass.update(this.player.position);
     this.shadows.update();
-    this.post.render(realDt, this);
+    // Phones and tablets leave the world's last picture standing behind the full-screen menu
+    // rather than drawing it again every frame: the GPU goes to the menu (and the map) instead.
+    if (!(this.menu.isOpen && this.touchActive)) this.post.render(realDt, this);
   }
 
   // Run `fn` after `delay` seconds of game time (pauses with the game, slows with hitstop).

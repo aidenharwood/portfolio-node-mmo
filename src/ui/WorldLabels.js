@@ -101,6 +101,8 @@ export class WorldLabels {
           const typeLabel = markerKind === 'story' ? 'Story quest' : markerKind === 'side' ? 'Side quest' : '';
           el.innerHTML = `${say ? `<div class="np-say">${esc(say)}</div>` : ''}${marker ? `<div class="marker ${MARK[marker] ?? ''} ${typeClass}" aria-label="${typeLabel || 'Quest'}">${typeLabel || marker}</div>` : ''}<div class="np-name">${esc(n.name)}</div><div class="np-title">${esc(n.title)}</div>`;
         }
+        // (Touch layouts show the titles of townsfolk only up close.)
+        el.classList.toggle('far', d > 10 && !marker);
         this.place(el, this.project(n.position, n.height + 0.3, w, h));
       }
 
@@ -148,9 +150,11 @@ export class WorldLabels {
         let x = _v.x;
         let y = _v.y;
         if (_v.z > 1) { x = -x; y = -y; }
-        const off = _v.z > 1 || Math.abs(x) > 0.9 || Math.abs(y) > 0.85;
+        // (Touch layouts keep it off the top and bottom rows of buttons and bars.)
+        const ey = game.touchActive ? 0.65 : 0.85;
+        const off = _v.z > 1 || Math.abs(x) > 0.9 || Math.abs(y) > ey;
         if (off) {
-          const k = Math.min(0.9 / Math.max(Math.abs(x), 1e-3), 0.85 / Math.max(Math.abs(y), 1e-3));
+          const k = Math.min(0.9 / Math.max(Math.abs(x), 1e-3), ey / Math.max(Math.abs(y), 1e-3));
           x *= k;
           y *= k;
         }

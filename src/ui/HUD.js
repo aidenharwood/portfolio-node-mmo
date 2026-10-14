@@ -15,6 +15,10 @@ const $ = (id) => document.getElementById(id);
 const TAU = Math.PI * 2;
 const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 const COMPASS_PX = 260; // pixels per radian of heading
+// On a touchscreen a line's keys ("[E]", "(L)", "— press N") mean nothing: they're left out.
+const touch = () => document.body.classList.contains('touch');
+const untouched = (text) => text.replace(/\s*—\s*press [A-Z]\b/g, '').replace(/\s*[[(](?:[A-Z]|Esc)[\])]$/, '');
+const forScreen = (text) => (text && touch() ? untouched(text) : text);
 
 export class HUD {
   constructor(thumbs) {
@@ -72,7 +76,7 @@ export class HUD {
     e.lvl.textContent = s.level;
     e.gold.textContent = `${s.gold}g`;
     e.points.style.display = s.points > 0 ? '' : 'none';
-    e.points.textContent = `+${s.points} talent point${s.points > 1 ? 's' : ''} — press N`;
+    e.points.textContent = forScreen(`+${s.points} talent point${s.points > 1 ? 's' : ''} — press N`);
 
     this.renderSlots(p);
     this.renderWeapon(p);
@@ -129,6 +133,8 @@ export class HUD {
       e.ammo.innerHTML = w.cls === 'magic' ? `${Math.round(w.stats.manaCost)}<small> MP / cast</small>` : (p.combo > 0 ? `${p.combo}<small> hits</small>` : '');
       if (this.keys.mag !== 'none') { this.keys.mag = 'none'; e.mag.innerHTML = ''; }
     }
+    // (Nothing to count — a melee weapon between combos: touch layouts leave the card out.)
+    e.wpnCard.classList.toggle('quiet', !e.ammo.innerHTML);
   }
 
   // Compass strip: ticks every 15°, cardinal letters, and diamonds for the quest/custom markers.
@@ -226,7 +232,7 @@ export class HUD {
     this.setHTML('slots', key, () => inv.slots.map((w, i) => {
       const color = w ? RARITY[w.rarity].css : 'transparent';
       const img = w ? `<img src="${this.thumbs.get(w)}" alt="">` : '';
-      return `<div class="slot ${i === inv.active ? 'active' : ''}" style="--rc:${color}">
+      return `<div class="slot ${i === inv.active ? 'active' : ''} ${w ? '' : 'empty'}" style="--rc:${color}">
         <span class="key">${i + 1}</span>${img}
         <span class="name">${w ? esc(w.name) : 'Empty'}</span>
         <span class="type">${w ? WEAPON_TYPES[w.type].label : ''}</span></div>`;
@@ -340,12 +346,13 @@ export class HUD {
 
   showBanner(text, sub) {
     this.bannerText = text;
-    this.el.banner.innerHTML = `${esc(text)}${sub ? `<small>${esc(sub)}</small>` : ''}`;
+    sub = forScreen(sub);
+    this.el.banner.innerHTML = `${esc(forScreen(text))}${sub ? `<small>${esc(sub)}</small>` : ''}`;
     this.bannerTime = 2.6;
   }
 
   toast(text) {
-    this.el.toast.textContent = text;
+    this.el.toast.textContent = forScreen(text);
     this.toastTime = 1.8;
   }
 
