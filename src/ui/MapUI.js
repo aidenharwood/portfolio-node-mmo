@@ -7,6 +7,8 @@
 // canvas a margin bigger than the view and copied each frame (offset while panning, scaled while
 // zooming), and the map is only drawn again when something moves; so panning and pinching stay
 // smooth on a phone.
+//   Seen from above like the minimap, with the compass's north (−z) at the top and east (+x) to
+// the right. (The map tiles and fog are painted with +z at the top, so they're drawn flipped.)
 import { HUB, REGION } from '../world/Gen.js';
 import { CHUNK } from '../world/Chunks.js';
 import { PARTY_COLOR } from './PartyUI.js';
@@ -119,7 +121,7 @@ export class MapUI {
       const dy = e.clientY - this.drag.y;
       if (Math.abs(dx) + Math.abs(dy) > 6) this.drag.moved = true;
       this.cx = this.drag.cx - dx / this.zoom;
-      this.cz = this.drag.cz + dy / this.zoom;
+      this.cz = this.drag.cz - dy / this.zoom;
     });
     const end = (e) => {
       this.touches.delete(e.pointerId);
@@ -179,16 +181,16 @@ export class MapUI {
   }
 
   toScreen(x, z) {
-    return [this.w / 2 + (x - this.cx) * this.zoom, this.h / 2 - (z - this.cz) * this.zoom];
+    return [this.w / 2 + (x - this.cx) * this.zoom, this.h / 2 + (z - this.cz) * this.zoom];
   }
 
   toWorld(sx, sy) {
-    return { x: this.cx + (sx - this.w / 2) / this.zoom, z: this.cz - (sy - this.h / 2) / this.zoom };
+    return { x: this.cx + (sx - this.w / 2) / this.zoom, z: this.cz + (sy - this.h / 2) / this.zoom };
   }
 
   viewRect() {
-    const a = this.toWorld(0, this.h);
-    const b = this.toWorld(this.w, 0);
+    const a = this.toWorld(0, 0);
+    const b = this.toWorld(this.w, this.h);
     return [a.x, a.z, b.x, b.z];
   }
 
@@ -331,7 +333,8 @@ export class MapUI {
     }
     Object.assign(b, { cx: this.cx, cz: this.cz, zoom: z, w, h, vw: this.w, vh: this.h, dpr: this.dpr, version: d.version, at: now });
     const ctx = c.getContext('2d');
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    // Painted upside down (+z up, as the tiles and the fog are), then flipped onto the canvas.
+    ctx.setTransform(dpr, 0, 0, -dpr, 0, h * dpr);
     ctx.fillStyle = BG;
     ctx.fillRect(0, 0, w, h);
     const toScreen = (x, zz) => [w / 2 + (x - b.cx) * z, h / 2 - (zz - b.cz) * z];
@@ -440,7 +443,7 @@ export class MapUI {
     const b = this.base;
     const s = this.zoom / b.zoom;
     ctx.imageSmoothingEnabled = true;
-    ctx.drawImage(b.canvas, W / 2 + (b.cx - b.w / 2 / b.zoom - this.cx) * this.zoom, H / 2 - (b.cz + b.h / 2 / b.zoom - this.cz) * this.zoom, b.w * s, b.h * s);
+    ctx.drawImage(b.canvas, W / 2 + (b.cx - b.w / 2 / b.zoom - this.cx) * this.zoom, H / 2 + (b.cz - b.h / 2 / b.zoom - this.cz) * this.zoom, b.w * s, b.h * s);
 
     for (const r of this.regionsInView()) {
       if (r.hub || !g.discovery.isKnown(r.x, r.z) || this.zoom < 0.45) continue;
@@ -536,7 +539,7 @@ export class MapUI {
     const [px, py] = this.toScreen(p.position.x, p.position.z);
     ctx.save();
     ctx.translate(px, py);
-    ctx.rotate(p.facing);
+    ctx.rotate(Math.PI - p.facing); // (facing is atan2(x, z); the arrow's drawn pointing up, −z)
     ctx.fillStyle = '#fff';
     ctx.strokeStyle = '#0a0c13';
     ctx.lineWidth = 3;
