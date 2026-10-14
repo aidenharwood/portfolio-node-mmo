@@ -111,7 +111,7 @@ about 110 players. Gateways put players on them.
 | 2 | Server-run world at 20 Hz with area of interest | ✅ |
 | 2 | Hits judged on screen, validated by server; statuses on server | ✅ |
 | 2 | Shared kill credit, instanced loot, health scaling with players | ✅ |
-| 3 | Inventory, gold, XP, attributes, trader, quests, chests on the server | ✅ predicted and rolled ops, hash checks |
+| 3 | Inventory, gold, XP, talents, trader, quests, chests on the server | ✅ predicted and rolled ops, hash checks |
 | 3 | Movement validation with corrections; travel done by the server | ✅ one speed bank rather than a per-move envelope |
 | 3 | Rate limits and sanity checks on every message | ✅ |
 | 4 | Parties | ✅ except below |
