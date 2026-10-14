@@ -12,7 +12,7 @@ import WebSocket from 'ws';
 import { createHmac, randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { options, target, wait, sleep, stopped, Timings, serverStats, ROOT } from './lib.mjs';
+import { options, target, wait, sleep, stopped, Timings, serverStats, reportErrors, ROOT } from './lib.mjs';
 import { WorldGen, HUB } from '../../src/world/Gen.js';
 import { randomChoice } from '../../src/models/heroLooks.js';
 
@@ -207,5 +207,6 @@ if (totals.corrections) console.log(`  position corrections: ${totals.correction
 if (ticks.n) console.log(`  server tick    median ${ticks.pct(50)} ms (budget 50 ms)${after.tick_ms_p95 !== undefined ? `, p95 ${after.tick_ms_p95} ms, slowest ${after.tick_ms_max} ms` : ''}`);
 if (after.cpu_seconds_total && before.cpu_seconds_total) console.log(`  server process ${((after.cpu_seconds_total - before.cpu_seconds_total) / secs).toFixed(2)} cores, ${Math.round(after.rss_bytes / 1048576)} MB resident`);
 for (const [what, map] of [['failed', failures], ['disconnected', closes]]) for (const [k, v] of map) console.log(`  ${what}: ${k} ×${v}`);
+const errors = reportErrors(server);
 await server.stop();
-process.exit(ok === opts.bots && !closes.size ? 0 : 1);
+process.exit(ok === opts.bots && !closes.size && !errors ? 0 : 1);

@@ -2,7 +2,7 @@
 // given paths (health check, status API, the page and its stylesheet by default).
 //   npm run load:http [-- [url] [--concurrency=50] [--duration=20] [--paths=/a,/b]]
 // Reports requests a second, latency percentiles per path, and status codes / errors.
-import { options, target, wait, stopped, Timings, serverStats } from './lib.mjs';
+import { options, target, wait, stopped, Timings, serverStats, reportErrors } from './lib.mjs';
 
 const opts = options('npm run load:http [-- [url] [options]]  — HTTP requests against the server', {
   concurrency: 50, duration: 20, paths: '/healthz,/api/status,/,/style.css',
@@ -56,5 +56,6 @@ for (const [p, r] of per) {
 const st = await serverStats(server.base);
 if (st.rss_bytes) console.log(`  server: ${Math.round(st.rss_bytes / 1048576)} MB resident, ${st.cpu_seconds_total?.toFixed(1)} s of processor so far`);
 if (failed) console.log(`  ${failed} requests failed or weren't 2xx/3xx`);
+const errors = reportErrors(server);
 await server.stop();
-process.exit(failed > done * 0.01 ? 1 : 0);
+process.exit(failed > done * 0.01 || errors ? 1 : 0);

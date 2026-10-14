@@ -32,25 +32,37 @@ export async function healthy(base) {
   try { return (await fetch(`${base}/healthz`, { signal: AbortSignal.timeout(2000) })).ok; } catch { return false; }
 }
 
-// The server to test: { base, spawned, stop() }.
+// The server to test: { base, spawned, stop(), errors() }. A throwaway server's errors() are the
+// errors it logged ({ count, first }); a server elsewhere keeps its logs to itself.
 export async function target(url) {
+  const elsewhere = (base) => ({ base, spawned: false, stop: async () => {}, errors: () => null });
   if (url) {
     const base = url.replace(/\/+$/, '').replace(/^ws/, 'http');
     if (!await healthy(base)) console.warn(`! ${base}/healthz isn't answering 200; carrying on anyway`);
-    return { base, spawned: false, stop: async () => {} };
+    return elsewhere(base);
   }
-  if (await healthy('http://localhost:8080')) return { base: 'http://localhost:8080', spawned: false, stop: async () => {} };
+  if (await healthy('http://localhost:8080')) return elsewhere('http://localhost:8080');
   const port = 18000 + Math.floor(Math.random() * 1000);
   const dir = mkdtempSync(path.join(tmpdir(), 'celblade-load-'));
   const child = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', 'server/main.js'], {
     cwd: ROOT,
-    env: { ...process.env, ROLE: 'all', PORT: String(port), HOST: '127.0.0.1', DATA_DIR: dir, DATABASE_URL: '', AUTH_LIMIT: '100000', BACKUP_HOURS: '0', LOG_FORMAT: 'text' },
+    env: { ...process.env, ROLE: 'all', PORT: String(port), HOST: '127.0.0.1', DATA_DIR: dir, DATABASE_URL: '', AUTH_LIMIT: '100000', BACKUP_HOURS: '0', LOG_FORMAT: 'json' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let out = '';
-  const keep = (d) => { out = (out + d).slice(-4000); };
-  child.stdout.on('data', keep);
-  child.stderr.on('data', keep);
+  let partial = '';
+  const errors = { count: 0, first: null };
+  child.stdout.on('data', (d) => {
+    const lines = (partial + d).split('\n');
+    partial = lines.pop();
+    for (const line of lines) {
+      if (!line.includes('"level":"error"')) continue;
+      errors.count++;
+      try { errors.first ??= JSON.parse(line).msg.split('\n').slice(0, 3).join('\n'); } catch { errors.first ??= line; }
+    }
+    out = (out + d).slice(-4000);
+  });
+  child.stderr.on('data', (d) => { out = (out + d).slice(-4000); });
   const base = `http://127.0.0.1:${port}`;
   const stop = async () => {
     child.kill('SIGTERM');
@@ -63,7 +75,7 @@ export async function target(url) {
   }
   if (!await healthy(base)) { await stop(); throw new Error(`the throwaway server didn't start:\n${out}`); }
   console.log(`(no server on localhost:8080: started a throwaway one at ${base})`);
-  return { base, spawned: true, stop };
+  return { base, spawned: true, stop, errors: () => errors };
 }
 
 // Resolves after `ms`, or as soon as Ctrl+C is pressed (`stopped` then reads true).
@@ -110,4 +122,11 @@ export async function serverStats(base) {
     if (res.ok) for (const [, k, v] of (await res.text()).matchAll(/^celblade_(\w+) ([\d.e+-]+)$/gm)) out[k] = Number(v);
   } catch { /* closed to us */ }
   return out;
+}
+
+// A throwaway server's logged errors, told; returns how many there were.
+export function reportErrors(server) {
+  const e = server.errors();
+  if (e?.count) console.log(`  ! the server logged ${e.count} error${e.count === 1 ? '' : 's'}; the first:\n    ${e.first.replace(/\n/g, '\n    ')}`);
+  return e?.count ?? 0;
 }
