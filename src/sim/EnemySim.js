@@ -18,6 +18,7 @@ import { resolveType } from '../combat/bestiary.js';
 import { anyComponentSpec, legDamageProfile } from '../combat/HitComponents.js';
 import { rollAffixes, affixCount, SHIELD, RALLY, VAMPIRIC_REGEN, OVERCHARGE, VOLATILE } from './affixes.js';
 import { inPocket } from '../world/dungeons.js';
+import { stopAgainst } from '../world/MeshCollision.js';
 
 const _to = new THREE.Vector3();
 const _desired = new THREE.Vector3();
@@ -26,6 +27,7 @@ const _aim = new THREE.Vector3();
 const _dir = new THREE.Vector3();
 const _o = new THREE.Vector3();
 const _p = new THREE.Vector3();
+const _push = new THREE.Vector3();
 const UP = new THREE.Vector3(0, 1, 0);
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const randIn = ([a, b]) => a + Math.random() * (b - a);
@@ -446,10 +448,12 @@ export class EnemySim {
     const ox = p.x;
     const oz = p.z;
     const oy = world.groundHeight(ox, oz);
-    p.addScaledVector(this.velocity, dt).addScaledVector(this.knockback, dt);
-    this.knockback.multiplyScalar(Math.exp(-7 * dt));
     p.y = oy;
-    world.resolve(p, this.radius, 0, this.height);
+    // Swept in short steps, so a charge or a knockback can't carry it through a wall.
+    _push.set(0, 0, 0);
+    world.move(p, (this.velocity.x + this.knockback.x) * dt, (this.velocity.z + this.knockback.z) * dt, this.radius, 0, this.height, _push);
+    stopAgainst(_push, this.velocity, this.knockback);
+    this.knockback.multiplyScalar(Math.exp(-7 * dt));
     let ny = world.groundHeight(p.x, p.z);
     const dist = Math.hypot(p.x - ox, p.z - oz);
     if (dist > 1e-4 && (ny - oy) / dist > MAX_SLOPE) {

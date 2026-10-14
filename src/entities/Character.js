@@ -1,7 +1,9 @@
 // Shared base for anything that moves, fights and dies.
 import * as THREE from 'three';
+import { stopAgainst } from '../world/MeshCollision.js';
 
 const WHITE = new THREE.Color(1, 1, 1);
+const _push = new THREE.Vector3();
 
 export const wrapAngle = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 export const MAX_SLOPE = 1.25; // rise/run a walker can climb (~51°); steeper needs jumping/clambering
@@ -83,10 +85,11 @@ export class Character {
     const ox = p.x;
     const oz = p.z;
     const oy = world.groundHeight(ox, oz);
-    p.addScaledVector(this.velocity, dt).addScaledVector(this.knockback, dt);
-    this.knockback.multiplyScalar(Math.exp(-7 * dt));
     p.y = oy;
-    world.resolve(p, this.radius, 0, this.height);
+    _push.set(0, 0, 0);
+    world.move(p, (this.velocity.x + this.knockback.x) * dt, (this.velocity.z + this.knockback.z) * dt, this.radius, 0, this.height, _push);
+    stopAgainst(_push, this.velocity, this.knockback);
+    this.knockback.multiplyScalar(Math.exp(-7 * dt));
     let ny = world.groundHeight(p.x, p.z);
     const dist = Math.hypot(p.x - ox, p.z - oz);
     if (dist > 1e-4 && (ny - oy) / dist > MAX_SLOPE) {

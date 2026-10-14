@@ -31,7 +31,7 @@ import { STORY_BUILDERS, foundryYard, placeObjects, objectProps } from './StoryS
 import { NPCS } from './mapData.js';
 import { inPocket, POCKET } from './dungeons.js';
 import { storyPlaces } from './story.js';
-import { buildMeshColliderData, meshHeightAt, meshHullFromGeometry, meshSupportTrianglesFromGeometry, pointInMeshHull, pushOutOfMeshHull } from './MeshCollision.js';
+import { attachMeshCollider, buildMeshColliderData, colliderCovers, meshCeilingAt, meshContainsPoint, meshSupportAt, pushOutOfMeshWalls } from './MeshCollision.js';
 
 const GRID = 8;
 const TAU = Math.PI * 2;
@@ -222,6 +222,9 @@ const _e = new THREE.Euler();
 const _v = new THREE.Vector3();
 const _s = new THREE.Vector3();
 const _col = new THREE.Color();
+const _from = new THREE.Vector3();
+// How far past its outline a prop's mesh is asked whether a point is inside it.
+const MESH_REACH = 0.6;
 
 // Pushes a circle (`pos`, `radius`) out of box collider `c`: away from the box's nearest point, or
 // (its centre inside) out by the shortest way.
@@ -413,15 +416,28 @@ export class World {
 
   addCollider(x, z, r, h = 3, y = this.groundHeight(x, z), surface = 'stone', meshData = null) {
     const c = { x, z, r, h, y, surface, cells: [] };
-    if (meshData?.meshGeometry) {
-      c.meshGeometry = meshData.meshGeometry;
-      c.meshMatrix = meshData.meshMatrix;
-      c.meshHull = meshHullFromGeometry(c, c.meshGeometry, c.meshMatrix);
-      c.meshSupportTriangles = meshSupportTrianglesFromGeometry(c.meshGeometry, c.meshMatrix);
-    }
+    if (meshData?.meshGeometry) attachMeshCollider(c, meshData);
     this.colliders.add(c);
-    for (let ix = Math.floor((x - r) / GRID); ix <= Math.floor((x + r) / GRID); ix++) {
-      for (let iz = Math.floor((z - r) / GRID); iz <= Math.floor((z + r) / GRID); iz++) {
+    this.gridAdd(c);
+    this.own?.colliders.push(c);
+    return c;
+  }
+
+  // Files a collider in the grid cells under it: its outline, and its mesh's triangles where they
+  // reach past that.
+  gridAdd(c) {
+    let x0 = c.x - c.r;
+    let x1 = c.x + c.r;
+    let z0 = c.z - c.r;
+    let z1 = c.z + c.r;
+    if (c.tris) {
+      x0 = Math.min(x0, c.tris.x0);
+      x1 = Math.max(x1, c.tris.x1);
+      z0 = Math.min(z0, c.tris.z0);
+      z1 = Math.max(z1, c.tris.z1);
+    }
+    for (let ix = Math.floor(x0 / GRID); ix <= Math.floor(x1 / GRID); ix++) {
+      for (let iz = Math.floor(z0 / GRID); iz <= Math.floor(z1 / GRID); iz++) {
         const k = this.cellKey(ix, iz);
         let cell = this.grid.get(k);
         if (!cell) this.grid.set(k, (cell = []));
@@ -429,13 +445,9 @@ export class World {
         c.cells.push(k);
       }
     }
-    this.own?.colliders.push(c);
-    return c;
   }
 
-  removeCollider(c) {
-    if (!this.colliders.delete(c)) return;
-    if (c.ownsMeshGeometry) c.meshGeometry?.dispose();
+  gridRemove(c) {
     for (const k of c.cells) {
       const cell = this.grid.get(k);
       if (!cell) continue;
@@ -443,6 +455,20 @@ export class World {
       if (i !== -1) cell.splice(i, 1);
       if (!cell.length) this.grid.delete(k);
     }
+    c.cells.length = 0;
+  }
+
+  // Files a collider again (it was given its mesh after it went in).
+  regrid(c) {
+    if (!this.colliders.has(c)) return;
+    this.gridRemove(c);
+    this.gridAdd(c);
+  }
+
+  removeCollider(c) {
+    if (!this.colliders.delete(c)) return;
+    if (c.ownsMeshGeometry) c.meshGeometry?.dispose();
+    this.gridRemove(c);
   }
 
   collidersNear(x, z, r = 0) {
@@ -467,67 +493,131 @@ export class World {
     return seen;
   }
 
-  // Highest standable surface at (x, z) not above maxY (terrain or collider tops).
-  supportHeight(x, z, maxY = Infinity) {
+  // Highest standable surface at (x, z) not above maxY (terrain, collider tops, the floors of
+  // props' meshes). `ceilFrom` is the mover's step height: anything whose underside is above it is
+  // overhead, and its top can't be stepped (or jumped) up onto through it.
+  supportHeight(x, z, maxY = Infinity, ceilFrom = Infinity) {
     let h = this.groundHeight(x, z);
     for (const c of this.collidersNear(x, z)) {
-      const top = c.y + c.h;
+      const top = c.tris ? c.tris.y1 : c.y + c.h;
       if (top <= h) continue;
-      if (c.meshGeometry) {
-        const meshHeight = meshHeightAt(c, x, z, maxY);
+      if (c.tris) {
+        const meshHeight = meshSupportAt(c, x, z, maxY, ceilFrom);
         if (meshHeight !== null && meshHeight > h) h = meshHeight;
         continue;
       }
-      if (top > maxY) continue;
-      const dx = x - c.x;
-      const dz = z - c.z;
-      const angle = c.ry ?? 0;
-      const lx = Math.cos(angle) * dx - Math.sin(angle) * dz;
-      const lz = Math.sin(angle) * dx + Math.cos(angle) * dz;
-      if (c.box ? Math.abs(lx) < c.hx && Math.abs(lz) < c.hz : dx * dx + dz * dz < c.r * c.r) h = top;
+      if (top > maxY || c.y > ceilFrom) continue;
+      if (colliderCovers(c, x, z, -1e-9)) h = top;
     }
     return h;
   }
 
-  // Pushes a circle at `pos` out of colliders it overlaps vertically. stepUp lets a mover ignore
-  // colliders whose top is within that height of its feet.
-  resolve(pos, radius, stepUp = 0, height = 1.8) {
-    for (const c of this.collidersNear(pos.x, pos.z, radius)) {
-      if (pos.y + stepUp >= c.y + c.h || pos.y + height <= c.y) continue;
-      if (c.meshHull) {
-        // A mesh's 2D footprint is only a broad side blocker. If its actual surface is under the
-        // mover's feet (or within the normal step-down range), let supportHeight follow that slope
-        // instead of ejecting the mover sideways from the mesh's convex footprint.
-        const surface = meshHeightAt(c, pos.x, pos.z, pos.y + stepUp);
-        if (surface !== null && surface >= pos.y - 0.6) continue;
-        pushOutOfMeshHull(pos, radius, c.meshHull);
+  // The lowest underside over (x, z) above fromY (a dungeon's ceiling, a platform, the cap of a
+  // rock): how high a body there can rise.
+  headroom(x, z, fromY) {
+    let ceil = this.ceilingAt(x, z);
+    for (const c of this.collidersNear(x, z)) {
+      if (c.tris) {
+        if (c.tris.y1 > fromY) ceil = Math.min(ceil, meshCeilingAt(c, x, z, fromY));
         continue;
       }
-      if (c.box) { pushOutOfBox(pos, radius, c); continue; }
-      const dx = pos.x - c.x;
-      const dz = pos.z - c.z;
-      const min = c.r + radius;
-      const d2 = dx * dx + dz * dz;
-      if (d2 >= min * min) continue;
-      const d = Math.sqrt(d2) || 0.001;
-      pos.x = c.x + (dx / d) * min;
-      pos.z = c.z + (dz / d) * min;
+      if (c.y + c.h <= fromY) continue;
+      if (c.y > fromY && c.y < ceil && colliderCovers(c, x, z, -1e-9)) ceil = c.y;
     }
+    return ceil;
+  }
+
+  // Pushes a circle at `pos` out of colliders it overlaps vertically. stepUp lets a mover ignore
+  // colliders whose top is within that height of its feet; `height` is how tall it is. `from`,
+  // where it stood before this move, keeps it on the side of a mesh's wall it came from. Props
+  // with meshes push with their walls only (see world/MeshCollision.js), so a mover can stand
+  // inside a ring or a hut as well as outside it. Corners take a few passes to settle.
+  resolve(pos, radius, stepUp = 0, height = 1.8, from = null) {
+    const near = this.collidersNear(pos.x, pos.z, radius + 0.5);
+    for (let pass = 0; pass < 3; pass++) {
+      let moved = false;
+      for (const c of near) {
+        if (c.tris) {
+          // (Anyone steps over a mesh's few centimetres: a rug's edge, a sill, a root.)
+          const over = Math.max(stepUp, 0.15);
+          if (pos.y + over >= c.tris.y1 || pos.y + height <= c.tris.y0) continue;
+          if (pushOutOfMeshWalls(c, pos, radius, pos.y + over, pos.y + height, from)) moved = true;
+          continue;
+        }
+        if (pos.y + stepUp >= c.y + c.h || pos.y + height <= c.y) continue;
+        const bx = pos.x;
+        const bz = pos.z;
+        if (c.box) pushOutOfBox(pos, radius, c);
+        else {
+          const dx = pos.x - c.x;
+          const dz = pos.z - c.z;
+          const min = c.r + radius;
+          const d2 = dx * dx + dz * dz;
+          if (d2 >= min * min) continue;
+          const d = Math.sqrt(d2) || 0.001;
+          pos.x = c.x + (dx / d) * min;
+          pos.z = c.z + (dz / d) * min;
+        }
+        if (Math.abs(pos.x - bx) + Math.abs(pos.z - bz) > 1e-7) moved = true;
+      }
+      if (!moved) break;
+    }
+  }
+
+  // Moves a body (feet at `pos`) by (dx, dz) through the colliders, in steps of at most half its
+  // radius, so a fast one (a slide, a dash, a knockback) can't pass through a wall between frames.
+  // The pushes the colliders gave add up in `push` (x, z), which says which way it ran into them.
+  move(pos, dx, dz, radius, stepUp = 0, height = 1.8, push = null) {
+    const len = Math.hypot(dx, dz);
+    const n = Math.min(24, Math.max(1, Math.ceil(len / Math.max(0.05, radius * 0.5))));
+    for (let i = 0; i < n; i++) {
+      _from.set(pos.x, pos.y, pos.z);
+      pos.x += dx / n;
+      pos.z += dz / n;
+      const bx = pos.x;
+      const bz = pos.z;
+      this.resolve(pos, radius, stepUp, height, _from);
+      if (push) {
+        push.x += pos.x - bx;
+        push.z += pos.z - bz;
+      }
+    }
+    return push;
+  }
+
+  // The slope of what a body standing at (x, y, z) is on, as rise per metre along x and z (it
+  // slides down it). Samples that drop away or rise up past what it could walk (the foot of a
+  // wall, a ledge, the void round a dungeon's rooms) are left out rather than read as a cliff.
+  surfaceSlope(x, y, z, stepUp = 0.5, out = { x: 0, z: 0 }) {
+    const e = 0.5;
+    const lim = e * 1.6;
+    const top = y + stepUp;
+    const h0 = this.supportHeight(x, z, top);
+    const axis = (sx, sz) => {
+      const dp = this.supportHeight(x + sx * e, z + sz * e, top) - h0;
+      const dm = h0 - this.supportHeight(x - sx * e, z - sz * e, top);
+      const okp = Math.abs(dp) <= lim;
+      const okm = Math.abs(dm) <= lim;
+      if (okp && okm) return (dp + dm) / (2 * e);
+      if (okp) return dp / e;
+      if (okm) return dm / e;
+      return 0;
+    };
+    out.x = axis(1, 0);
+    out.z = axis(0, 1);
+    return out;
   }
 
   blocks(pos) {
     for (const c of this.collidersNear(pos.x, pos.z)) {
-      if (c.meshHull) {
-        if (pos.y >= c.y && pos.y <= c.y + c.h && pointInMeshHull(pos, c.meshHull)) return true;
+      const T = c.tris;
+      if (T) {
+        if (pos.y >= T.y0 && pos.y <= T.y1 && colliderCovers(c, pos.x, pos.z, MESH_REACH)
+          && pos.x >= T.x0 && pos.x <= T.x1 && pos.z >= T.z0 && pos.z <= T.z1 && meshContainsPoint(c, pos)) return true;
         continue;
       }
-      const dx = pos.x - c.x;
-      const dz = pos.z - c.z;
-      const angle = c.ry ?? 0;
-      const lx = Math.cos(angle) * dx - Math.sin(angle) * dz;
-      const lz = Math.sin(angle) * dx + Math.cos(angle) * dz;
-      const inside = c.box ? Math.abs(lx) < c.hx && Math.abs(lz) < c.hz : dx * dx + dz * dz < c.r * c.r;
-      if (inside && pos.y >= c.y && pos.y <= c.y + c.h) return true;
+      if (pos.y < c.y || pos.y > c.y + c.h) continue;
+      if (colliderCovers(c, pos.x, pos.z, -1e-9)) return true;
     }
     return false;
   }
@@ -929,8 +1019,9 @@ export class World {
       (lists[k] ??= []).push(..._m.elements);
       if (color !== null) (colors[k] ??= []).push(color.r, color.g, color.b);
       if (collision) {
+        // (The server has no scenery sets: its colliders are the plain shapes.)
         const set = this.sets[k];
-        return { meshGeometry: set.colors ? set.mesh.geometry : set.body.geometry, meshMatrix: _m.clone() };
+        return set ? { meshGeometry: set.colors ? set.mesh.geometry : set.body.geometry, meshMatrix: _m.clone() } : {};
       }
     };
     const pois = this.poisNear(ch.x0 + CHUNK / 2, ch.z0 + CHUNK / 2, CHUNK + 40);
@@ -992,18 +1083,18 @@ export class World {
           const meshData = push(kind, x, y - 0.1, z, s, { collision: true });
           const m = lists[kind].slice(-16);
           (lists.trunk ??= []).push(...m);
-          meshData.meshGeometry = this.sets.trunk.body.geometry;
+          if (meshData.meshGeometry) meshData.meshGeometry = this.sets.trunk.body.geometry;
           colliders.push({ x, z, r: 0.36 * s, h: 2.2 * s, y, surface: 'planks', ...meshData });
         } else if (kind === 'palm') {
           const meshData = push('palm', x, y - 0.1, z, s, { tilt: 0.3, collision: true });
           (lists.tallTrunk ??= []).push(...lists.palm.slice(-16));
-          meshData.meshGeometry = this.sets.tallTrunk.body.geometry;
+          if (meshData.meshGeometry) meshData.meshGeometry = this.sets.tallTrunk.body.geometry;
           colliders.push({ x, z, r: 0.32 * s, h: 6.3 * s, y, surface: 'planks', ...meshData });
         } else if (kind === 'shroom') {
           const ss = s * (0.8 + rnd() * 0.9);
           const meshData = push('shroomCap', x, y - 0.05, z, ss, { tilt: 0.2, collision: true });
           (lists.shroomStem ??= []).push(...lists.shroomCap.slice(-16));
-          meshData.meshGeometry = this.sets.shroomStem.body.geometry;
+          if (meshData.meshGeometry) meshData.meshGeometry = this.sets.shroomStem.body.geometry;
           colliders.push({ x, z, r: 0.43 * ss, h: 3.2 * ss, y, surface: 'chitin', ...meshData });
         } else if (kind === 'cactus') {
           const meshData = push('cactus', x, y - 0.1, z, s, { tilt: 0.12, collision: true });
@@ -1129,6 +1220,7 @@ export class World {
     if (p.story === 'foundry') foundryYard(this, p);
     if (p.story && p.type !== 'story') placeObjects(this, p);
     buildMeshColliderData(o.colliders, o.group);
+    for (const c of o.colliders) if (c.tris) this.regrid(c);
     this.onPoiLoad?.(p, o);
     KIT.detail = previousDetail;
     this.own = null;

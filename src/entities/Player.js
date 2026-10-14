@@ -5,6 +5,7 @@
 //   magic  — casts at the reticle; hold LMB to charge a stronger cast; RMB aims
 import * as THREE from 'three';
 import { Character, MAX_SLOPE, wrapAngle } from './Character.js';
+import { stopAgainst } from '../world/MeshCollision.js';
 import { MELEE_COMBOS, WHIRLWIND, DODGE, resolveMeleeAttack } from '../combat/attacks.js';
 import { performSweep, dealDamage } from '../combat/Damage.js';
 import { updateStatuses } from '../combat/Status.js';
@@ -58,6 +59,8 @@ const _sightPoint = new THREE.Vector3();
 const _origin = new THREE.Vector3();
 const _dir = new THREE.Vector3();
 const _u = new THREE.Vector3();
+const _push = new THREE.Vector3();
+const _slope = { x: 0, z: 0 };
 const _v = new THREE.Vector3();
 const _pose = [0, 0, 0];
 const UP = new THREE.Vector3(0, 1, 0);
@@ -908,7 +911,7 @@ export class Player extends Character {
     for (const d of [0.55, 0.95]) {
       const px = p.x + _dir.x * (this.radius + d);
       const pz = p.z + _dir.z * (this.radius + d);
-      const top = world.supportHeight(px, pz, p.y + reach);
+      const top = world.supportHeight(px, pz, p.y + reach, p.y + MOVE.stepUp);
       const rise = top - p.y;
       if (rise < minRise || rise > reach) continue;
       // Needs headroom above the ledge and something to stand on (not the far side of a thin post).
@@ -970,11 +973,10 @@ export class Player extends Character {
     let vx = this.velocity.x;
     let vz = this.velocity.z;
     if (this.grounded) {
-      const e = 0.8;
-      const gx = (w.groundHeight(p.x + e, p.z) - w.groundHeight(p.x - e, p.z)) / (2 * e);
-      const gz = (w.groundHeight(p.x, p.z + e) - w.groundHeight(p.x, p.z - e)) / (2 * e);
-      vx -= gx * MOVE.slideGravity * dt;
-      vz -= gz * MOVE.slideGravity * dt;
+      // Downhill on what's underfoot — not toward the drop behind a wall or off a ledge.
+      const g = w.surfaceSlope(p.x, p.y, p.z, MOVE.stepUp, _slope);
+      vx -= g.x * MOVE.slideGravity * dt;
+      vz -= g.z * MOVE.slideGravity * dt;
       const f = Math.exp(-MOVE.slideFriction * dt);
       vx *= f;
       vz *= f;
@@ -1173,10 +1175,12 @@ export class Player extends Character {
     const ox = p.x;
     const oz = p.z;
     const oy = p.y;
-    p.x += (this.velocity.x + this.knockback.x) * dt;
-    p.z += (this.velocity.z + this.knockback.z) * dt;
+    // Swept in short steps (nothing thin is passed through at speed); whatever it ran into takes
+    // the speed going into it, so pressing or sliding into a wall stops or runs along it.
+    _push.set(0, 0, 0);
+    world.move(p, (this.velocity.x + this.knockback.x) * dt, (this.velocity.z + this.knockback.z) * dt, this.radius, MOVE.stepUp, this.height, _push);
+    stopAgainst(_push, this.velocity, this.knockback);
     this.knockback.multiplyScalar(Math.exp(-7 * dt));
-    world.resolve(p, this.radius, MOVE.stepUp, this.height);
     // Terrain cliffs: walkers can't climb steeper than MAX_SLOPE (jump + clamber instead).
     const gOld = world.groundHeight(ox, oz);
     const gNew = world.groundHeight(p.x, p.z);
@@ -1200,8 +1204,16 @@ export class Player extends Character {
     } else if (this.state !== 'airdash') this.vy -= MOVE.gravity * dt;
     if (this.state === 'slam') this.vy = Math.min(this.vy, -MOVE.slamSpeed);
     p.y += this.vy * dt;
+    // Rising into a ceiling (a dungeon's, a platform, a ledge overhead) stops the rise there.
+    if (this.vy > 0) {
+      const ceil = world.headroom(p.x, p.z, oy + this.height - 0.05);
+      if (p.y + this.height > ceil) {
+        p.y = Math.max(oy, ceil - this.height);
+        this.vy = 0;
+      }
+    }
     this.airPeak = Math.max(this.airPeak, p.y);
-    const support = world.supportHeight(p.x, p.z, Math.max(p.y, oy) + MOVE.stepUp);
+    const support = world.supportHeight(p.x, p.z, Math.max(p.y, oy) + MOVE.stepUp, oy + MOVE.stepUp);
     if (p.y <= support) {
       const wasAir = !this.grounded;
       p.y = support;
