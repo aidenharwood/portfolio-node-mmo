@@ -196,6 +196,52 @@ export const STORY = [
     setFlags: ['act1_done'],
     rewards: { xp: 1000, gold: 400, weapon: { minTier: 3 } },
   },
+
+  // ---------------------------------------------------------------- Act II: The Brood
+  {
+    id: 'b1', kind: 'story', act: 2, level: 8, giver: 'city1:warden', requires: ['a8'], returnTo: 'city2:captain', title: 'The Road to Farcall', moments: { accept: 'act2' },
+    offer: {
+      krell_captured: 'Farcall\'s gone quiet — three weeks, not a word down the masts. And Krell\'s been talking in my cells: he says Ironjaw spoke of other "lids". I don\'t like that word any more. Go to Farcall, {city2:dir} of here, and find their captain of the watch.',
+      default: 'Farcall\'s gone quiet — three weeks, not a word down the masts, and Farcall is nothing but masts. Go, {city2:dir} of here, and find their captain of the watch. Tell them the Wardens haven\'t forgotten them.',
+    },
+    stages: [
+      { text: 'Travel to Farcall.', objectives: [{ type: 'goto', at: 'city2', count: 1, text: 'Reach Farcall' }] },
+      {
+        text: 'Find Farcall\'s captain of the watch.', objectives: [{ type: 'talk', npc: 'city2:captain', count: 1, text: 'Talk to Captain Vey Okonta' }],
+        say: { 'city2:captain': 'Ashe sent you? Good. Then someone down there still reads what we send. We\'ve been calling for three weeks — the masts carry it, but nothing comes back. Something\'s sitting on the signal.' },
+      },
+    ],
+    turnIn: 'The sleeper, in my watch room. Well. I asked for soldiers and they sent me a legend. I\'ll take it.',
+    setFlags: ['act2_started'],
+    rewards: { xp: 1100, gold: 420, armor: { minTier: 3 } },
+  },
+  {
+    id: 'b2', kind: 'story', act: 2, level: 9, giver: 'city2:captain', requires: ['b1'], title: 'Gone Quiet',
+    offer: 'Three hamlets out past the walls stopped answering the masts — {quiet1}, {quiet2} and {quiet3}. No smoke, no riders, no word. Go and see. And if you find something growing that shouldn\'t be, burn it.',
+    stages: [
+      {
+        text: 'Find out what happened to the quiet hamlets.',
+        objectives: [
+          { type: 'goto', at: 'quiet1', count: 1, text: 'Reach {quiet1}' },
+          { type: 'goto', at: 'quiet2', count: 1, text: 'Reach {quiet2}' },
+          { type: 'goto', at: 'quiet3', count: 1, text: 'Reach {quiet3}' },
+        ],
+      },
+      {
+        text: 'Spore pods have taken root at {sporefield}. Burn them, and the Hive feeding off them.',
+        objectives: [
+          { type: 'use', object: 'sporefield:pod1', count: 1, text: 'Burn the first spore pod' },
+          { type: 'use', object: 'sporefield:pod2', count: 1, text: 'Burn the second spore pod' },
+          { type: 'use', object: 'sporefield:pod3', count: 1, text: 'Burn the third spore pod' },
+          { type: 'killRace', race: 'hive', near: 'sporefield', count: 8, text: 'Hive at {sporefield}' },
+        ],
+        say: { 'sporefield:krell': 'You. Of course it\'s you. They hit my crew two nights back — came up out of the ground like the ground was theirs. They weren\'t hunting, sleeper. They were walking. Toward Farcall\'s masts, every one.' },
+      },
+    ],
+    turnIn: 'One of the hamlet folk made it in an hour ago. Said the masts "started singing wrong" the night before the pods came up. I\'ve stood under those masts twenty years. They don\'t sing.',
+    setFlags: ['hamlets_cleared'],
+    rewards: { xp: 1250, gold: 460, weapon: { minTier: 3 } },
+  },
 ];
 
 // Short scenes, played on screen when a quest asks (ui/Moments.js): a few shots, each a camera
@@ -251,6 +297,11 @@ export const MOMENTS = {
       { from: [-12, 10, 16], lift: 2, t: 6, line: ['The Pilgrim', '...Too late. It was never a door. It was a lid.'] },
     ],
   },
+  act2: {
+    at: 'player', title: ['Act II', 'The Brood'], shots: [
+      { from: [8, 6, 10], lift: 1.6, t: 5.5, line: ['High Warden Ashe', 'Farcall\'s masts have gone silent. Whatever came out of that vault, I\'d wager it went that way.'] },
+    ],
+  },
   act1end: {
     at: 'player', title: ['Act I complete', 'Signal Fire'], shots: [
       { from: [8, 5, 10], lift: 1.6, t: 6, line: ['', 'The Sunken Vault lies open under Ironjaw\'s dig — and its gate in New Meridian stands sealed, for now.'] },
@@ -267,4 +318,6 @@ export const BARKS = [
   { npc: 'city1:warden', when: { quest: 'a2', stage: 1 }, line: 'You. Maren\'s runner? Over here.' },
   { npc: 'relicdig:chief', when: { quest: 'a3', stage: 2 }, line: 'That was close. Come here — you need to see this.' },
   { npc: 'foundry:krell', when: { quest: 'a6', stage: 2 }, line: 'Mercy! I yield, I yield!' },
+  { npc: 'city2:captain', when: { quest: 'b1', stage: 1 }, line: 'You — the one from New Meridian? Up here.' },
+  { npc: 'sporefield:krell', when: { quest: 'b2', stage: 1, flag: 'krell_freed' }, line: 'Sleeper! Over here — I didn\'t forget.' },
 ];

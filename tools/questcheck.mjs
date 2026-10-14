@@ -207,6 +207,15 @@ for (const q of STORY) {
 }
 check(quests.flags.act1_done && quests.flags.ironjaw_fell && quests.flags.vault_open, 'Act I complete: Ironjaw fell, the vault is open');
 check(quests.flags.krell_captured && !quests.flags.krell_freed && quests.flags.trusted_ysolde, 'choices set their flags (Krell taken in chains, Ysolde told)');
+check(quests.flags.act2_started && quests.flags.hamlets_cleared, 'Act II under way: Farcall reached, the quiet hamlets answered');
+{
+  // A character who finished Act I before Act II existed: Ashe has the next step for them.
+  const later = new QuestLog(host);
+  for (const q of STORY) if (q.act < 2) later.completed.add(q.id);
+  const b1 = STORY.find((q) => q.id === 'b1');
+  check(later.available(later.giverId(b1)).some((q) => q.id === 'b1'), 'a character past Act I is offered Act II by High Warden Ashe');
+  check(later.giverName(later.returnId(b1)) === 'Vey Okonta in Farcall', `the journal names Farcall's captain (${later.giverName(later.returnId(b1))})`);
+}
 check(quests.pick(STORY.find((q) => q.id === 'a6').turnIn).startsWith('Ironjaw dead, and his bookkeeper'), 'and what people say follows them');
 check(STORY.every((q) => quests.completed.has(q.id)) && !Object.keys(quests.active).length, `all ${STORY.length} story quests done, the log clear`);
 check(stats.level >= 5, `the story alone is worth some levels (level ${stats.level})`);
