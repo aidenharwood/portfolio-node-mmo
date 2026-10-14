@@ -20,6 +20,11 @@ import { clearSave } from '../core/Save.js';
 import { typing } from '../core/Input.js';
 import { DUNGEONS } from '../world/dungeons.js';
 import { RAIDS, instanceDef } from '../world/raids.js';
+import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
+
+const _physicsWorldPosition = new THREE.Vector3();
+const _physicsWorldQuaternion = new THREE.Quaternion();
+const _physicsWorldScale = new THREE.Vector3();
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 const TABS = ['Player', 'World', 'Spawn', 'Loot', 'Render', 'Audio', 'Save', 'Console', 'Errors'];
@@ -160,6 +165,8 @@ export class DevTools {
       if (p.weapon?.cls === 'ranged') p.weapon.ammo = p.weapon.stats.magSize;
     }
     if (this.helpers.colliders) this.refreshColliderHelpers();
+    if (this.helpers.hitboxes) this.refreshHitboxHelpers();
+    if (this.helpers.physicsBodies) this.refreshPhysicsBodyHelpers();
   }
 
   renderPerf() {
@@ -172,7 +179,8 @@ export class DevTools {
       <b>${this.fps.toFixed(0)}</b> fps · ${this.frameMs.toFixed(1)} ms<br>
       calls ${info.render.calls} · tris ${(info.render.triangles / 1000).toFixed(0)}k<br>
       geo ${info.memory.geometries} · tex ${info.memory.textures} · prog ${info.programs?.length ?? 0}<br>
-      enemies ${g.enemies.length} · drops ${g.drops.length} · shots ${g.projectiles.list.length} · fx ${g.effects.items.length}<br>
+      enemies ${g.enemies.length} · drops ${g.drops.length} · shots ${g.projectiles.list.length}<br>
+      particles ${g.effects.glowParticles.activeCount + g.effects.solidParticles.activeCount + g.effects.smokeParticles.activeCount}/${g.effects.glowParticles.budget + g.effects.solidParticles.budget + g.effects.smokeParticles.budget} · fx ${g.effects.items.length}<br>
       pos ${p.position.x.toFixed(1)}, ${p.position.y.toFixed(1)}, ${p.position.z.toFixed(1)}<br>
       ${p.state}${p.grounded ? '' : ' (air)'} · ${speed.toFixed(1)} m/s · vy ${p.vy.toFixed(1)}
       ${errs ? `<br><span class="err">${errs} error${errs > 1 ? 's' : ''} — press \`</span>` : ''}`;
@@ -310,7 +318,13 @@ export class DevTools {
     const g = this.game;
     if (this.helpers[name]) {
       g.scene.remove(this.helpers[name]);
-      this.helpers[name].traverse?.((o) => { o.geometry?.dispose(); o.material?.dispose?.(); });
+      if (name === 'physicsBodies') this.clearPhysicsBodyModels(this.physicsBodyModels);
+      else if (name === 'hitboxes') this.clearPhysicsBodyModels(this.hitboxModels);
+      else if (name === 'colliders') {
+        this.helpers[name].traverse((o) => { if (!o.userData.sharedGeometry) o.geometry?.dispose(); });
+        this.colliderMat?.dispose();
+        this.colliderMat = null;
+      } else this.helpers[name].traverse?.((o) => { o.geometry?.dispose(); o.material?.dispose?.(); });
       this.helpers[name] = null;
     }
     if (!on) return;
@@ -325,7 +339,113 @@ export class DevTools {
       g.scene.add(this.helpers.colliders);
       this.colliderAt = null;
       this.refreshColliderHelpers();
+    } else if (name === 'hitboxes') {
+      this.helpers.hitboxes = new THREE.Group();
+      this.hitboxModels = new Map();
+      g.scene.add(this.helpers.hitboxes);
+      this.refreshHitboxHelpers();
+    } else if (name === 'physicsBodies') {
+      this.helpers.physicsBodies = new THREE.Group();
+      this.physicsBodyModels = new Map();
+      g.scene.add(this.helpers.physicsBodies);
+      this.refreshPhysicsBodyHelpers();
     }
+  }
+
+  createPhysicsBodyModel(source, color, group) {
+    const model = cloneSkinned(source);
+    const material = new THREE.MeshBasicMaterial({
+      color, wireframe: true, transparent: true, opacity: 0.9,
+      depthTest: false, depthWrite: false, side: THREE.DoubleSide,
+    });
+    const sourceNodes = [];
+    const modelNodes = [];
+    source.traverse((object) => sourceNodes.push(object));
+    model.traverse((object) => {
+      modelNodes.push(object);
+      if (!object.isMesh) return;
+      object.material = material;
+      object.frustumCulled = false;
+      object.castShadow = false;
+      object.receiveShadow = false;
+      object.renderOrder = 998;
+    });
+    group.add(model);
+    return { source, model, material, sourceNodes, modelNodes, group };
+  }
+
+  removePhysicsBodyModel(record) {
+    record.group?.remove(record.model);
+    const skeletons = new Set();
+    for (const object of record.modelNodes) if (object.isSkinnedMesh && object.skeleton) skeletons.add(object.skeleton);
+    for (const skeleton of skeletons) skeleton.dispose();
+    record.material.dispose();
+  }
+
+  clearPhysicsBodyModels(models) {
+    for (const record of models?.values() ?? []) this.removePhysicsBodyModel(record);
+    models?.clear();
+  }
+
+  syncPhysicsBodyModel(record, source) {
+    source.updateWorldMatrix(true, true);
+    source.matrixWorld.decompose(_physicsWorldPosition, _physicsWorldQuaternion, _physicsWorldScale);
+    record.model.position.copy(_physicsWorldPosition);
+    record.model.quaternion.copy(_physicsWorldQuaternion);
+    record.model.scale.copy(_physicsWorldScale);
+    record.model.visible = source.visible;
+    for (let i = 1; i < record.sourceNodes.length; i++) {
+      const from = record.sourceNodes[i];
+      const to = record.modelNodes[i];
+      to.matrixAutoUpdate = from.matrixAutoUpdate;
+      if (from.matrixAutoUpdate) {
+        to.position.copy(from.position);
+        to.quaternion.copy(from.quaternion);
+        to.scale.copy(from.scale);
+      } else to.matrix.copy(from.matrix);
+      to.visible = from.visible;
+      to.matrixWorldNeedsUpdate = true;
+    }
+    record.model.updateMatrix();
+    record.model.updateMatrixWorld(true);
+    for (const object of record.modelNodes) if (object.isSkinnedMesh) object.skeleton?.update();
+  }
+
+  refreshMeshOverlays(models, group, entities, colorFor) {
+    const live = new Set();
+    for (const [entityKey, entity] of entities) {
+      const source = entity.rig?.model ?? entity.model;
+      if (!source) continue;
+      const key = entityKey;
+      live.add(key);
+      let record = models.get(key);
+      if (!record || record.source !== source) {
+        if (record) this.removePhysicsBodyModel(record);
+        record = this.createPhysicsBodyModel(source, colorFor(entityKey, entity), group);
+        models.set(key, record);
+      }
+      this.syncPhysicsBodyModel(record, source);
+    }
+    for (const [key, record] of models) if (!live.has(key)) {
+      this.removePhysicsBodyModel(record);
+      models.delete(key);
+    }
+  }
+
+  refreshPhysicsBodyHelpers() {
+    this.refreshMeshOverlays(
+      this.physicsBodyModels, this.helpers.physicsBodies,
+      [['player', this.game.player], ...this.game.enemies.map((e) => [`enemy:${e.id}`, e])],
+      (key) => key === 'player' ? 0x48e7ff : 0xffb632,
+    );
+  }
+
+  refreshHitboxHelpers() {
+    this.refreshMeshOverlays(
+      this.hitboxModels, this.helpers.hitboxes,
+      this.game.enemies.filter((e) => e.alive).map((e) => [`enemy:${e.id}`, e]),
+      () => 0xff354f,
+    );
   }
 
   refreshColliderHelpers() {
@@ -334,11 +454,19 @@ export class DevTools {
     if (this.colliderAt && this.colliderAt.distanceTo(p) < 10) return;
     this.colliderAt = p.clone();
     const grp = this.helpers.colliders;
-    for (const c of [...grp.children]) { grp.remove(c); c.geometry.dispose(); }
+    for (const c of [...grp.children]) { grp.remove(c); if (!c.userData.sharedGeometry) c.geometry.dispose(); }
     const mat = this.colliderMat ??= new THREE.MeshBasicMaterial({ color: 0xff3df0, wireframe: true, transparent: true, opacity: 0.5, depthTest: false });
     for (const c of g.world.collidersNear(p.x, p.z, 45)) {
-      const m = new THREE.Mesh(c.box ? new THREE.BoxGeometry(c.hx * 2, c.h, c.hz * 2) : new THREE.CylinderGeometry(c.r, c.r, c.h, 12, 1, true), mat);
-      m.position.set(c.x, c.y + c.h / 2, c.z);
+      const m = new THREE.Mesh(c.meshGeometry ?? (c.box ? new THREE.BoxGeometry(c.hx * 2, c.h, c.hz * 2) : new THREE.CylinderGeometry(c.r, c.r, c.h, 12, 1, true)), mat);
+      if (c.meshGeometry) {
+        m.userData.sharedGeometry = true;
+        m.matrixAutoUpdate = false;
+        m.matrix.copy(c.meshMatrix ?? new THREE.Matrix4());
+        m.matrixWorld.copy(m.matrix);
+      } else {
+        m.position.set(c.x, c.y + c.h / 2, c.z);
+        m.rotation.y = c.ry ?? 0;
+      }
       grp.add(m);
     }
   }
@@ -382,6 +510,7 @@ export class DevTools {
         <div class="row"><select id="dev-dun">${Object.values(DUNGEONS).map((d) => `<option value="${d.id}">${esc(d.name)} (${esc(d.theme)}, Lv ${d.level})</option>`).join('')}${Object.values(RAIDS).map((d) => `<option value="${d.id}">Raid: ${esc(d.name)} (Lv ${d.level})</option>`).join('')}</select><select id="dev-dun-mode"><option value="open">Open world</option><option value="run:0">Run · Normal</option><option value="run:1">Run · Veteran</option><option value="run:2">Run · Elite</option></select><button data-act="dungeon">Go down</button></div>
         <div class="row"><button data-act="tp-reticle">Teleport to reticle</button><button data-act="reveal">Reveal map</button><button data-act="attune">Attune all waystones</button></div>
         <div class="row"><button data-act="kill-all">Kill all enemies</button><button data-act="respawn">Respawn camps</button><button data-act="clear-loot">Clear ground loot</button></div>
+        <div class="row"><select id="dev-event"><option value="surge">Hive Surge</option><option value="siege">Scav Siege</option><option value="anomaly">Maker Anomaly</option></select><button data-act="event">Start event nearby</button><button data-act="event-win">Win it</button><button data-act="event-lose">Lose it</button></div>
         <div class="grid2">${chk('freezeAI', 'Freeze enemy AI', f.freezeAI)}<label class="chk"><input type="checkbox" data-act="pause" ${this.paused ? 'checked' : ''}> Pause simulation</label></div>
         <div class="row"><span>Time scale</span><input type="range" id="dev-time" min="0.05" max="2" step="0.05" value="${g.timeScale ?? 1}"><b id="dev-time-v">${(g.timeScale ?? 1).toFixed(2)}×</b></div>`;
     } else if (this.tab === 'Spawn') {
@@ -403,10 +532,10 @@ export class DevTools {
         <div class="row"><button data-act="forge-drop">Drop in front</button><button data-act="forge-pack">Add to backpack</button><button data-act="forge-10">Drop 10 random</button></div>`;
     } else if (this.tab === 'Render') {
       const pr = g.prefs;
-      const r = this.renderFlags ??= { outlines: pr.outlines, hatching: pr.hatching, fog: true, shadows: pr.shadows, speedfx: true, skeleton: false, colliders: false };
+      const r = this.renderFlags ??= { outlines: pr.outlines, hatching: pr.hatching, fog: true, shadows: pr.shadows, speedfx: true, skeleton: false, colliders: false, hitboxes: false, physicsBodies: false };
       const rchk = (id, label) => `<label class="chk"><input type="checkbox" data-render="${id}" ${r[id] ? 'checked' : ''}> ${label}</label>`;
       body = `
-        <div class="grid2">${rchk('outlines', 'Ink outlines')}${rchk('hatching', 'Comic hatching')}${rchk('fog', 'Fog')}${rchk('shadows', 'Shadows')}${rchk('speedfx', 'Speed blur / lines')}${rchk('skeleton', 'Player skeleton')}${rchk('colliders', 'World colliders')}</div>
+        <div class="grid2">${rchk('outlines', 'Ink outlines')}${rchk('hatching', 'Comic hatching')}${rchk('fog', 'Fog')}${rchk('shadows', 'Shadows')}${rchk('speedfx', 'Speed blur / lines')}${rchk('skeleton', 'Player skeleton')}${rchk('colliders', 'World colliders')}${rchk('hitboxes', 'Enemy hitboxes')}${rchk('physicsBodies', 'Model physics bodies')}</div>
         <div class="row"><button data-act="perf">${this.perfOn ? 'Hide' : 'Show'} perf overlay (F3)</button></div>`;
     } else if (this.tab === 'Audio') {
       const s = g.prefs;
@@ -503,6 +632,16 @@ export class DevTools {
         g.hud.toast('All waystones attuned');
         break;
       case 'kill-all': this.killAll(); break;
+      // Public events (sim/WorldEvents.js), offline: one at the nearest place that suits it, and
+      // the nearest one won or lost on the spot.
+      case 'event': case 'event-win': case 'event-lose': {
+        const d = g.enemyLayer.sim?.director;
+        if (!d) { g.hud.toast('Offline only (online: /admin event)'); break; }
+        const pp = p.position;
+        const ev = act === 'event' ? d.startNear(pp.x, pp.z, $('#dev-event').value) : d.force(pp.x, pp.z, act === 'event-win');
+        g.hud.toast(ev ? `${act === 'event' ? 'Started' : act === 'event-win' ? 'Won' : 'Lost'}: ${ev.name}` : 'No event near');
+        break;
+      }
       case 'respawn': g.encounters.respawnAll(); g.hud.toast('Camps respawned'); break;
       case 'clear-loot': for (const d of [...g.drops]) g.removeDrop(d); break;
       case 'pause': this.paused = el.checked; return;

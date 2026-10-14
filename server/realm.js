@@ -25,13 +25,14 @@
 //     resync                                  "send me my whole character again"
 //     ping    { c }                           clock sync; answered by pong { c, s }
 //     hit, st                                 hits and statuses on enemies (server/simhost.js)
+//     evote   { id, tier }                    a vote at a public event's beacon (server/simhost.js)
 //   server → client
-//     welcome { id, seed, time, tick, character, camps, ground, layer }
+//     welcome { id, seed, time, tick, character, camps, ovr, ground, layer }
 //     add     { id, name, lv, look, w, a, s, rt }   a player came into view
 //     remove  { id }                                 …went out of view or left
 //     look    { id, lv, w, a }                       a visible player changed gear or level
 //     snap    { ts, ps: [[id, rt, state]], fx: [[id, fx]], ea, ed, es, ev }   each tick
-//     reward, camp                                   (server/simhost.js)
+//     reward, camp, wev, ovr                         (server/simhost.js)
 //     opr     { seq, ok, roll, h }                   the answer to an op (h: fingerprint)
 //     sop     { op }                                 a change the server made (kill rewards...)
 //     char    { data, ground }                       the whole character (on resync)
@@ -238,9 +239,12 @@ export class Realm {
     bus.on((to, msg) => { if (to === 'all' || to === `layer:${layer}`) this.onBus(msg); });
   }
 
-  // Up: whoever this layer held before a crash is let go, then it says it's open.
+  // Up: whoever this layer held before a crash is let go, Brightwater's surroundings are built
+  // (where new characters start; after a restart everyone comes back at once), then it says it's
+  // open.
   async start() {
     await this.store.clearLayer(this.layer);
+    this.simhost.primeHub();
     await this.announce();
     this.announceTimer = setInterval(() => this.announce().catch((err) => log.warn('realm', `announce failed: ${err.message}`)), ANNOUNCE_EVERY);
     this.presenceTimer = setInterval(() => this.store.refreshLayer(this.layer).catch(() => {}), PRESENCE_EVERY);
@@ -346,6 +350,7 @@ export class Realm {
       t: 'welcome', id: session.id, seed: this.seed, time: Date.now(), tick: TICK_MS, layer: this.standalone ? null : this.layer,
       character: { id: character.id, name: character.name, look: character.look, data: characterData(core, extras) },
       camps: [...this.simhost.cleared],
+      ovr: this.simhost.overrun,
       ground: groundList(core),
     });
     this.parties.online(session);
@@ -442,6 +447,7 @@ export class Realm {
       case 'hit': this.simhost.hit(s, msg); break;
       case 'st': this.simhost.status(s, msg); break;
       case 'dun': if (s.proxy?.placed && typeof msg.id === 'string') this.simhost.dungeons.use(s.id, msg.id.slice(0, 12), s.proxy.position, s.name); break;
+      case 'evote': this.simhost.vote(s, msg); break;
       case 'ab': this.ability(s, msg); break;
       case 'profile': {
         s.level = s.core.stats.level;

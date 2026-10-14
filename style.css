@@ -91,6 +91,7 @@ button { font-family: var(--ui); cursor: pointer; }
 #compass .cd.n { color: var(--accent-2); }
 #compass .mk { position: absolute; top: 9px; width: 9px; height: 9px; margin-left: -4.5px; transform: rotate(45deg); background: var(--accent-2); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.7), 0 0 8px rgba(240, 198, 116, 0.8); }
 #compass .mk.custom { background: var(--accent); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.7), 0 0 8px rgba(94, 230, 255, 0.8); }
+#compass .mk.event { background: var(--event); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.7), 0 0 8px rgba(255, 106, 74, 0.85); }
 #compass .caret { position: absolute; left: 50%; bottom: 0; margin-left: -5px; border: 5px solid transparent; border-bottom-color: var(--accent); filter: drop-shadow(0 0 3px var(--accent)); }
 
 /* ---------- vitals (bottom-left) ---------- */
@@ -167,6 +168,37 @@ button { font-family: var(--ui); cursor: pointer; }
 .quest.story b { color: #ffcf7a; }
 .quest.tracked { box-shadow: inset 3px 0 0 var(--accent), inset 0 0 0 1px rgba(94, 230, 255, 0.45); }
 .quest.more { padding: 3px 11px 4px 13px; font-size: 10.5px; font-weight: 600; letter-spacing: 1.5px; text-transform: uppercase; opacity: 0.75; }
+
+/* ---------- public events (ui/EventUI.js): the tracker over the quests, plates over pylons ---------- */
+:root { --event: #ff6a4a; }
+#event { width: 250px; align-self: flex-end; }
+#event:empty { display: none; }
+.ev-card {
+  background: var(--halftone), var(--glass); padding: 7px 11px 8px 13px; font-size: 12.5px; font-weight: 500;
+  clip-path: var(--cut-s); box-shadow: inset 3px 0 0 var(--event), inset 0 0 0 1px rgba(255, 106, 74, 0.45);
+}
+.ev-card.gather { box-shadow: inset 3px 0 0 #ffd25a, inset 0 0 0 1px rgba(255, 210, 90, 0.45); }
+.ev-card.over { opacity: 0.85; }
+.ev-card b { display: block; font-family: var(--display); font-size: 14px; font-weight: 600; letter-spacing: 1.5px; text-transform: uppercase; color: #ffb39e; text-shadow: var(--outline); }
+.ev-card.gather b { color: #ffe08a; }
+.ev-card.won b { color: #9fffc0; }
+.ev-card p { margin: 2px 0 0; font-size: 11.5px; font-style: italic; opacity: 0.85; }
+.ev-card ul { margin: 3px 0 0; padding-left: 14px; }
+.ev-card li { margin: 1px 0; }
+.ev-card li::marker { color: var(--event); }
+.ev-card li.done { opacity: 0.45; text-decoration: line-through; }
+.ev-card small { display: block; margin-top: 4px; font-size: 10.5px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; opacity: 0.75; }
+.ev-card .ev-bars { display: flex; align-items: center; gap: 4px; list-style: none; margin-left: -14px; }
+.ev-card .ev-bars span { margin-right: 2px; font-size: 10.5px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; opacity: 0.8; }
+.ev-hp { flex: 1; height: 5px; background: rgba(6, 8, 14, 0.8); box-shadow: inset 0 0 0 1px var(--line); }
+.ev-hp em { display: block; height: 100%; background: linear-gradient(90deg, #2a9fff, #58cfff); transition: width 0.3s; }
+.ev-hp.beacon em { background: linear-gradient(90deg, #c89a3a, #ffd27a); }
+.ev-hp.down { box-shadow: inset 0 0 0 1px rgba(255, 77, 94, 0.6); }
+#labels > .ev-plate span { font-family: var(--display); font-size: 11px; font-weight: 600; letter-spacing: 1.5px; text-transform: uppercase; color: #a8e8ff; text-shadow: var(--outline); }
+#labels > .ev-plate i { display: block; width: 80px; height: 5px; margin: 3px auto 0; background: rgba(6, 8, 14, 0.8); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6); }
+#labels > .ev-plate em { display: block; height: 100%; background: linear-gradient(#d8f6ff 0 30%, #58cfff 30%); }
+body.touch #event { max-height: 18vh; overflow: hidden; }
+@media (max-width: 720px) { #event, .ev-card { width: 210px; } }
 
 /* ---------- boss ---------- */
 #bossbar { position: absolute; top: 52px; left: 50%; transform: translateX(-50%); width: min(600px, 62vw); text-align: center; }
@@ -304,6 +336,15 @@ kbd {
 @keyframes bob { to { translate: 0 -5px; } }
 .npc-label .marker.turnin { background: #9fffc0; box-shadow: 0 0 0 2px rgba(10, 12, 19, 0.8), 0 0 12px rgba(159, 255, 192, 0.9); }
 .npc-label .marker.talk { width: 11px; height: 11px; background: var(--accent); box-shadow: 0 0 0 2px rgba(10, 12, 19, 0.8), 0 0 12px rgba(94, 230, 255, 0.9); }
+.npc-label .marker.story, .npc-label .marker.side { display: grid; width: 20px; height: 20px; transform: none; place-items: center; border: 1px solid rgba(255,255,255,.8); font-size: 0; }
+.npc-label .marker.story { color: #17130a; background: #ffcf7a; clip-path: polygon(50% 0, 62% 29%, 94% 18%, 82% 50%, 100% 70%, 67% 74%, 50% 100%, 33% 74%, 0 70%, 18% 50%, 6% 18%, 38% 29%); box-shadow: 0 0 0 2px rgba(10,12,19,.8), 0 0 12px rgba(255,207,122,.9); }
+.npc-label .marker.side { border-radius: 50%; color: #07161a; background: #5ee6ff; box-shadow: 0 0 0 2px rgba(10,12,19,.8), 0 0 12px rgba(94,230,255,.85); }
+.npc-label .marker.story::before { content: '✦'; font: 700 13px/1 var(--ui); }
+.npc-label .marker.side::before { content: '!'; font: 800 14px/1 var(--ui); }
+.npc-label .marker.story.turnin { background: #9fffc0; box-shadow: 0 0 0 2px rgba(10,12,19,.8), 0 0 12px rgba(159,255,192,.9); }
+.npc-label .marker.side.turnin { background: #9fffc0; box-shadow: 0 0 0 2px rgba(10,12,19,.8), 0 0 12px rgba(159,255,192,.9); }
+.npc-label .marker.story.talk { width: 20px; height: 20px; background: #ffcf7a; }
+.npc-label .marker.side.talk { width: 20px; height: 20px; background: #5ee6ff; }
 .npc-label .np-say {
   width: max-content; max-width: 250px; margin: 0 auto 9px; padding: 6px 11px 7px; white-space: normal; font-size: 12.5px; font-weight: 500; line-height: 1.35;
   background: var(--glass); clip-path: var(--cut-s); box-shadow: inset 0 0 0 1px var(--line), inset 2px 0 0 var(--accent-2); text-shadow: var(--outline); animation: say-in 0.25s ease-out;
@@ -320,6 +361,9 @@ kbd {
 /* ---------- damage numbers ---------- */
 .dmg { position: absolute; left: 0; top: 0; font-family: var(--display); font-weight: 800; font-size: 24px; letter-spacing: 0.5px; color: #fff; white-space: nowrap; text-shadow: var(--outline-big); }
 .dmg.crit { color: var(--accent-2); font-size: 34px; text-shadow: var(--outline-big), 0 0 12px rgba(240, 198, 116, 0.6); }
+.dmg-weakpoint-icon { position: relative; display: inline-block; width: 0.64em; height: 0.64em; margin-left: 0.28em; vertical-align: 0.04em; box-sizing: border-box; border: 2px solid #ff6df0; border-radius: 50%; color: #ff6df0; }
+.dmg-weakpoint-icon::before { position: absolute; content: ''; inset: 24%; box-sizing: border-box; border: 1px solid currentColor; border-radius: 50%; }
+.dmg-weakpoint-icon::after { position: absolute; content: ''; inset: -24%; background: linear-gradient(currentColor, currentColor) center top / 1px 24% no-repeat, linear-gradient(currentColor, currentColor) center bottom / 1px 24% no-repeat, linear-gradient(currentColor, currentColor) left center / 24% 1px no-repeat, linear-gradient(currentColor, currentColor) right center / 24% 1px no-repeat; }
 .dmg.hurt { color: #ff6a76; }
 .dmg.xp { color: var(--xp); font-size: 16px; font-weight: 600; letter-spacing: 1.5px; }
 
@@ -346,18 +390,39 @@ button:disabled { opacity: 0.35; cursor: default; }
 /* ---------- dialogue ---------- */
 #dialogue {
   position: fixed; left: 50%; bottom: 44px; transform: translateX(-50%); width: min(660px, calc(100vw - 32px));
-  background: var(--halftone), var(--glass); clip-path: var(--cut); box-shadow: inset 0 2px 0 var(--accent), inset 0 0 0 1px var(--line); padding: 14px 20px 16px;
+  background: var(--halftone), var(--glass); clip-path: var(--cut); box-shadow: inset 0 2px 0 var(--accent), inset 0 0 0 1px var(--line), 0 18px 55px rgba(0,0,0,.42); padding: 18px 22px 16px;
 }
-.dlg-name { font-family: var(--display); font-weight: 700; font-size: 22px; letter-spacing: 2.5px; text-transform: uppercase; color: var(--accent-2); text-shadow: var(--outline); }
-.dlg-name small { font-family: var(--ui); font-size: 11px; font-weight: 600; letter-spacing: 1.5px; text-transform: uppercase; color: #e9f1ff; opacity: 0.6; margin-left: 6px; }
-#dialogue p { font-size: 15px; line-height: 1.5; font-weight: 500; }
-.dlg-options { display: flex; flex-wrap: wrap; gap: 8px; }
+.dlg-head { display: flex; justify-content: space-between; align-items: center; gap: 16px; border-bottom: 1px solid var(--line); padding-bottom: 11px; }
+.dlg-eyebrow, .dlg-step { font-size: 9px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: var(--accent); opacity: .8; }
+.dlg-name { font-family: var(--display); font-weight: 700; font-size: 22px; line-height: 1.05; letter-spacing: 2px; text-transform: uppercase; color: var(--accent-2); text-shadow: var(--outline); }
+.dlg-role { margin-top: 4px; font-size: 10px; font-weight: 600; letter-spacing: 1.4px; text-transform: uppercase; color: #e9f1ff; opacity: 0.58; }
+#dialogue.quest-story { box-shadow: inset 0 2px 0 #ffcf7a, inset 0 0 0 1px var(--line), 0 18px 55px rgba(0,0,0,.42); }
+#dialogue.quest-story .dlg-eyebrow, #dialogue.quest-story .dlg-name { color: #ffcf7a; }
+#dialogue.quest-side { box-shadow: inset 0 2px 0 #5ee6ff, inset 0 0 0 1px var(--line), 0 18px 55px rgba(0,0,0,.42); }
+#dialogue.quest-side .dlg-eyebrow, #dialogue.quest-side .dlg-name { color: #5ee6ff; }
+#dialogue .dlg-line { margin: 14px 0 18px; max-width: 62ch; font-size: 16px; line-height: 1.6; font-weight: 500; color: #f2f4f8; }
+.dlg-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr)); gap: 7px; }
+.dlg-options button { display: flex; align-items: center; gap: 11px; min-height: 40px; padding: 7px 11px; text-align: left; font-size: 12px; letter-spacing: .7px; }
+.dlg-choice-copy { display: grid; gap: 2px; min-width: 0; }
+.dlg-choice-copy > small { color: var(--accent-2); font: 700 9px var(--ui); letter-spacing: 1.3px; text-transform: uppercase; }
+.dlg-options button[data-primary="true"] { background: rgba(240,198,116,.1); box-shadow: inset 0 0 0 1px rgba(240,198,116,.48); color: var(--accent-2); }
 .dlg-options button.quest { color: var(--accent-2); box-shadow: inset 0 0 0 1px rgba(240, 198, 116, 0.6); }
+.dlg-options button.quest.story { color: #ffcf7a; box-shadow: inset 0 0 0 1px rgba(255,207,122,.65); }
+.dlg-options button.quest.side { color: #7cecff; box-shadow: inset 0 0 0 1px rgba(94,230,255,.58); }
 .dlg-notes { display: grid; gap: 8px; margin: 0 0 12px; max-height: 40vh; overflow-y: auto; }
-.dlg-note { background: rgba(255, 255, 255, 0.04); box-shadow: inset 0 0 0 1px var(--line); padding: 8px 12px; }
+.dlg-note { background: rgba(255, 255, 255, 0.04); box-shadow: inset 0 0 0 1px var(--line); padding: 11px 13px; }
+.dlg-note header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .dlg-note b { font-family: var(--display); font-weight: 700; letter-spacing: 1.2px; text-transform: uppercase; color: var(--accent-2); }
-.dlg-note small { float: right; font-size: 11px; font-weight: 600; letter-spacing: 1px; opacity: 0.75; }
+.dlg-note header small { flex: 0 0 auto; font-size: 9px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: #b5c1d0; opacity: 0.8; }
+.dlg-note.available { border-left: 2px solid var(--accent-2); }
+.dlg-note.ready { border-left: 2px solid #9fffc0; }
+.dlg-note.ready header small { color: #9fffc0; }
+.dlg-note.active { border-left: 2px solid var(--accent); }
+.dlg-note header small { padding: 3px 7px; background: rgba(255,255,255,.07); }
 #dialogue .dlg-note p { margin: 4px 0 0; font-size: 13.5px; line-height: 1.4; }
+.dlg-note-action { margin-top: 9px; width: 100%; display: flex; align-items: center; min-height: 36px; padding: 6px 10px; background: rgba(240,198,116,.08); color: var(--accent-2); border: 0; box-shadow: inset 0 0 0 1px rgba(240,198,116,.38); clip-path: var(--cut-s); font: 600 11px var(--display); letter-spacing: .7px; text-align: left; cursor: pointer; }
+.dlg-note-action:hover { background: rgba(240,198,116,.16); box-shadow: inset 0 0 0 1px var(--accent-2); }
+.dlg-note-action .dlg-choice-copy { display: flex; flex-direction: row; align-items: baseline; justify-content: space-between; gap: 8px; flex: 1; }
 
 /* ---------- inventory (the game menu's Inventory tab) ---------- */
 #inventory { max-width: 1280px; margin: 0 auto; }
@@ -579,7 +644,7 @@ body.at-title #chat { display: none; }
 .gm-hp i { position: absolute; left: 0; top: 0; bottom: 0; background: linear-gradient(var(--hp-hi) 0 22%, var(--hp) 22% 76%, #b8263a 76%); transition: width 0.15s; }
 .gm-hp b { position: absolute; inset: 0; display: grid; place-items: center; font-family: var(--display); font-weight: 700; font-size: 11.5px; letter-spacing: 1px; text-shadow: var(--outline); }
 .gm-hp.low { animation: hpPulse 0.6s ease-in-out infinite alternate; }
-.gm-tabs { grid-column: 1 / -1; grid-row: 2; display: flex; gap: 2px; margin: 0 0 0 -15px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+.gm-tabs { position: relative; grid-column: 1 / -1; grid-row: 2; display: flex; gap: 2px; margin: 0 0 0 -15px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
 .gm-tab {
   position: relative; padding: 10px 15px 14px; border: none; background: none; color: rgba(233, 241, 255, 0.55); white-space: nowrap;
   font-family: var(--display); font-weight: 600; font-size: 17px; letter-spacing: 3px; text-transform: uppercase; transition: color 0.12s, background 0.12s;
@@ -625,7 +690,7 @@ body.at-title #chat { display: none; }
 .gm-gear li.none b { opacity: 0.3; }
 .gm-gear small { font-size: 11px; opacity: 0.6; }
 .gm-wide { grid-column: 1 / -1; width: 100%; max-width: 900px; justify-self: center; }
-.gm-quest { margin: 0 0 12px; padding: 8px 0 8px 14px; box-shadow: inset 2px 0 0 var(--accent-2); }
+.gm-quest { margin: 0 0 12px; padding: 12px 14px; background: rgba(255,255,255,.025); box-shadow: inset 2px 0 0 var(--accent-2), inset 0 0 0 1px rgba(190,214,255,.07); }
 .gm-quest.ready { box-shadow: inset 2px 0 0 #9fffc0; }
 .gm-quest h4 { margin: 0; font-family: var(--display); font-weight: 700; font-size: 19px; letter-spacing: 2px; text-transform: uppercase; color: #fff; text-shadow: var(--outline); }
 .gm-quest small { font-size: 10.5px; font-weight: 600; letter-spacing: 1.5px; text-transform: uppercase; color: var(--accent-2); }
@@ -639,6 +704,12 @@ body.at-title #chat { display: none; }
 .gm-quest.tracked { box-shadow: inset 3px 0 0 var(--accent); }
 .gm-quest.tracked h4 .gm-btn { color: var(--accent); }
 .gm-quest p { margin: 6px 0 0; font-size: 13px; line-height: 1.4; opacity: 0.85; }
+.gm-quest-progress { display: flex; align-items: center; gap: 12px; margin-top: 10px; font-size: 10px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: #c4cedc; }
+.gm-quest-progress > span { flex: 0 0 auto; }
+.gm-quest-progress > i { flex: 1; height: 4px; overflow: hidden; background: rgba(255,255,255,.1); }
+.gm-quest-progress > i b { display: block; height: 100%; background: var(--accent-2); box-shadow: 0 0 8px rgba(240,198,116,.55); }
+.gm-quest.ready .gm-quest-progress { color: #9fffc0; }
+.gm-quest.ready .gm-quest-progress > i b { background: #9fffc0; box-shadow: 0 0 8px rgba(159,255,192,.5); }
 .qtabs { margin: 0 0 16px; }
 .qtabs small { margin-left: 4px; opacity: 0.7; }
 .gm-story { margin: 10px 0 0; padding: 9px 14px 10px; background: rgba(255, 255, 255, 0.03); box-shadow: inset 0 0 0 1px var(--line); }
@@ -954,32 +1025,54 @@ body.touch, body.touch #menu, body.touch #title { -webkit-tap-highlight-color: t
 .tc-slide { --s: var(--sm); right: calc(var(--big) + var(--mid) + 22px); bottom: 4px; }
 .tc-reload { --s: var(--sm); right: calc(var(--big) + var(--mid) + 18px); bottom: calc(var(--mid) + 14px); }
 .tc-melee { --s: var(--sm); right: calc((var(--big) - var(--sm)) / 2); bottom: calc(var(--big) + var(--mid) + 22px); }
-#touch.tc-melee-weapon .tc-reload, #touch.tc-melee-weapon .tc-melee, #touch.tc-melee-weapon .tc-laim { display: none; }
+/* (A melee weapon has nothing to reload or quick-swing, and its Attack already aims while held: no
+   left-hand buttons either.) */
+#touch.tc-melee-weapon .tc-reload, #touch.tc-melee-weapon .tc-melee, #touch.tc-melee-weapon .tc-left { display: none; }
 /* Left hand: fire with the left thumb while the right one aims; Aim stays on until tapped. */
-.tc-left { position: absolute; left: calc(env(safe-area-inset-left, 0px) + 14px); top: 50%; display: flex; align-items: center; gap: 10px; }
+.tc-left { position: absolute; left: calc(env(safe-area-inset-left, 0px) + 14px); top: 68%; display: flex; align-items: center; gap: 10px; }
 .tc-left .tc-btn { position: static; }
 .tc-laim { --s: var(--sm); }
 .tc-lfire { --s: var(--mid); background: rgba(9, 12, 20, 0.5); box-shadow: inset 0 0 0 2px rgba(240, 198, 116, 0.7); }
 .tc-lfire.on { background: rgba(240, 198, 116, 0.32); box-shadow: inset 0 0 0 2px var(--accent-2), 0 0 16px rgba(240, 198, 116, 0.55); }
 .tc-top { position: absolute; left: calc(env(safe-area-inset-left, 0px) + 8px); top: calc(env(safe-area-inset-top, 0px) + 8px); display: flex; flex-direction: column; gap: 6px; }
-.tc-util { --s: 40px; position: static; border-radius: 6px; font-size: 10px; letter-spacing: 1.5px; }
-.tc-burger, .tc-burger::before, .tc-burger::after { display: block; width: 18px; height: 2px; background: #fff; box-shadow: 0 0 2px #000; }
-.tc-burger { position: relative; }
-.tc-burger::before, .tc-burger::after { content: ''; position: absolute; left: 0; }
-.tc-burger::before { top: -6px; }
-.tc-burger::after { top: 6px; }
+.tc-util { --s: 40px; position: relative; }
+.tc-util svg { width: 20px; height: 20px; fill: none; stroke: #fff; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; filter: drop-shadow(0 0 1.5px #000); }
+/* Talent points waiting: a dot on the menu button. */
+.tc-util.badge::after { content: ''; position: absolute; top: 3px; right: 3px; width: 9px; height: 9px; border-radius: 50%; background: var(--accent-2); box-shadow: 0 0 0 2px rgba(9, 12, 20, 0.8), 0 0 8px var(--accent-2); }
 
-/* The HUD rearranged round the thumbs: vitals top-left beside the menu button, weapons
-   bottom-centre between the stick and the buttons, chat at the top (the keyboard covers the
-   bottom). Its prompts take touches (the interaction prompt, the loot card, weapon slots). */
-body.touch #hud { zoom: 0.82; }
+/* The HUD rearranged round the thumbs, in two columns: what you are (vitals, the tracked quest,
+   party, chat) down the left beside the menu button; the minimap and the action buttons down the
+   right; weapons bottom-centre between the stick and the buttons. It's drawn zoomed out (--hz),
+   so every offset from a screen edge is divided by the zoom, and clears the phone's notch and
+   rounded corners (env(safe-area-inset-*): CSS zoom scales those too). Its prompts take touches
+   (the interaction prompt, the loot card, weapon slots, the minimap — a tap opens the map). */
+body.touch { --hz: 0.82; --sal: env(safe-area-inset-left, 0px); --sar: env(safe-area-inset-right, 0px); --sat: env(safe-area-inset-top, 0px); }
+@media (max-height: 600px) { body.touch { --hz: 0.66; } }
+@media (max-height: 440px) { body.touch { --hz: 0.56; } }
+body.touch #hud { zoom: var(--hz); }
 body.touch #mouse-hint { display: none !important; }
-body.touch #vitals { left: 104px; top: 10px; bottom: auto; align-items: flex-start; }
+body.touch #vitals { left: calc((var(--sal) + 58px) / var(--hz)); top: calc((var(--sat) + 8px) / var(--hz)); bottom: auto; align-items: flex-start; }
+/* (Gold is on the menu's header; talent points to spend light the menu button instead.) */
+body.touch .gold-line { display: none; }
+body.touch .bar { width: 200px; }
+body.touch .bar.hp { width: 264px; }
+body.touch .bar.mp { width: 228px; }
+body.touch #compass { width: 320px; top: calc((var(--sat) + 8px) / var(--hz)); }
+body.touch #map-wrap { display: contents; }
+body.touch .map-frame { position: absolute; right: calc((var(--sar) + 12px) / var(--hz)); top: calc((var(--sat) + 10px) / var(--hz)); pointer-events: auto; touch-action: none; cursor: pointer; }
+body.touch .map-frame:active { box-shadow: 0 0 0 1px var(--accent), 0 0 0 5px rgba(9, 12, 20, 0.75), 0 0 0 6px var(--accent), 0 0 18px rgba(94, 230, 255, 0.5); }
+body.touch #zone { position: absolute; right: calc((var(--sar) + 12px) / var(--hz) - 20px); top: calc((var(--sat) + 10px) / var(--hz) + 196px); width: 222px; margin: 0; font-size: 13px; letter-spacing: 1.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Just the quest being followed, under the vitals; a tap opens the journal. */
+body.touch #quests { position: absolute; left: calc((var(--sal) + 58px) / var(--hz)); top: calc((var(--sat) + 56px) / var(--hz)); width: 280px; pointer-events: auto; }
+body.touch #quests > :not(:first-child) { display: none; }
+body.touch #party { left: calc((var(--sal) + 12px) / var(--hz)); top: calc(33vh / var(--hz)); }
 body.touch #weapons { left: 50%; right: auto; bottom: 16px; transform: translateX(-50%); flex-direction: row; align-items: flex-end; }
 body.touch #wpn-card { min-width: 0; padding: 6px 14px 6px 16px; }
+body.touch #wpn-card.quiet { display: none; }
 body.touch #wpn-name, body.touch #wpn-sub, body.touch #mag { display: none; }
 body.touch #ammo { font-size: 30px; }
 body.touch .slot { width: 76px; }
+body.touch .slot.empty { display: none; }
 body.touch .slot .name, body.touch .slot .type, body.touch .slot .key { display: none; }
 body.touch .slot img { width: 50px; height: 50px; }
 body.touch #prompt, body.touch #loot-card, body.touch .slot { pointer-events: auto; touch-action: none; }
@@ -988,15 +1081,25 @@ body.touch #prompt kbd { display: none; }
 body.touch #loot-card .lc-prompt kbd { font-size: 0; padding: 0 4px; }
 body.touch #loot-card .lc-prompt kbd::after { content: 'Tap'; font-size: 11px; }
 body.touch #loot-card .lc-hold kbd::after { content: 'Hold'; }
-body.touch #party { top: 110px; left: 104px; }
-body.touch #chat { left: 60px; top: 8px; bottom: auto; width: min(420px, calc(100vw - 280px)); }
-body.touch #chat .chat-log { max-height: 30vh; }
+body.touch #banner { font-size: 40px; letter-spacing: 9px; }
+body.touch #banner small { font-size: 13px; }
+/* Chat: a few recent lines low on the left while it's shut; at the top, wider, while typing (the
+   keyboard covers the bottom). */
+body.touch #chat { left: calc(var(--sal) + 12px); top: auto; bottom: 34vh; width: min(320px, 40vw); font-size: 12px; }
+body.touch #chat .chat-log { max-height: 26vh; }
+body.touch #chat:not(.open) .chat-msg:not(:nth-last-child(-n+4)) { display: none; }
+body.touch #chat.open { top: calc(var(--sat) + 8px); bottom: auto; left: calc(var(--sal) + 58px); width: min(520px, calc(100vw - var(--sal) - var(--sar) - 140px)); }
+body.touch #chat.open .chat-log { max-height: 34vh; }
 body.touch #xpbar { bottom: 4px; }
 body.touch #xp-text { display: none; }
-body.touch #quests { max-height: 22vh; overflow: hidden; }
 body.touch .tile, body.touch .gm-map canvas, body.touch #worldmap canvas { touch-action: none; }
-@media (max-height: 600px) { body.touch #hud { zoom: 0.66; } }
-@media (max-height: 440px) { body.touch #hud { zoom: 0.56; } }
+/* World labels: smaller, and the townsfolk's titles only up close. */
+body.touch .npc-label .np-name { font-size: 12px; letter-spacing: 1.5px; }
+body.touch .npc-label .np-title { font-size: 9px; }
+body.touch .npc-label.far .np-title { display: none; }
+body.touch .plate .np-name, body.touch .loot-label { font-size: 10px; }
+/* What's said in keys on a keyboard and in taps on a touchscreen. */
+body.touch .kb-only, body:not(.touch) .touch-only { display: none; }
 
 /* Phones are played sideways. */
 #rotate { display: none; }
@@ -1013,6 +1116,23 @@ body.touch .tile, body.touch .gm-map canvas, body.touch #worldmap canvas { touch
   .tt-blade { font-size: 84px; }
 }
 body.touch #menu kbd, body.touch #dialogue kbd, body.touch #party-invite kbd, body.touch #trade-req kbd, body.touch .gm-foot > :first-child { display: none; }
+/* The game menu on phones and tablets: over the world's last picture (main.js stops drawing it
+   under the menu), so no blur through it; clear of the notch; the header in one row (level and
+   health, the tabs, Resume) and no footer, so the panes — the map most of all — get the height. */
+body.touch #menu { padding: 0 var(--sar) 0 var(--sal); background: #080b12; }
+body.touch .gm-frame { backdrop-filter: none; background: linear-gradient(180deg, rgba(8, 11, 18, 0.97), rgba(8, 11, 18, 0.93)), var(--halftone); }
+body.touch .gm-head { grid-template-columns: auto minmax(0, 1fr) auto; padding-top: 8px; }
+body.touch .gm-who { gap: 8px; }
+body.touch .gm-name, body.touch .gm-gold, body.touch .gm-foot { display: none; }
+body.touch .gm-hp { width: 96px; }
+body.touch .gm-tabs { grid-row: 1; grid-column: 2; margin: 0; -webkit-mask: linear-gradient(90deg, transparent, #000 18px, #000 calc(100% - 18px), transparent); mask: linear-gradient(90deg, transparent, #000 18px, #000 calc(100% - 18px), transparent); }
+body.touch .gm-pane { padding: 14px 18px; }
+body.touch .gm-map.on { padding: 8px 12px 10px; }
+body.touch #worldmap .map-head { gap: 12px; padding: 5px 14px; }
+body.touch #worldmap h2 { flex: none; font-size: 17px; letter-spacing: 3px; }
+body.touch #worldmap .map-info { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (max-height: 600px) { body.touch #menu .gm-frame { zoom: 0.8; } }
+@media (max-height: 440px) { body.touch #menu .gm-frame { zoom: 0.66; } }
 /* Short landscape screens draw the menus zoomed out, so there's room for the wide layouts the
    narrow-width rules above would otherwise stack. */
 @media (max-height: 600px) and (min-width: 560px) {
@@ -1033,11 +1153,12 @@ body.touch #menu kbd, body.touch #dialogue kbd, body.touch #party-invite kbd, bo
 #abilities.flash .ab:not(.ready) { box-shadow: inset 0 0 0 1px #ff6a5a; }
 @keyframes ab-ready { from { filter: brightness(2.2); } to { filter: none; } }
 body.touch #abilities { display: none !important; }
-.tc-ab { --s: var(--sm); bottom: calc(var(--big) + var(--mid) + var(--sm) + 34px); font-size: calc(var(--s) * 0.17); box-shadow: inset 0 0 0 2px var(--tree, rgba(233, 241, 255, 0.38)); }
+/* Abilities in an arc over Dash and Reload, clear of the minimap above. */
+.tc-ab { --s: var(--sm); font-size: calc(var(--s) * 0.17); box-shadow: inset 0 0 0 2px var(--tree, rgba(233, 241, 255, 0.38)); }
 .tc-ab::after { content: ''; position: absolute; inset: 0; border-radius: 50%; background: conic-gradient(rgba(6, 8, 14, 0.7) calc(var(--cd, 0) * 360deg), transparent 0); pointer-events: none; }
-.tc-ab0 { right: 0; }
-.tc-ab1 { right: calc(var(--sm) + 10px); }
-.tc-ab2 { right: calc(2 * (var(--sm) + 10px)); }
+.tc-ab0 { right: calc(var(--big) - 8px); bottom: calc(var(--big) + var(--mid) + 24px); }
+.tc-ab1 { right: calc(var(--big) + var(--sm) + 2px); bottom: calc(var(--big) + var(--mid) + 8px); }
+.tc-ab2 { right: calc(var(--big) + 2 * var(--sm) + 12px); bottom: calc(var(--big) + var(--sm)); }
 
 /* ---------- journal: achievements and codex (ui/JournalUI.js) ---------- */
 .jr-tabs { max-width: 1280px; margin: 0 auto 16px; }

@@ -117,6 +117,12 @@ export function roamHorde(race, level, rng) {
   return band(table, level, rng, n, level >= 18 ? 2 : 1, level >= 16);
 }
 
+// A wave in a public event (sim/WorldEvents.js): `n` off the race's camp roster (the wild's roaming
+// kinds), the first `elites` of them named elites — the very first a champion if `champion`.
+export function eventWave(race, level, rng, n, elites = 0, champion = false) {
+  return band(race === 'fauna' ? ROAM.fauna : CAMP[race] ?? CAMP.scav, level, rng, n, elites, champion);
+}
+
 export const RACE_OF = Object.fromEntries(Object.entries(ENEMY_TYPES).map(([k, v]) => [k, v.race]));
 
 // A dungeon room's residents (world/DungeonGen.js): `n` off the race's camp roster (the wild's

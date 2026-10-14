@@ -3,7 +3,7 @@
   "short_name": "Cel Blade",
   "description": "Cel-shaded arcane-tech action MMORPG.",
   "start_url": "./",
-  "display": "fullscreen",
+  "display": "standalone",
   "orientation": "landscape",
   "background_color": "#0a0d16",
   "theme_color": "#0a0d16",

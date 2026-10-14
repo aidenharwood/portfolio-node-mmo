@@ -10,7 +10,7 @@
 import * as THREE from 'three';
 import { GLOW, INK } from './Toon.js';
 
-export const GLOW_KIND = { soft: 0, star: 1, ring: 2, spark: 3, ember: 4, mote: 5 };
+export const GLOW_KIND = { soft: 0, star: 1, ring: 2, spark: 3, ember: 4, mote: 5, flame: 6, smoke: 7 };
 export const SOLID_KIND = { puff: 0, chip: 1, drop: 2, leaf: 3, flake: 4, shard: 5, splinter: 6 };
 
 const QUAD = new THREE.PlaneGeometry(1, 1);
@@ -71,6 +71,19 @@ const GLOW_VERT = /* glsl */ `
       dir = l > 1e-5 ? dir / l : vec2(1.0, 0.0);
       float len = aExtra.y * (0.4 + min(1.5, length(vel) * 0.08)) * (1.0 - k * 0.5);
       mv.xy += dir * corner.x * len + vec2(-dir.y, dir.x) * corner.y * size;
+    } else if (aExtra.x > 5.5 && aExtra.x < 6.5) {
+      // Fire is tall and narrow; keep the tongue upright as it billboards toward the camera.
+      float a = aSize.z + aSize.w * t;
+      vec2 flameCorner = mat2(cos(a), sin(a), -sin(a), cos(a)) * corner;
+      float width = 0.55 + aExtra.y * 0.45;
+      float height = 1.35 - aExtra.y * 0.45;
+      mv.xy += flameCorner * vec2(size * width, size * height);
+    } else if (aExtra.x > 6.5 && aExtra.x < 7.5) {
+      // Rising smoke stretches into a wisp, then broadens as it cools.
+      float a = aSize.z + aSize.w * t;
+      vec2 smokeCorner = mat2(cos(a), sin(a), -sin(a), cos(a)) * corner;
+      float spread = mix(0.62, 1.0, k);
+      mv.xy += smokeCorner * vec2(size * 0.72 * spread, size * 1.35);
     } else {
       float a = aSize.z + aSize.w * t;
       mv.xy += mat2(cos(a), sin(a), -sin(a), cos(a)) * corner * size;
@@ -88,6 +101,7 @@ const GLOW_VERT = /* glsl */ `
 
 const GLOW_FRAG = /* glsl */ `
   uniform float uGlow;
+  uniform float uTime;
   varying vec2 vUv;
   varying vec4 vCol;
   varying float vKind;
@@ -99,6 +113,7 @@ const GLOW_FRAG = /* glsl */ `
     float r = length(p);
     int kind = int(vKind + 0.5);
     float a;
+    vec3 rgb = vCol.rgb;
     if (kind == 1) {        // star flare: a hot core and four arms
       float arms = max(exp(-abs(p.x) * 14.0) * (1.0 - abs(p.y)), exp(-abs(p.y) * 14.0) * (1.0 - abs(p.x)));
       a = max(pow(max(0.0, 1.0 - r), 2.0), arms);
@@ -109,12 +124,43 @@ const GLOW_FRAG = /* glsl */ `
       a = across * smoothstep(-1.0, 0.7, p.x) * (1.0 - smoothstep(0.85, 1.0, p.x));
     } else if (kind == 4) { // ember: a hard hot dot that flickers
       a = (1.0 - smoothstep(0.25, 0.55, r)) * (0.65 + 0.35 * sin(vK * 40.0 + vSeed * 30.0));
+    } else if (kind == 6) { // tapered, flickering flame tongue
+      float h = p.y;
+      float rise = clamp((h + 1.0) * 0.5, 0.0, 1.0);
+      float sway = 0.085 * sin(h * 3.7 + vSeed * 19.0 + uTime * 1.35)
+                 + 0.022 * sin(h * 8.5 + vSeed * 7.0 - uTime * 2.1);
+      float width = 0.64 * pow(max(0.0, 1.0 - rise), 0.62) + 0.012;
+      float turbulence = 0.012 * sin(h * 13.0 + vSeed * 33.0 + uTime * 2.8);
+      float body = 1.0 - smoothstep(width * 0.56, width, abs(p.x - sway) + turbulence);
+      float ends = smoothstep(-1.0, -0.82, h) * (1.0 - smoothstep(0.76, 0.98, h));
+      a = body * ends;
+      float core = exp(-abs(p.x - sway * 0.45) * 10.0) * smoothstep(-0.85, -0.15, h);
+      rgb = mix(rgb, vec3(1.0, 0.68, 0.24), core * 0.58);
+    } else if (kind == 7) { // soft, uneven smoke cloud
+      float h = p.y;
+      float sway = 0.13 * sin(h * 2.2 + vSeed * 9.0 + vK * 3.0);
+      float nx = sin(p.x * 9.0 + p.y * 3.0 + vSeed * 19.0) * sin(p.y * 7.0 - vSeed * 13.0);
+      float ny = sin(p.x * 5.0 - p.y * 8.0 + vSeed * 5.0);
+      vec2 q = vec2((p.x - sway) * (0.86 + 0.12 * sin(h * 3.0 + vSeed)), p.y);
+      float edge = length(q) + 0.11 * nx + 0.055 * ny;
+      float lowerCut = smoothstep(-1.0, -0.55, h);
+      float wisps = 0.58 + 0.16 * nx + 0.12 * ny;
+      a = (1.0 - smoothstep(0.3, 1.02, edge)) * lowerCut * wisps;
     } else {                // soft glow, mote
       a = pow(max(0.0, 1.0 - r), kind == 5 ? 2.5 : 1.6);
     }
+    // Overlap tongues with soft edges in time as well as space to avoid popping at birth/death.
+    if (kind == 6) {
+      float birth = smoothstep(0.0, 0.12, vK);
+      float death = 1.0 - smoothstep(0.72, 1.0, vK);
+      float breathe = 0.94 + 0.06 * sin(uTime * 2.0 + vSeed * 17.0);
+      a *= birth * death * breathe;
+    }
     a *= vCol.a;
     if (a < 0.004) discard;
-    gl_FragColor = vec4(vCol.rgb * (1.0 + (uGlow - 1.0) * 0.4), a);
+    // Flame sprites are colored surfaces only. Their PointLight is managed separately per source.
+    float lift = kind == 6 || kind == 7 ? 0.0 : 0.4;
+    gl_FragColor = vec4(rgb * (1.0 + (uGlow - 1.0) * lift), a);
     #include <fog_fragment>
   }
 `;
@@ -203,10 +249,12 @@ const SOLID_FRAG = /* glsl */ `
 `;
 
 export class ParticleSystem {
-  constructor(scene, { capacity = 4096, solid = false } = {}) {
+  constructor(scene, { capacity = 4096, solid = false, soft = false } = {}) {
     this.capacity = capacity;
     this.next = 0;
     this.time = 0;
+    this.budget = capacity;
+    this.activeSlots = new Set();
     this.lo = Infinity;
     this.hi = -1;
     const geo = new THREE.InstancedBufferGeometry();
@@ -231,11 +279,11 @@ export class ParticleSystem {
       fog: true,
       transparent: !solid,
       depthWrite: solid,
-      blending: solid ? THREE.NormalBlending : THREE.AdditiveBlending,
+      blending: solid || soft ? THREE.NormalBlending : THREE.AdditiveBlending,
     });
     this.mesh = new THREE.Mesh(geo, this.material);
     this.mesh.frustumCulled = false;
-    this.mesh.renderOrder = solid ? 0 : 5;
+    this.mesh.renderOrder = solid ? 0 : soft ? 4 : 5;
     scene.add(this.mesh);
     this.live = 0;
   }
@@ -245,8 +293,11 @@ export class ParticleSystem {
    * alpha (glow: opacity; solid: how much it glows unlit) at birth and death (alphaTo).
    */
   emit(pos, vel, { life = 0.5, gravity = 0, drag = 0, size = 0.3, sizeTo = size, turn = Math.random() * 6.283, spin = 0, color = 0xffffff, to = color, alpha = 1, alphaTo = 0, kind = 0, length = 0.5, fade = 0.6 } = {}) {
+    if (this.budget <= 0) return;
     const i = this.next;
-    this.next = (i + 1) % this.capacity;
+    this.next = (i + 1) % this.budget;
+    const replacingLive = this.activeSlots.has(i);
+    if (!replacingLive && this.activeSlots.size >= this.budget) return;
     const A = this.a;
     A.pos.array.set([pos.x, pos.y, pos.z], i * 3);
     A.vel.array.set([vel.x, vel.y, vel.z], i * 3);
@@ -257,6 +308,7 @@ export class ParticleSystem {
     _c.set(to);
     A.c1.array.set([_c.r, _c.g, _c.b, alphaTo], i * 4);
     A.extra.array.set([kind, length, fade, Math.random()], i * 4);
+    this.activeSlots.add(i);
     if (i < this.lo) this.lo = i;
     if (i > this.hi) this.hi = i;
   }
@@ -264,6 +316,9 @@ export class ParticleSystem {
   update(dt, camera = null, sunDir = null) {
     this.time += dt;
     this.uniforms.uTime.value = this.time;
+    for (const i of this.activeSlots) {
+      if (this.time - this.a.time.array[i * 4] >= this.a.time.array[i * 4 + 1]) this.activeSlots.delete(i);
+    }
     if (camera && sunDir) this.uniforms.uSun.value.copy(sunDir).transformDirection(camera.matrixWorldInverse);
     if (this.hi >= 0) {
       for (const a of Object.values(this.a)) {
@@ -281,7 +336,26 @@ export class ParticleSystem {
     for (let i = 0; i < this.capacity; i++) t[i * 4] = -1e9;
     this.a.time.addUpdateRange(0, t.length);
     this.a.time.needsUpdate = true;
+    this.activeSlots.clear();
+    this.lo = Infinity;
+    this.hi = -1;
   }
+
+  setBudget(count) {
+    this.budget = Math.max(0, Math.min(this.capacity, Math.floor(count)));
+    if (this.budget > 0) this.next %= this.budget;
+    while (this.activeSlots.size > this.budget) {
+      const i = this.activeSlots.values().next().value;
+      this.activeSlots.delete(i);
+      this.a.time.array[i * 4] = -1e9;
+    }
+    if (this.activeSlots.size < this.capacity) {
+      this.a.time.addUpdateRange(0, this.a.time.array.length);
+      this.a.time.needsUpdate = true;
+    }
+  }
+
+  get activeCount() { return this.activeSlots.size; }
 }
 
 // A random direction, mostly upward by `up` (0 level … 1 straight up), as a Vector3 into `out`.

@@ -7,6 +7,7 @@
 // springs so state changes blend instead of popping.
 import * as THREE from 'three';
 import { solveTwoBone, Spring } from './IK.js';
+import { Ragdoll, severRagdoll, deathKick } from './Ragdoll.js';
 
 const TAU = Math.PI * 2;
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
@@ -22,7 +23,6 @@ const AXIS = new THREE.Vector3(0, -1, 0);
 const KNEE_BEND = new THREE.Vector3(0, 0, -1);
 const ELBOW_BEND = new THREE.Vector3(0, 0, 1);
 const X_AXIS = new THREE.Vector3(1, 0, 0);
-const Y_AXIS = new THREE.Vector3(0, 1, 0);
 const Z_AXIS = new THREE.Vector3(0, 0, 1);
 const ARM_TO_POSE = new THREE.Quaternion().setFromAxisAngle(X_AXIS, -Math.PI / 2); // bone -Y → pose +Z
 const MOUNT_INV = new THREE.Quaternion().setFromAxisAngle(X_AXIS, -Math.PI / 2);   // weapon → hand frame
@@ -109,6 +109,7 @@ export function makeAnimState() {
   return {
     mode: 'ground',        // ground | air | slide | dash | airdash | mantle | slam | dead | stagger
     vx: 0, vz: 0, vy: 0, facing: 0, grounded: true,
+    brokenLegs: [],
     sprint: false,
     t: 0,                  // 0..1 progress for timed modes (dash, mantle, dead)
     dashX: 0, dashZ: 1,    // dash direction, model space
@@ -252,6 +253,7 @@ export class Animator {
     // Hand orientations last frame (chest-local), for capping how fast a hand can turn.
     this.handPrev = [new THREE.Quaternion(), new THREE.Quaternion()];
     this.handSet = [false, false];
+    this.ragdoll = null;
   }
 
   // The current weapon pose re-expressed in `space` (YXZ Euler, chosen nearest to `near`).
@@ -279,8 +281,22 @@ export class Animator {
     this.sp.base.kick(-Math.min(5, impact * 0.35));
   }
 
+  resetRagdoll() {
+    if (this.ragdoll) this.rig.hips.position.copy(this.ragdoll.drives[0].pos0);
+    this.ragdoll = null;
+  }
+
+  // Dead: the body is a ragdoll of its own skeleton (anim/Ragdoll.js), from the pose it fell in.
+  updateRagdoll(dt, s) {
+    if (!this.ragdoll) this.ragdoll = humanoidRagdoll(this.rig, s);
+    severRagdoll(this.ragdoll, s.brokenLegs, (id) => BIPED_PARTS[id]?.(this.rig));
+    this.ragdoll.update(dt, s.world ?? null, s.ground ?? null);
+  }
+
   update(dt, s) {
     if (dt <= 0) return;
+    // A body at rest only keeps lying where it lies.
+    if (s.mode === 'dead' && this.ragdoll?.asleep) { this.ragdoll.update(dt, null); return; }
     dt = Math.min(dt, 1 / 20);
     const r = this.rig;
     const d = this.d;
@@ -305,6 +321,9 @@ export class Animator {
     const run = smoothstep(2.4 * scale, 5.5 * scale, speed);
     const move = smoothstep(0.1, 0.9 * scale, speed);
     const sprint = s.sprint ? smoothstep(7, 10, speed) : 0;
+    const brokenLeft = s.brokenLegs?.includes('leftLeg') ?? false;
+    const brokenRight = s.brokenLegs?.includes('rightLeg') ?? false;
+    const lostLegs = Number(brokenLeft) + Number(brokenRight);
     const mode = s.mode;
     const grounded = s.grounded && (mode === 'ground' || mode === 'stagger' || mode === 'dash');
     // Dash: the direction (model space) and an envelope rising and falling over it. A dash is
@@ -320,10 +339,10 @@ export class Animator {
     const vert = hipJoint - d.ankle;
     const reach = Math.sqrt(Math.max(0.01, (L * 0.97) ** 2 - vert * vert));
     const S = Math.min(2 * reach * 0.96, 0.2 + speed * 0.5);
-    const D = lerp(0.6, 0.26, run) - 0.07 * sprint;
+    const D = Math.min(0.82, lerp(0.6, 0.26, run) - 0.07 * sprint + 0.1 * lostLegs);
     const C = Math.max(0.2, S / D);
     if (s.grounded) this.phase = (this.phase + (speed / C) * dt) % 1;
-    const lift = L * lerp(0.12, 0.42, run);
+    const lift = L * lerp(0.12, 0.42, run) * (lostLegs ? 1.18 : 1);
     const stance = sp.stance.step(s.stance ?? 0, dt);
 
     // ---- foot targets (model space): ground gait
@@ -331,6 +350,11 @@ export class Animator {
     const uz = this.dir.y;
     for (let i = 0; i < 2; i++) {
       const side = i === 0 ? 1 : -1;
+      if (i === 0 ? brokenLeft : brokenRight) {
+        _target[i].set(side * d.hipX, -d.hipDrop - L * 0.12, -L * 0.08);
+        _pitch[i] = 0;
+        continue;
+      }
       const ph = (this.phase + i * 0.5) % 1;
       let a;
       let y;
@@ -358,6 +382,7 @@ export class Animator {
     m.updateWorldMatrix(true, false);
     const modelY = m.matrixWorld.elements[13];
     for (let i = 0; i < 2; i++) {
+      if (i === 0 ? brokenLeft : brokenRight) { _h[i] = 0; continue; }
       if (s.ground && mode !== 'dead') {
         _v.set(_target[i].x, 0, _target[i].z).applyMatrix4(m.matrixWorld);
         _h[i] = clamp((s.ground(_v.x, _v.z) - modelY) / mScale, -0.55, 0.55);
@@ -367,10 +392,14 @@ export class Animator {
 
     // ---- hips
     const groundW = sp.ground.step(grounded ? 1 : 0, dt);
-    const lowFoot = Math.min(0, _h[0], _h[1]);
-    let base = d.hipY - drop + lowFoot * groundW - s.hunch * 0.06 - (s.crouch ?? 0) * L * 0.17;
+    const supportHeights = [];
+    if (!brokenLeft) supportHeights.push(_h[0]);
+    if (!brokenRight) supportHeights.push(_h[1]);
+    const lowFoot = Math.min(0, ...supportHeights);
+    const collapse = lostLegs === 2 ? 0.4 : lostLegs === 1 ? 0.16 : 0;
+    let base = d.hipY - drop + lowFoot * groundW - s.hunch * 0.06 - (s.crouch ?? 0) * L * 0.17 - L * collapse;
     if (mode === 'slide') base = d.hipY * 0.55;
-    else if (mode === 'dead') base = lerp(d.hipY, d.hipY * 0.25, ease(clamp(s.t * 1.4, 0, 1)));
+    else if (mode === 'dead') base = lerp(d.hipY, d.hipY * 0.14, ease(clamp(s.t * 1.4, 0, 1)));
     else if (mode === 'mantle') base = d.hipY * 0.92;
     const baseY = sp.base.step(base, dt);
     // How high the hips are carried (springs, no bob), for the first-person eye — which keeps only
@@ -384,13 +413,15 @@ export class Animator {
     r.hips.position.set(sway, baseY + bob + breathe - d.hipY * 0.13 * dashE, 0);
 
     // Pelvis twist follows the legs; strafing turns the hips toward travel, shoulders stay on aim.
-    const nL = _target[0].z / Math.max(0.01, S / 2);
+    const gaitLeg = brokenLeft ? _target[1] : _target[0];
+    const nL = gaitLeg.z / Math.max(0.01, S / 2);
     const gaitYaw = -0.14 * clamp(nL, -1, 1) * move * groundW * lerp(0.6, 1, run);
     const strafe = speed > 0.5 ? Math.atan2(lx, Math.abs(lz) + 0.6) * 0.55 * move : 0;
     const strafeYaw = sp.hipYaw.step(strafe * groundW, dt);
     // The hips take a fifth of any torso twist (swings, bladed aiming) so the turn reads full-body.
     const hipYaw = strafeYaw + gaitYaw + sp.twist.x * 0.2;
-    const hipRoll = 0.05 * Math.sin(TAU * this.phase) * move * groundW;
+    const limpRoll = brokenLeft && !brokenRight ? 0.16 : brokenRight && !brokenLeft ? -0.16 : 0;
+    const hipRoll = 0.05 * Math.sin(TAU * this.phase) * move * groundW + limpRoll;
     let hipPitch = 0.06 * run * groundW;
     if (mode === 'slide') hipPitch = -0.28;
     else if (mode === 'dash') hipPitch += 0.18 * dashZ * dashE;
@@ -493,6 +524,13 @@ export class Animator {
     r.hips.getWorldQuaternion(_qc);
     for (let i = 0; i < 2; i++) {
       const leg = r.legs[i];
+      if (i === 0 ? brokenLeft : brokenRight) {
+        // Leave the severed stump out of foot placement and ground support.
+        leg.thigh.quaternion.setFromAxisAngle(X_AXIS, 0.45);
+        leg.shin.quaternion.identity();
+        leg.foot.quaternion.identity();
+        continue;
+      }
       const side = i === 0 ? 1 : -1;
       _v.copy(_target[i]).applyMatrix4(m.matrixWorld);
       _pole.set(side * 0.12, mode === 'slide' && i === 1 ? -0.6 : 0, 1).normalize().applyQuaternion(_qc);
@@ -653,6 +691,8 @@ export class Animator {
       blendQ(a.fore.quaternion, _fkF, a.fore.quaternion, wIK, bm[1]);
       blendQ(a.hand.quaternion, _fkH, a.hand.quaternion, wIK, bm[2]);
     } else a.hand.quaternion.identity();
+    if (mode === 'dead') this.updateRagdoll(dt, s);
+    else if (this.ragdoll) this.resetRagdoll();
   }
 
   // Caps how fast a gripping hand may turn (chest-relative): steady motion passes untouched, but a
@@ -771,4 +811,139 @@ export class Animator {
         return null;
     }
   }
+}
+
+// ---------------------------------------------------------------- ragdoll
+// The parts a biped can lose (combat/HitComponents.js), by the bone each hangs from.
+const BIPED_PARTS = {
+  head: (r) => r.head, leftArm: (r) => r.armL.upper, rightArm: (r) => r.armR.upper,
+  leftLeg: (r) => r.legs[0].thigh, rightLeg: (r) => r.legs[1].thigh,
+};
+const KNEE = new THREE.Vector3(0, 0, -1);   // a shin folds back from its thigh (KNEE_BEND), and of the pelvis
+const ELBOW = new THREE.Vector3(0, 0, 1);   // a forearm forward from its upper arm (ELBOW_BEND)
+const FORWARD = new THREE.Vector3(0, 0, 1);
+const DOWN = new THREE.Vector3(0, -1, 0);
+const V3 = (x, y, z) => new THREE.Vector3(x, y, z);
+// Which ways the torso's outline is found (model frame): front, back, sides and between.
+const LOWER_SHELL = [V3(0, 0, 1), V3(0, 0, -1), V3(1, 0, 0), V3(-1, 0, 0), V3(1, 0, 1), V3(-1, 0, 1), V3(1, 0, -1), V3(-1, 0, -1),
+  V3(0, -1, -1), V3(0, -1, 1), V3(1, -1, 0), V3(-1, -1, 0), V3(0, -1, -0.3)];
+const UPPER_SHELL = [V3(0, 0, 1), V3(0, 0, -1), V3(1, 0, 0), V3(-1, 0, 0), V3(1, 0, 1), V3(-1, 0, 1), V3(1, 0, -1), V3(-1, 0, -1), V3(1, 1, 0), V3(-1, 1, 0)];
+
+// A humanoid's ragdoll: balls at the pelvis, spine, chest, neck, head, shoulders, elbows, wrists,
+// hips, knees, ankles and toes; the torso braced into one piece that bends a little at the spine;
+// knees and elbows hinges that fold one way; hips and shoulders twist only so far.
+export function humanoidRagdoll(r, s) {
+  const rd = new Ragdoll(r.model, (r.height ?? 2.05) / 2.05);
+  const V = (x, y, z) => new THREE.Vector3(x, y, z);
+  const pelvis = rd.point(r.hips, null, 0.15);
+  const spine = rd.point(r.spine, null, 0.13);
+  const chest = rd.point(r.chest, null, 0.15);
+  const neck = rd.point(r.head, null, 0.07);
+  const arms = [r.armL, r.armR].map((a) => {
+    const wr = rd.point(a.hand, null, 0.05);
+    // Something big in the hand (a shield, a maul) is a stiff piece of its own, as wide as it
+    // is; a bare or lightly armed fist is a ball at the knuckles.
+    const reach = Math.max(0, ...rd.outline([a.hand]).map((p) => p.distanceTo(rd.points[wr].p))) / (rd.scale * rd.size);
+    const held = reach > 0.32 ? rd.piece(a.hand, [a.hand], wr, V(0, -1, 0), V(1, 0, 0), 0.05, 10, 0.18) : null;
+    return {
+      a, sh: rd.point(a.upper, null, 0.07), el: rd.point(a.fore, null, 0.055), wr,
+      fist: held?.end >= 0 ? held.end : rd.tip(a.hand, V(0, -1, 0), 0.045, 0.04), held,
+    };
+  });
+  const legs = r.legs.map((l) => {
+    const toe = rd.tip(l.foot, V(0, -0.35, 1), 0.05, 0.06);
+    return {
+      l, hip: rd.point(l.thigh, null, 0.09), knee: rd.point(l.shin, null, 0.07), ankle: rd.point(l.foot, null, 0.06),
+      toe: toe >= 0 ? toe : rd.point(l.foot, V(0, -0.05, 0.16), 0.05), heel: rd.tip(l.foot, V(0, -0.5, -1), 0.045, 0.03),
+    };
+  });
+  // Joints as thick as the limbs round them (armour, a heavy build).
+  for (const { a, sh, el, wr, fist } of arms) {
+    rd.thick(sh, a.upper, el, 0.2);
+    rd.thick(el, a.fore, wr, 0.16);
+    rd.thick(wr, a.fore, el, 0.16);
+    // (What's in the fist, when it's part of the body: a blade.)
+    rd.thick(fist, a.hand, wr, 0.3);
+  }
+  for (const { l, hip, knee, ankle } of legs) {
+    rd.thick(hip, l.thigh, knee, 0.2);
+    rd.thick(knee, l.shin, ankle, 0.16);
+    rd.thick(ankle, l.shin, knee, 0.16);
+  }
+  const [L, R] = arms;
+  const [LL, RL] = legs;
+  // The torso: pelvis, hips and spine one rigid block; the chest, neck and shoulders another;
+  // between them the spine bends and turns a little. Each block's outline (belly, back, sides,
+  // shoulders, armour) is balls too, so it lies on the ground as wide as it is.
+  const lowerShell = rd.shell([r.hips, r.spine], LOWER_SHELL, 0.05, r.hips, 16);
+  const upperShell = rd.shell([r.chest], UPPER_SHELL, 0.05, r.chest, 12);
+  const lower = rd.group([pelvis, spine, LL.hip, RL.hip, ...lowerShell]);
+  const upper = rd.group([chest, neck, L.sh, R.sh, ...upperShell]);
+  rd.twist(lower, upper, [spine, chest], [RL.hip, LL.hip], [R.sh, L.sh], 0.7);
+  // The head (and whatever it wears: a helmet, a crest) one stiff piece on its neck.
+  const skull = rd.piece(r.head, [r.head, r.skull].filter(Boolean), neck, V(0, 1, 0), V(1, 0, 0), 0.06, 8, 0.12);
+  const head = skull.end;
+  // It turns and tips only so far: each side of it stays about as far from its shoulder.
+  rd.range(L.sh, skull.left, 0.85, 1.18); rd.range(R.sh, skull.right, 0.85, 1.18);
+  rd.range(L.sh, skull.right, 0.85, 1.18); rd.range(R.sh, skull.left, 0.85, 1.18);
+  rd.link(spine, chest);
+  rd.range(spine, L.sh, 0.93, 1.03); rd.range(spine, R.sh, 0.93, 1.03);
+  rd.range(pelvis, chest, 0.88, 1.01);
+  for (const h of [LL.hip, RL.hip]) for (const sh of [L.sh, R.sh]) rd.range(h, sh, 0.85, 1.06);
+  // The head nods and turns only so far.
+  rd.range(chest, head, 0.86, 1.01);
+  rd.range(L.sh, head, 0.8, 1.15); rd.range(R.sh, head, 0.8, 1.15);
+  for (const { sh, el, wr, fist, held } of arms) {
+    rd.link(sh, el, 1, true); rd.link(el, wr, 1, true);
+    // The hand bends at the wrist only so far.
+    if (!held) rd.link(wr, fist);
+    rd.bend(el, wr, fist, 0.9);
+    rd.apart(sh, wr, 0.3);
+    // Arms stay out of the body.
+    const body = 0.15 * rd.size;
+    rd.apart(el, spine, 0, body + 0.01); rd.apart(wr, spine, 0, body); rd.apart(wr, pelvis, 0, body); rd.apart(wr, chest, 0, body);
+  }
+  const shanks = new Map();
+  // The pelvis's frame (side, up, forward), for the hips' and knees' limits.
+  const hips = [pelvis, spine, RL.hip, LL.hip];
+  for (const { l, hip, knee, ankle, toe, heel } of legs) {
+    rd.link(hip, knee, 1, true);
+    // Shin and foot one stiff piece: knee, ankle, toe and heel (a dead body's ankles don't
+    // flex to speak of).
+    shanks.set(l, rd.group([knee, ankle, toe, heel]));
+    rd.apart(hip, ankle, 0.35);
+    rd.apart(knee, chest, 0.5);
+    rd.hinge(hip, knee, ankle, hips, FORWARD, 0.9, true);
+    rd.reach(hip, knee, hips, FORWARD, -0.22 * rd.size);
+    // …and only so far up: a thigh rises to about level, curled or flung out sideways; it swings
+    // out to the side about 50°, and in across the other a little.
+    rd.reach(hip, knee, hips, DOWN, -0.25 * rd.size);
+    const thigh = rd.points[hip].p.distanceTo(rd.points[knee].p) / rd.scale;
+    const out = l === r.legs[0] ? V3(1, 0, 0) : V3(-1, 0, 0);
+    rd.reach(hip, knee, hips, out.clone().negate(), -0.78 * thigh);
+    rd.reach(hip, knee, hips, out, -0.42 * thigh);
+  }
+  rd.apart(LL.knee, RL.knee, 0, 0.14 * rd.size); rd.apart(LL.ankle, RL.ankle, 0, 0.12 * rd.size);
+  // How the bones follow, root first.
+  rd.drive(r.hips, 'root', pelvis, spine, { side: [RL.hip, LL.hip], group: lower });
+  rd.drive(r.spine, 'frame', spine, chest, { side: [RL.hip, LL.hip], cone: 1.8 });
+  rd.drive(r.chest, 'frame', chest, neck, { side: [R.sh, L.sh], group: upper, cone: 1.8 });
+  if (skull.ok) rd.drive(r.head, 'frame', skull.pivot, skull.end, { side: [skull.right, skull.left], group: skull.group, cone: 2.2 });
+  else rd.drive(r.head, 'frame', neck, head, { side: [R.sh, L.sh], cone: 2.2 });
+  for (const { a, sh, el, wr, fist, held } of arms) {
+    rd.drive(a.upper, 'limb', sh, el, { next: wr, bend: ELBOW });
+    rd.drive(a.fore, 'hinge', el, wr, { bend: ELBOW, lo: 0, hi: 2.8 });
+    if (held?.ok) rd.drive(a.hand, 'frame', held.pivot, held.end, { side: [held.right, held.left], group: held.group, cone: 2.4 });
+    else rd.drive(a.hand, 'aim', wr, fist, { cone: 2.4 });
+  }
+  for (const { l, hip, knee, ankle, toe, heel } of legs) {
+    rd.drive(l.thigh, 'limb', hip, knee, { next: ankle, bend: KNEE, ref: hips, refDir: KNEE, refSwing: true, cone: 2.8 });
+    // The shin turned with its foot (one piece), so the foot sits on it as it did.
+    rd.drive(l.shin, 'frame', knee, ankle, { side: [ankle, toe], group: shanks.get(l), cone: 2.8 });
+    if (heel >= 0) rd.drive(l.foot, 'frame', ankle, toe, { side: [ankle, heel], group: shanks.get(l), cone: 2.4 });
+    else rd.drive(l.foot, 'aim', ankle, toe, { cone: 2.4 });
+  }
+  const { velocity, kick } = deathKick(s);
+  rd.start(velocity, kick, [chest, neck, head, L.sh, R.sh, spine]);
+  return rd;
 }

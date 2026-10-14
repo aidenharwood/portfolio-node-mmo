@@ -156,8 +156,8 @@ export class RemotePlayer extends Player {
     if (this.trailSpawned || this.stateTime < a.windup || this.stateTime > a.windup + a.active + 0.1) return;
     this.trailSpawned = true;
     const w = this.weapon;
-    this.game.effects.spawnSlash(this.position, this.facing, {
-      arc: a.arc, range: a.range, vertical: a.vertical,
+    this.game.effects.spawnWeaponTrail(this.weaponModel, this.facing, {
+      direction: a.swing?.path === 'slashL' ? -1 : 1,
       color: w.element !== 'none' ? ELEMENTS[w.element].color : MANUFACTURERS[w.manufacturer].palette.energy,
     });
   }

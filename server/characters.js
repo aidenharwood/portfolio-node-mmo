@@ -35,6 +35,7 @@ export function loadCharacter(session, data, simhost) {
     position, world: simhost.world, strict: true,
   });
   core.inCombat = () => simhost.inCombat(session);
+  core.eventTier = () => simhost.eventTier(session);
   core.dungeons = simhost.dungeonPort(session);
   const extras = { discovery: data?.discovery ?? null, marker: data?.marker ?? null, tracked: data?.tracked ?? null, pos: data?.pos ?? null };
   // Left in a dungeon (its copy may be gone): back where they went in.
@@ -52,13 +53,8 @@ export function loadCharacter(session, data, simhost) {
     const at = extras.pos ?? [HUB.x, 0, HUB.z + 4];
     for (const it of spill) core.spawn(core.gid(), it, at, [], false);
   } else {
-    // A new character: a plain sword, and three weapons waiting by the camp to choose from.
+    // A new character starts with a plain sword.
     inventory.add(generateWeapon({ seed: 7, level: 1, type: 'sword', rarity: 'common' }));
-    for (const [cls, x] of [['ranged', -2.5], ['magic', 0], ['melee', 2.5]]) {
-      const gx = HUB.x + x;
-      const gz = HUB.z - 7.5;
-      core.spawn(core.gid(), generateWeapon({ level: 1, cls, rarity: 'uncommon' }), [gx, w.groundHeight(gx, gz), gz], [], false);
-    }
     extras.pos = [HUB.x, w.groundHeight(HUB.x, HUB.z + 4), HUB.z + 4];
   }
   // A new character starts in the Pathfinder trail set; an older one without it gets the cape.

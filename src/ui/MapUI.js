@@ -1,11 +1,18 @@
 // Full-screen world map (M) of the explored world: terrain tiles of every chunk you've seen under
 // a soft fog, roads, region names, camps and strongholds, waystones, chests, the quest target and
-// a custom marker. Drag to pan, wheel to zoom (far enough out to see everything explored), click
-// to place a marker (or travel from an attuned waystone), right-click to clear the marker.
+// a custom marker. Drag to pan, wheel or pinch to zoom (far enough out to see everything
+// explored), click or tap to place a marker (or travel from an attuned waystone), right-click or
+// a long press to clear the marker.
+//   The slow-changing part of the picture — terrain, roads and fog — is painted into an offscreen
+// canvas a margin bigger than the view and copied each frame (offset while panning, scaled while
+// zooming), and the map is only drawn again when something moves; so panning and pinching stay
+// smooth on a phone.
+//   Seen from above like the minimap, with the compass's north (−z) at the top and east (+x) to
+// the right. (The map tiles and fog are painted with +z at the top, so they're drawn flipped.)
 import { HUB, REGION } from '../world/Gen.js';
 import { CHUNK } from '../world/Chunks.js';
-import { FOG_PER_CHUNK } from '../world/Discovery.js';
 import { PARTY_COLOR } from './PartyUI.js';
+import { FogLayer } from './MapFog.js';
 
 export function levelColor(diff) {
   if (diff >= 3) return '#ff5a5a';
@@ -16,6 +23,12 @@ export function levelColor(diff) {
 }
 
 const RACE_COLOR = { scav: '#e8603a', hive: '#b07aff', synth: '#3ad8ff', fauna: '#ffb030' };
+const BG = '#0b0f18';       // the map's ground where nothing's been seen (the fog's own colour)
+const MARGIN = 256;         // CSS px of cached picture kept beyond each side of the view
+const REFRESH = 100;        // ms between redraws while nothing's being dragged (the player arrow, party)
+const SETTLE = 150;         // ms after the last zoom step before the picture's repainted at the new zoom
+const TILE_BUDGET = 4;      // ms a frame may spend painting tiles of chunks never loaded this session
+const font = (size) => `700 ${size}px "Chakra Petch", "Trebuchet MS", sans-serif`;
 
 function samePlaceName(a, b) {
   const na = (a ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
@@ -31,73 +44,31 @@ function sameRegionSettlement(settlement, region) {
   return !!settlement && !!region && samePlaceName(settlement.name, region.name) && !!settlement.way;
 }
 
-export function pickMapDrawStride({ width, height, zoom, chunkCount }) {
-  if (!Number.isFinite(width) || !Number.isFinite(height) || !Number.isFinite(zoom) || zoom <= 0) return 1;
-  const visibleArea = (width * height) / (zoom * zoom);
-  if (chunkCount <= 256 || visibleArea < 2_000_000) return 1;
-  return Math.min(8, Math.max(2, Math.ceil(Math.sqrt(chunkCount / 250))));
+// Whether the cached picture `base` (painted at base.zoom round base.cx, base.cz, base.w × base.h
+// CSS px) covers all of the view `v` (its centre, zoom and size).
+export function baseCovers(base, v) {
+  const bw = base.w / 2 / base.zoom;
+  const bh = base.h / 2 / base.zoom;
+  const vw = v.w / 2 / v.zoom;
+  const vh = v.h / 2 / v.zoom;
+  return v.cx - vw >= base.cx - bw - 1e-6 && v.cx + vw <= base.cx + bw + 1e-6
+    && v.cz - vh >= base.cz - bh - 1e-6 && v.cz + vh <= base.cz + bh + 1e-6;
 }
 
-// Draws explored chunk tiles plus a blurred fog over unexplored cells into `ctx`, for the world
-// rectangle visible through `toScreen` (shared by the map and the minimap).
-export function drawExplored(ctx, game, x0, z0, x1, z1, toScreen, px, budget = 6) {
-  const d = game.discovery;
-  const world = game.world;
-  const cx0 = Math.floor(x0 / CHUNK);
-  const cx1 = Math.floor(x1 / CHUNK);
-  const cz0 = Math.floor(z0 / CHUNK);
-  const cz1 = Math.floor(z1 / CHUNK);
-  const size = CHUNK * px;
-  const drawStride = pickMapDrawStride({ width: ctx.canvas.width, height: ctx.canvas.height, zoom: px, chunkCount: d.chunks.size });
-  let painted = 0;
-  ctx.imageSmoothingEnabled = true;
-  const wide = (cx1 - cx0 + 1) * (cz1 - cz0 + 1) > 2500;
-  const each = (fn) => {
-    if (wide) {
-      for (const key of d.chunks.keys()) {
-        const [cx, cz] = key.split(',').map(Number);
-        if (cx >= cx0 && cx <= cx1 && cz >= cz0 && cz <= cz1) {
-          if (drawStride > 1 && ((cx + cz) % drawStride) !== 0) continue;
-          fn(cx, cz);
-        }
-      }
-    } else for (let cx = cx0; cx <= cx1; cx++) for (let cz = cz0; cz <= cz1; cz++) if (d.mask(cx, cz)) fn(cx, cz);
-  };
-  each((cx, cz) => {
-    let tile = world.tiles.get((cx + 32768) * 65536 + (cz + 32768));
-    if (!tile && painted < budget) {
-      tile = world.tileFor(cx, cz);
-      painted++;
-    }
-    if (!tile) return;
-    const [sx, sy] = toScreen(cx * CHUNK, (cz + 1) * CHUNK);
-    ctx.drawImage(tile, sx, sy, size + 0.5, size + 0.5);
-  });
-  // Fog: one pixel per 8 m cell over the visible chunk range, scaled up and blurred.
-  const W = (cx1 - cx0 + 1) * FOG_PER_CHUNK;
-  const H = (cz1 - cz0 + 1) * FOG_PER_CHUNK;
-  if (W * H > 600000) return;
-  const fog = (drawExplored.fog ??= document.createElement('canvas'));
-  if (fog.width !== W || fog.height !== H) { fog.width = W; fog.height = H; }
-  const fctx = fog.getContext('2d');
-  const img = fctx.createImageData(W, H);
-  const a = img.data;
-  for (let i = 0; i < W * H; i++) { a[i * 4] = 11; a[i * 4 + 1] = 15; a[i * 4 + 2] = 24; a[i * 4 + 3] = 235; }
-  each((cx, cz) => {
-    const m = d.mask(cx, cz);
-    for (let b = 0; b < 64; b++) {
-      if (!((m[b >> 5] >>> (b & 31)) & 1)) continue;
-      const ix = (cx - cx0) * FOG_PER_CHUNK + (b % FOG_PER_CHUNK);
-      const iz = (cz - cz0) * FOG_PER_CHUNK + Math.floor(b / FOG_PER_CHUNK);
-      const row = H - 1 - iz;
-      a[(row * W + ix) * 4 + 3] = 0;
-    }
-  });
-  fctx.putImageData(img, 0, 0);
-  const [fx, fy] = toScreen(cx0 * CHUNK, (cz1 + 1) * CHUNK);
-  ctx.filter = `blur(${Math.max(2, Math.min(24, px * 10))}px)`;
-  ctx.drawImage(fog, fx, fy, (cx1 - cx0 + 1) * size, (cz1 - cz0 + 1) * size);
-  ctx.filter = 'none';
+// Whether the cached picture has to be painted again for the view `v` at time `now` (ms): never
+// painted, the window or what's explored has changed, the view's panned out of it, the zoom has
+// settled somewhere new, or tiles it was waiting for have come in. Mid-zoom, the old picture
+// scaled stands in (beyond its edges is the fog's colour anyway) unless it's stretched too far.
+export function baseStale(base, v, now) {
+  if (!base) return true;
+  if (base.vw !== v.w || base.vh !== v.h || base.dpr !== v.dpr || base.version !== v.version) return true;
+  if (v.zoom !== base.zoom) {
+    if (now - v.zoomedAt > SETTLE && !v.pinching) return true;
+    const s = v.zoom / base.zoom;
+    return (s < 0.5 || s > 2) && now - base.at > 200;
+  }
+  if (!baseCovers(base, v)) return true;
+  return !base.complete && (v.tilesReady || now - base.at > 250);
 }
 
 export class MapUI {
@@ -110,8 +81,20 @@ export class MapUI {
     this.cx = 0;
     this.cz = 0;
     this.zoom = 1;
+    this.w = this.canvas.width;  // CSS px (the canvas itself is dpr times that)
+    this.h = this.canvas.height;
+    this.dpr = 1;
     this.drag = null;
     this.hover = null;
+    this.base = null;            // the cached picture (see paintBase)
+    this.missing = [];           // chunks whose tiles the cached picture is waiting for
+    this.fog = new FogLayer([11, 15, 24, 235], 2);
+    this.labels = [];
+    this.widths = new Map();     // label text widths, by size and text
+    this.dirty = true;
+    this.drawnAt = 0;
+    this.zoomedAt = 0;
+    if (typeof ResizeObserver === 'function') new ResizeObserver(() => { this.sizeDirty = true; }).observe(this.canvas);
 
     // Mouse, pen or fingers: drag to pan, click or tap to travel or mark, right-click or a long
     // press to clear the marker, wheel or pinch to zoom.
@@ -121,6 +104,7 @@ export class MapUI {
       this.touches.set(e.pointerId, pt);
       try { this.canvas.setPointerCapture(e.pointerId); } catch { /* not an active pointer */ }
       this.mouse = pt;
+      this.dirty = true;
       if (this.touches.size === 2) { this.drag = null; this.pinch = this.pinchState(); return; }
       if (e.button !== 0) return;
       this.drag = { x: e.clientX, y: e.clientY, cx: this.cx, cz: this.cz, moved: false, at: performance.now() };
@@ -129,6 +113,7 @@ export class MapUI {
       if (!this.isOpen) return;
       const pt = this.local(e);
       this.mouse = pt;
+      this.dirty = true;
       if (this.touches.has(e.pointerId)) this.touches.set(e.pointerId, pt);
       if (this.pinch && this.touches.size === 2) { this.pinchTo(); return; }
       if (!this.drag) return;
@@ -136,10 +121,11 @@ export class MapUI {
       const dy = e.clientY - this.drag.y;
       if (Math.abs(dx) + Math.abs(dy) > 6) this.drag.moved = true;
       this.cx = this.drag.cx - dx / this.zoom;
-      this.cz = this.drag.cz + dy / this.zoom;
+      this.cz = this.drag.cz - dy / this.zoom;
     });
     const end = (e) => {
       this.touches.delete(e.pointerId);
+      this.dirty = true;
       if (this.pinch) { if (this.touches.size < 2) this.pinch = null; this.drag = null; return; }
       if (!this.isOpen || !this.drag) return;
       const { moved, at } = this.drag;
@@ -153,14 +139,17 @@ export class MapUI {
     this.canvas.addEventListener('contextmenu', (e) => {
       e.preventDefault();
       this.game.customMarker = null;
+      this.dirty = true;
     });
     this.canvas.addEventListener('wheel', (e) => {
       e.preventDefault();
-      const before = this.toWorld(this.mouse?.x ?? this.canvas.width / 2, this.mouse?.y ?? this.canvas.height / 2);
+      const before = this.toWorld(this.mouse?.x ?? this.w / 2, this.mouse?.y ?? this.h / 2);
       this.zoom = Math.min(6, Math.max(0.08, this.zoom * (e.deltaY > 0 ? 0.85 : 1.18)));
-      const after = this.toWorld(this.mouse?.x ?? this.canvas.width / 2, this.mouse?.y ?? this.canvas.height / 2);
+      const after = this.toWorld(this.mouse?.x ?? this.w / 2, this.mouse?.y ?? this.h / 2);
       this.cx += before.x - after.x;
       this.cz += before.z - after.z;
+      this.zoomedAt = performance.now();
+      this.dirty = true;
     }, { passive: false });
   }
 
@@ -172,34 +161,41 @@ export class MapUI {
     this.cz = p.z;
     this.el.classList.remove('hidden');
     this.resize();
-    this.zoom = Math.max(0.6, Math.min(this.canvas.width, this.canvas.height) / 360);
+    this.zoom = Math.max(0.6, Math.min(this.w, this.h) / 360);
+    this.mouse = null;
+    this.dirty = true;
   }
 
   close() { this.el.classList.add('hidden'); }
 
+  // The canvas at the screen's resolution (up to 2× on phones, so text and icons stay sharp).
   resize() {
     const r = this.canvas.getBoundingClientRect();
-    this.canvas.width = r.width;
-    this.canvas.height = r.height;
+    this.dpr = Math.min(2, window.devicePixelRatio || 1);
+    this.w = Math.max(1, Math.round(r.width));
+    this.h = Math.max(1, Math.round(r.height));
+    this.canvas.width = Math.round(this.w * this.dpr);
+    this.canvas.height = Math.round(this.h * this.dpr);
+    this.sizeDirty = false;
+    this.dirty = true;
   }
 
   toScreen(x, z) {
-    return [this.canvas.width / 2 + (x - this.cx) * this.zoom, this.canvas.height / 2 - (z - this.cz) * this.zoom];
+    return [this.w / 2 + (x - this.cx) * this.zoom, this.h / 2 + (z - this.cz) * this.zoom];
   }
 
   toWorld(sx, sy) {
-    return { x: this.cx + (sx - this.canvas.width / 2) / this.zoom, z: this.cz - (sy - this.canvas.height / 2) / this.zoom };
+    return { x: this.cx + (sx - this.w / 2) / this.zoom, z: this.cz + (sy - this.h / 2) / this.zoom };
   }
 
   viewRect() {
-    const a = this.toWorld(0, this.canvas.height);
-    const b = this.toWorld(this.canvas.width, 0);
+    const a = this.toWorld(0, 0);
+    const b = this.toWorld(this.w, this.h);
     return [a.x, a.z, b.x, b.z];
   }
 
-  // Regions overlapping the view (capped when zoomed far out).
-  regionsInView() {
-    const [x0, z0, x1, z1] = this.viewRect();
+  // Regions overlapping a world rectangle (none when zoomed so far out there'd be too many).
+  regionsIn(x0, z0, x1, z1) {
     const gen = this.game.world.gen;
     const out = [];
     const r0 = gen.cellOf(x0 - REGION, z0 - REGION);
@@ -209,8 +205,14 @@ export class MapUI {
     return out;
   }
 
-  // Things you can point at on the map (only discovered ones).
+  regionsInView() { return this.regionsIn(...this.viewRect()); }
+
+  // Things you can point at on the map (only discovered ones). Kept for a moment for the same
+  // view: a frame's drawing and the hover test share it.
   pois() {
+    const now = performance.now();
+    const key = `${this.cx},${this.cz},${this.zoom},${this.w},${this.h}`;
+    if (this.poiCache?.key === key && now - this.poiCache.at < 500) return this.poiCache.list;
     const g = this.game;
     const d = g.discovery;
     const out = [];
@@ -245,6 +247,7 @@ export class MapUI {
         else if (p.type === 'landmark' || p.type === 'story') out.push({ kind: 'landmark', x: p.x, z: p.z, name: p.name, story: !!p.story });
       }
     }
+    this.poiCache = { key, at: now, list: out };
     return out;
   }
 
@@ -296,6 +299,7 @@ export class MapUI {
     const mid = this.toWorld((a.x + b.x) / 2, (a.y + b.y) / 2);
     this.cx += p.world.x - mid.x;
     this.cz += p.world.z - mid.z;
+    this.zoomedAt = performance.now();
   }
 
   click() {
@@ -310,35 +314,74 @@ export class MapUI {
     this.game.customMarker = { x: w.x, z: w.z };
   }
 
-  draw() {
-    if (!this.isOpen) return;
+  // The cached picture: explored terrain, the roads seen and the fog, over the view and a margin
+  // round it, at the current zoom.
+  paintBase(now) {
     const g = this.game;
-    const ctx = this.ctx;
-    const W = this.canvas.width;
-    const H = this.canvas.height;
-    ctx.fillStyle = '#0b0f18';
-    ctx.fillRect(0, 0, W, H);
-    // Down in a dungeon, the map is its rooms seen so far.
-    if (g.dungeonView?.active) {
-      g.dungeonView.drawMap(ctx, W, H);
-      this.label(W / 2, 46, g.dungeonView.def.name.toUpperCase(), '#ffe2a8', 18);
-      this.info.textContent = `${g.dungeonView.def.name} · Lv ${g.dungeonView.run.lv} — the rooms you've seen so far`;
-      return;
+    const d = g.discovery;
+    // (At the screen's own resolution rather than the canvas's: the tiles are coarser than either,
+    // and a quarter of the pixels to fill on a phone.)
+    const dpr = 1;
+    const z = this.zoom;
+    const w = this.w + MARGIN * 2;
+    const h = this.h + MARGIN * 2;
+    const b = (this.base ??= { canvas: document.createElement('canvas') });
+    const c = b.canvas;
+    if (c.width !== Math.round(w * dpr) || c.height !== Math.round(h * dpr)) {
+      c.width = Math.round(w * dpr);
+      c.height = Math.round(h * dpr);
     }
-    const [x0, z0, x1, z1] = this.viewRect();
-    drawExplored(ctx, g, x0, z0, x1, z1, (x, z) => this.toScreen(x, z), this.zoom);
+    Object.assign(b, { cx: this.cx, cz: this.cz, zoom: z, w, h, vw: this.w, vh: this.h, dpr: this.dpr, version: d.version, at: now });
+    const ctx = c.getContext('2d');
+    // Painted upside down (+z up, as the tiles and the fog are), then flipped onto the canvas.
+    ctx.setTransform(dpr, 0, 0, -dpr, 0, h * dpr);
+    ctx.fillStyle = BG;
+    ctx.fillRect(0, 0, w, h);
+    const toScreen = (x, zz) => [w / 2 + (x - b.cx) * z, h / 2 - (zz - b.cz) * z];
+    const x0 = b.cx - w / 2 / z;
+    const x1 = b.cx + w / 2 / z;
+    const z0 = b.cz - h / 2 / z;
+    const z1 = b.cz + h / 2 / z;
+    const cx0 = Math.floor(x0 / CHUNK);
+    const cx1 = Math.floor(x1 / CHUNK);
+    const cz0 = Math.floor(z0 / CHUNK);
+    const cz1 = Math.floor(z1 / CHUNK);
 
-    const regions = this.regionsInView();
-    if (this.zoom > 0.2) {
+    // Explored terrain, a tile per chunk. Chunks never loaded this session have no tile yet: they're
+    // painted a few a frame (nearest the middle first) and the picture's repainted as they come.
+    const size = CHUNK * z;
+    const missing = [];
+    ctx.imageSmoothingEnabled = true;
+    const tile = (cx, cz) => {
+      const t = g.world.tiles.get((cx + 32768) * 65536 + (cz + 32768));
+      if (!t) { missing.push([cx, cz]); return; }
+      const [sx, sy] = toScreen(cx * CHUNK, (cz + 1) * CHUNK);
+      ctx.drawImage(t, sx, sy, size + 0.5, size + 0.5);
+    };
+    if ((cx1 - cx0 + 1) * (cz1 - cz0 + 1) > d.chunks.size) {
+      for (const key of d.chunks.keys()) {
+        const i = key.indexOf(',');
+        const cx = +key.slice(0, i);
+        const cz = +key.slice(i + 1);
+        if (cx >= cx0 && cx <= cx1 && cz >= cz0 && cz <= cz1) tile(cx, cz);
+      }
+    } else for (let cx = cx0; cx <= cx1; cx++) for (let cz = cz0; cz <= cz1; cz++) if (d.mask(cx, cz)) tile(cx, cz);
+    const mx = Math.floor(this.cx / CHUNK);
+    const mz = Math.floor(this.cz / CHUNK);
+    this.missing = missing.sort((p, q) => Math.hypot(q[0] - mx, q[1] - mz) - Math.hypot(p[0] - mx, p[1] - mz));
+    b.complete = !missing.length;
+
+    // Roads, as far as they've been seen.
+    if (z > 0.2) {
       ctx.strokeStyle = 'rgba(214,180,120,0.9)';
-      ctx.lineWidth = Math.max(1.2, 2.6 * this.zoom * 0.6);
-      for (const r of regions) {
+      ctx.lineWidth = Math.max(1.2, 2.6 * z * 0.6);
+      for (const r of this.regionsIn(x0, z0, x1, z1)) {
         for (const path of r.roads) {
           ctx.beginPath();
           let pen = false;
-          for (const [x, z] of path) {
-            const known = g.discovery.isKnown(x, z);
-            const [sx, sy] = this.toScreen(x, z);
+          for (const [x, zz] of path) {
+            const known = d.isKnown(x, zz);
+            const [sx, sy] = toScreen(x, zz);
             if (known && pen) ctx.lineTo(sx, sy); else if (known) ctx.moveTo(sx, sy);
             pen = known;
           }
@@ -346,15 +389,68 @@ export class MapUI {
         }
       }
     }
-    for (const r of regions) {
-      if (r.hub || !g.discovery.isKnown(r.x, r.z)) continue;
+
+    // The fog over the cells not yet seen (ui/MapFog.js).
+    if (this.fog.cover(d, cx0, cz0, cx1, cz1)) {
+      const f = this.fog.bounds;
+      const [sx, sy] = toScreen(f.x, f.zTop);
+      ctx.drawImage(this.fog.canvas, sx, sy, f.w * z, f.h * z);
+    }
+  }
+
+  // Paints some of the tiles the cached picture is waiting for.
+  paintMissing() {
+    if (!this.missing.length) return;
+    const t0 = performance.now();
+    while (this.missing.length && performance.now() - t0 < TILE_BUDGET) {
+      const [cx, cz] = this.missing.pop();
+      this.game.world.tileFor(cx, cz);
+    }
+  }
+
+  draw() {
+    if (!this.isOpen) return;
+    const g = this.game;
+    const now = performance.now();
+    if (this.sizeDirty) this.resize();
+    const indoors = g.dungeonView?.active;
+    if (!indoors) this.paintMissing();
+    const view = {
+      cx: this.cx, cz: this.cz, zoom: this.zoom, w: this.w, h: this.h, dpr: this.dpr, version: g.discovery.version,
+      zoomedAt: this.zoomedAt, pinching: !!this.pinch, tilesReady: !this.missing.length,
+    };
+    const stale = !indoors && baseStale(this.base, view, now);
+    // Nothing moved: the player's arrow, party members and the like are brought up to date a few
+    // times a second.
+    if (!stale && !this.dirty && now - this.drawnAt < REFRESH) return;
+    this.dirty = false;
+    this.drawnAt = now;
+    if (stale) this.paintBase(now);
+
+    const ctx = this.ctx;
+    const W = this.w;
+    const H = this.h;
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    ctx.fillStyle = BG;
+    ctx.fillRect(0, 0, W, H);
+    // Down in a dungeon, the map is its rooms seen so far.
+    if (indoors) {
+      g.dungeonView.drawMap(ctx, W, H);
+      this.label(W / 2, 46, g.dungeonView.def.name.toUpperCase(), '#ffe2a8', 18);
+      this.setInfo(`${g.dungeonView.def.name} · Lv ${g.dungeonView.run.lv} — the rooms you've seen so far`);
+      return;
+    }
+    const b = this.base;
+    const s = this.zoom / b.zoom;
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(b.canvas, W / 2 + (b.cx - b.w / 2 / b.zoom - this.cx) * this.zoom, H / 2 + (b.cz - b.h / 2 / b.zoom - this.cz) * this.zoom, b.w * s, b.h * s);
+
+    for (const r of this.regionsInView()) {
+      if (r.hub || !g.discovery.isKnown(r.x, r.z) || this.zoom < 0.45) continue;
       const [sx, sy] = this.toScreen(r.x, r.z);
-      if (this.zoom < 0.45) continue;
-      const name = r.name.toUpperCase();
-      this.label(sx, sy - 26, name, RACE_COLOR[r.race], 14);
       const areaWay = r.pois.find((p) => isRegionAnchorWaystone(r, p));
-      if (areaWay && g.attuned.has(areaWay.id)) this.icon(sx - ctx.measureText(name).width / 2 - 9, sy - 30, 'badge');
-      if (this.zoom > 0.62) this.label(sx, sy - 12, `Lv ${r.level}`, levelColor(r.level - g.stats.level), 11);
+      this.queueLabel(sx, sy - 26, r.name.toUpperCase(), RACE_COLOR[r.race], 14, 60, !!areaWay && g.attuned.has(areaWay.id));
+      if (this.zoom > 0.62) this.queueLabel(sx, sy - 12, `Lv ${r.level}`, levelColor(r.level - g.stats.level), 11, 58);
     }
 
     for (const p of this.pois()) {
@@ -364,42 +460,62 @@ export class MapUI {
       if (this.zoom < 0.65 && !waystoneAnchor) continue;
       if (p.kind === 'camp') {
         this.icon(sx, sy, p.boss ? 'boss' : 'camp', p.cleared, RACE_COLOR[p.race]);
-        if (this.zoom > 0.5 || p.boss) this.label(sx, sy + 18, `${p.name} · Lv ${p.level}`, levelColor(p.level - g.stats.level));
+        if (this.zoom > 0.5 || p.boss) this.queueLabel(sx, sy + 18, `${p.name} · Lv ${p.level}`, levelColor(p.level - g.stats.level), 12, p.boss ? 45 : 40);
       } else if (p.kind === 'waystone') {
         const region = this.game.world.gen.regionAt(p.x, p.z);
         const attachedToRegion = !!region && (p.anchor || isRegionAnchorWaystone(region, { type: 'waystone', name: p.name, x: p.x, z: p.z }));
         if (attachedToRegion) continue;
         this.icon(sx, sy, 'waystone', !p.active);
-        if (this.zoom > 1.2 || this.hover === p) this.label(sx, sy + 16, p.name, p.active ? '#7fe8ff' : '#aaa');
+        if (this.zoom > 1.2 || this.hover === p) this.queueLabel(sx, sy + 16, p.name, p.active ? '#7fe8ff' : '#aaa', 12, 25);
       } else if (p.kind === 'settlement') {
         this.icon(sx, sy, 'settlement');
         if (p.id) this.icon(sx + 12, sy - 10, 'waystone', !p.active);
-        this.label(sx, sy + 18, p.name, '#ffe2a8');
+        this.queueLabel(sx, sy + 18, p.name, '#ffe2a8', 12, 50);
       } else if (p.kind === 'hamlet') {
         this.icon(sx, sy, 'hamlet');
-        if (this.zoom > 0.6 || this.hover === p) this.label(sx, sy + 15, p.name, '#ffe2a8', 11);
+        if (this.zoom > 0.6 || this.hover === p) this.queueLabel(sx, sy + 15, p.name, '#ffe2a8', 11, 30);
       } else if (p.kind === 'town') {
         this.icon(sx, sy, 'town');
         if (p.active) this.icon(sx + 13, sy - 11, 'badge');
-        this.label(sx, sy + 22, p.name, '#ffe2a8', 13);
+        this.queueLabel(sx, sy + 22, p.name, '#ffe2a8', 13, 70);
       } else if (p.kind === 'city') {
         this.icon(sx, sy, 'city', !p.known);
         if (p.active) this.icon(sx + 15, sy - 14, 'badge');
-        this.label(sx, sy + 26, p.name.toUpperCase(), p.known ? '#ffd27a' : '#c8b48a', 15);
-        if (!p.known) this.label(sx, sy + 40, `Act ${p.act}`, '#a89878', 11);
+        this.queueLabel(sx, sy + 26, p.name.toUpperCase(), p.known ? '#ffd27a' : '#c8b48a', 15, 80);
+        if (!p.known) this.queueLabel(sx, sy + 40, `Act ${p.act}`, '#a89878', 11, 79);
       } else if (p.kind === 'landmark') {
         // The story's own places in gold.
         this.icon(sx, sy, 'landmark', false, p.story ? '#ffcf7a' : null);
-        if (this.zoom > 0.35 || this.hover === p || p.story) this.label(sx, sy + 18, p.name, p.story ? '#ffe2a8' : '#d8c8ff');
+        if (this.zoom > 0.35 || this.hover === p || p.story) this.queueLabel(sx, sy + 18, p.name, p.story ? '#ffe2a8' : '#d8c8ff', 12, p.story ? 44 : 35);
       } else if (this.zoom > 0.4) {
         this.icon(sx, sy, 'chest');
       }
     }
 
+    // Public events (ui/EventUI.js): where each one is, and what it is.
+    for (const m of g.eventUI?.markers() ?? []) {
+      const [sx, sy] = this.toScreen(m.x, m.z);
+      const color = m.stage === 'gather' ? '#ffd25a' : '#ff6a4a';
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(sx, sy, Math.max(7, m.r * this.zoom), 0, Math.PI * 2);
+      ctx.fillStyle = `${color}22`;
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = color;
+      ctx.stroke();
+      ctx.restore();
+      this.label(sx, sy - Math.max(7, m.r * this.zoom) - 6, m.name, color, 12);
+    }
     const wp = g.questWaypoint();
     if (wp) {
       const [sx, sy] = this.toScreen(wp.x, wp.z);
-      this.questMarker(sx, sy, wp.kind ?? 'default', Math.max(8, (wp.radius ?? 4) * this.zoom * 0.9));
+      if (['goto', 'defend', 'clear'].includes(wp.kind) && wp.radius > 8) this.searchArea(sx, sy, wp.kind, wp.radius * this.zoom);
+      this.questMarker(sx, sy, wp.kind ?? 'default', 8);
+      const q = g.tracked && g.quests?.defs?.get(g.tracked);
+      if (q && sx > 24 && sx < W - 24 && sy > 42 && sy < H - 28) {
+        this.queueLabel(sx, sy - 18, `★ ${q.title}`, '#ffe08a', 12, 100);
+      }
     }
     if (g.customMarker) {
       const [sx, sy] = this.toScreen(g.customMarker.x, g.customMarker.z);
@@ -416,13 +532,14 @@ export class MapUI {
       ctx.arc(sx, sy, 6, 0, Math.PI * 2);
       ctx.stroke();
       ctx.fill();
-      this.label(sx, sy - 12, m.name, PARTY_COLOR);
+      this.queueLabel(sx, sy - 12, m.name, PARTY_COLOR, 12, 90);
     }
+    this.flushLabels();
     const p = g.player;
     const [px, py] = this.toScreen(p.position.x, p.position.z);
     ctx.save();
     ctx.translate(px, py);
-    ctx.rotate(p.facing);
+    ctx.rotate(Math.PI - p.facing); // (facing is atan2(x, z); the arrow's drawn pointing up, −z)
     ctx.fillStyle = '#fff';
     ctx.strokeStyle = '#0a0c13';
     ctx.lineWidth = 3;
@@ -447,7 +564,46 @@ export class MapUI {
       this.label(sx, sy + (this.hover.hoverDy ?? -18), hoverLabel(this.hover), c, 12);
     }
     const here = g.world.regionAt(p.position.x, p.position.z);
-    this.info.textContent = `${here.name} · Lv ${here.level} — Drag to pan · Wheel to zoom · Click to place a marker · Right-click clears it · Click an attuned waystone to fast travel`;
+    this.setInfo(g.touchActive
+      ? `${here.name} · Lv ${here.level} — Drag to pan · Pinch to zoom · Tap to place a marker · Hold to clear it · Tap an attuned waystone to fast travel`
+      : `${here.name} · Lv ${here.level} — Drag to pan · Wheel to zoom · Click to place a marker · Right-click clears it · Click an attuned waystone to fast travel`);
+  }
+
+  setInfo(text) {
+    if (this.infoText !== text) this.info.textContent = this.infoText = text;
+  }
+
+  // Labels go down most important first; one that would overlap a label already down is left out,
+  // which keeps a zoomed-out map (or a phone's) readable. A `badge` is the attuned-waystone mark
+  // before a region's name.
+  queueLabel(x, y, text, color, size = 12, prio = 0, badge = false) {
+    this.labels.push({ x, y, text, color, size, prio, badge });
+  }
+
+  flushLabels() {
+    const placed = [];
+    const list = this.labels.sort((a, b) => b.prio - a.prio);
+    this.labels = [];
+    for (const l of list) {
+      const half = this.textWidth(l.text, l.size) / 2 + 2;
+      const r = { x0: l.x - half, x1: l.x + half, y0: l.y - l.size, y1: l.y + l.size * 0.3 };
+      if (placed.some((q) => r.x0 < q.x1 && r.x1 > q.x0 && r.y0 < q.y1 && r.y1 > q.y0)) continue;
+      placed.push(r);
+      this.label(l.x, l.y, l.text, l.color, l.size);
+      if (l.badge) this.icon(r.x0 - 7, l.y - 4, 'badge');
+    }
+  }
+
+  textWidth(text, size) {
+    const key = `${size}|${text}`;
+    let w = this.widths.get(key);
+    if (w === undefined) {
+      this.ctx.font = font(size);
+      w = this.ctx.measureText(text).width;
+      if (this.widths.size > 2000) this.widths.clear();
+      this.widths.set(key, w);
+    }
+    return w;
   }
 
   questMarkerStyle(kind = 'default') {
@@ -465,14 +621,42 @@ export class MapUI {
     return styles[kind] ?? styles.default;
   }
 
+  searchArea(x, y, kind, radius) {
+    const ctx = this.ctx;
+    const s = this.questMarkerStyle(kind);
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.fillStyle = `${s.fill}08`;
+    ctx.fill();
+    ctx.setLineDash([5, 7]);
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = `${s.fill}70`;
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+  }
+
   questMarker(x, y, kind, radius = 9) {
     const ctx = this.ctx;
     const s = this.questMarkerStyle(kind);
     const r = radius;
     ctx.save();
     ctx.translate(x, y);
+    // A marker radius is visual size only; the objective's search radius is drawn separately.
+    ctx.shadowColor = 'rgba(0,0,0,.65)';
+    ctx.shadowBlur = 7;
+    ctx.beginPath();
+    ctx.arc(0, 0, r + 4, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(8,12,20,.82)';
+    ctx.fill();
+    ctx.strokeStyle = s.stroke;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.shadowColor = 'transparent';
+    ctx.shadowBlur = 0;
     ctx.lineWidth = 2.5;
-    ctx.strokeStyle = '#0a0c13';
+    ctx.strokeStyle = '#101723';
     ctx.fillStyle = s.fill;
     ctx.beginPath();
     if (s.mark === 'diamond') {
@@ -521,7 +705,7 @@ export class MapUI {
 
   label(x, y, text, color, size = 12) {
     const ctx = this.ctx;
-    ctx.font = `700 ${size}px "Chakra Petch", "Trebuchet MS", sans-serif`;
+    ctx.font = font(size);
     ctx.textAlign = 'center';
     ctx.lineWidth = 3.5;
     ctx.strokeStyle = '#0a0c13';

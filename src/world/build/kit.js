@@ -29,7 +29,7 @@ const archGeo = (r, depth) => new THREE.CylinderGeometry(r, r, depth, 12, 1, fal
 
 // draw: false where nothing is drawn (the server's world): a building gives its colliders only.
 // doors: a list to note each front door's doorstep in (world x, y, z) for tools/buildcheck.mjs.
-export const KIT = { draw: true, doors: null };
+export const KIT = { draw: true, detail: true, doors: null };
 
 // ---------------------------------------------------------------- the plan
 /**
@@ -46,19 +46,21 @@ export function planBuilding(o, seed) {
   const { wd, dp } = o;
   const ht = o.ht ?? 3;
   const storeys = o.storeys ?? 1;
-  const form = o.barn ? 'gable' : o.flat ? pick(S.flatRoofs) : pick(S.roofs);
+  const form = o.barn ? 'gable' : o.roofForm ?? (o.flat ? pick(S.flatRoofs) : pick(S.roofs));
   const masses = [];
   const shapeRoll = rnd();
-  const shape = o.simple || o.barn || wd < 5.4 || dp < 4.4 ? 'rect' : shapeRoll < 0.3 ? 'L' : shapeRoll < 0.42 ? 'T' : 'rect';
+  const shape = o.simple || o.barn || wd < 5.4 || dp < 4.4 ? 'rect' : o.footprint ?? (shapeRoll < 0.24 ? 'L' : shapeRoll < 0.34 ? 'T' : shapeRoll < 0.43 ? 'U' : shapeRoll < 0.5 ? 'court' : 'rect');
   // Gables to the street (the ridge running front to back) on narrow, deep-enough houses — and
   // always on a barn.
   const frontGable = o.barn || ((form === 'gable' || form === 'hip') && wd <= dp * 1.25 && chance(S.frontGable));
   if (shape === 'rect') {
     masses.push({ x: 0, z: 0, wd, dp, storeys, form, ridge: frontGable ? 'z' : 'x', main: true });
-  } else {
+  } else if (shape === 'L' || shape === 'T') {
     const mainDp = dp * (0.56 + rnd() * 0.1);
     const wingW = Math.max(2.6, Math.min(wd * 0.5, wd * (0.36 + rnd() * 0.14)));
-    const wingDp = dp - mainDp + 0.5;
+    // Meet the main block at its rear wall. Extending the wing into it made their
+    // exterior side walls coplanar over the overlap, which caused visible z-fighting.
+    const wingDp = dp - mainDp;
     const side = rnd() < 0.5 ? -1 : 1;
     const wingForm = form === 'dome' || form === 'sawtooth' ? 'parapet' : form;
     masses.push({ x: 0, z: dp / 2 - mainDp / 2, wd, dp: mainDp, storeys, form, ridge: 'x', main: true });
@@ -66,6 +68,19 @@ export function planBuilding(o, seed) {
       x: shape === 'T' ? 0 : side * (wd / 2 - wingW / 2), z: -dp / 2 + wingDp / 2, wd: wingW, dp: wingDp,
       storeys: storeys > 1 && chance(0.5) ? storeys - 1 : storeys, form: wingForm, ridge: 'z',
     });
+  } else if (shape === 'U') {
+    const sideW = Math.min(wd * 0.28, Math.max(2.2, wd * 0.22));
+    const backDp = Math.min(dp * 0.38, Math.max(2.2, dp * 0.3));
+    const wingDp = dp - backDp;
+    masses.push({ x: 0, z: -dp / 2 + backDp / 2, wd, dp: backDp, storeys, form, ridge: 'x', main: true });
+    for (const side of [-1, 1]) masses.push({ x: side * (wd / 2 - sideW / 2), z: -dp / 2 + backDp + wingDp / 2, wd: sideW, dp: wingDp, storeys, form, ridge: 'z' });
+  } else if (shape === 'court') {
+    const edge = Math.min(2.6, wd * 0.22, dp * 0.22);
+    masses.push({ x: 0, z: dp / 2 - edge / 2, wd, dp: edge, storeys, form, ridge: 'x', main: true });
+    masses.push({ x: 0, z: -dp / 2 + edge / 2, wd, dp: edge, storeys, form, ridge: 'x' });
+    for (const side of [-1, 1]) masses.push({ x: side * (wd / 2 - edge / 2), z: 0, wd: edge, dp: dp - edge * 2, storeys, form, ridge: 'z' });
+  } else {
+    masses.push({ x: 0, z: 0, wd, dp, storeys, form, ridge: frontGable ? 'z' : 'x', main: true });
   }
   const ov = S.overhang ?? 0.32;
   for (const m of masses) {
@@ -78,12 +93,12 @@ export function planBuilding(o, seed) {
   const main = masses[0];
   const doorW = o.barn ? wd * 0.44 : o.doorW ?? 1.1;
   const plan = {
-    o, S, styleName, rnd, ht, ov, masses, main,
+    o, S, styleName, footprint: shape, detail: KIT.detail, rnd, ht, ov, masses, main,
     wall: o.wall, roof: o.roof, trim: o.trim ?? C.metalDark,
     wallSurf: o.wallSurf ?? wallSurface(o.wall), roofSurf: o.roofSurf ?? roofSurface(o.roof),
     glow: S.strip ?? LAMP,
     door: {
-      x: o.barn ? 0 : o.doorX ?? (wd > 4.5 ? -wd * 0.22 : 0), w: doorW, h: o.barn ? ht * 0.68 : o.doorH ?? 2.0,
+      x: o.barn || shape === 'U' ? (o.doorX ?? 0) : o.doorX ?? (wd > 4.5 ? -wd * 0.22 : 0), w: doorW, h: o.barn ? ht * 0.68 : o.doorH ?? 2.0,
       arch: !!S.arch && doorW < 2, col: pick(DOORS), barn: !!o.barn,
     },
     shutter: !o.barn && chance(S.shutters) ? pick(SHUTTERS) : null,
@@ -98,11 +113,11 @@ export function planBuilding(o, seed) {
     tarp: pick(TARPS),
     dormers: main.form !== 'shed' && main.ridge === 'x' && main.rise > 1.4 && main.dp >= 4.4 && chance(S.dormers) ? (wd > 7 ? 2 : 1) : 0,
     chimney: o.chimney ? (rnd() < 0.5 ? -1 : 1) : 0,
-    clutter: Math.floor(rnd() * 4),
+    clutter: KIT.detail ? Math.floor(rnd() * 4) : 0,
     window: { w: styleName === 'dry' ? 0.75 : 0.9, h: styleName === 'tech' || styleName === 'warden' ? 0.7 : 0.95 },
   };
   // One rotated box per block, from the ground to the top of its roof.
-  plan.cols = masses.map((m) => ({ x: m.x, z: m.z, hx: m.wd / 2 + 0.05, hz: m.dp / 2 + 0.05, h: m.H + m.rise + 0.5 }));
+  plan.cols = masses.map((m) => ({ x: m.x, z: m.z, hx: m.wd / 2 + 0.05, hz: m.dp / 2 + 0.05, h: m.H + m.rise + 0.5, surface: plan.wallSurf }));
   return plan;
 }
 
@@ -228,6 +243,7 @@ function walls(h, plan, m) {
   const H = m.H;
   piece(h, box(m.wd + 0.3, 0.4, m.dp + 0.3), S.plinth, { pos: [m.x, 0.15, m.z], outline: 0.02, pattern: plan.styleName === 'wet' ? 'planks' : 'blocks' });
   piece(h, box(m.wd, H, m.dp), plan.wall, { pos: [m.x, H / 2 + 0.05, m.z], outline: 0.04, pattern: plan.wallSurf });
+  if (!plan.detail) return;
   for (let s = 1; s < m.storeys; s++) piece(h, box(m.wd + 0.2, 0.16, m.dp + 0.2), plan.trim, { pos: [m.x, s * ht + 0.05, m.z], outline: 0.012 });
   const flat = m.form === 'parapet' || m.form === 'crenel' || m.form === 'dome' || m.form === 'sawtooth';
   if (plan.quoins) {
@@ -388,8 +404,10 @@ export function buildPlan(h, plan) {
     walls(h, plan, m);
     tops.push(roof(h, plan, m));
   }
-  door(h, plan);
-  extras(h, plan, tops);
+  if (plan.detail) {
+    door(h, plan);
+    extras(h, plan, tops);
+  }
   return plan.cols;
 }
 
@@ -402,7 +420,7 @@ export function building(h, o) {
     h.updateWorldMatrix(true, false);
     const m = plan.main;
     const v = new THREE.Vector3(plan.door.x, 0, m.z + m.dp / 2 + 1.1).applyMatrix4(h.matrixWorld);
-    KIT.doors.push({ x: v.x, y: v.y, z: v.z, w: plan.door.w });
+    KIT.doors.push({ x: v.x, y: v.y, z: v.z, w: plan.door.w, footprint: plan.footprint });
   }
   return buildPlan(h, plan);
 }
@@ -411,5 +429,5 @@ export function building(h, o) {
 export function bodyCols(w, x, z, ry, cols) {
   const c = Math.cos(ry);
   const s = Math.sin(ry);
-  for (const b of cols) w.addOrientedBox(x + c * b.x + s * b.z, z - s * b.x + c * b.z, b.hx, b.hz, ry, b.h);
+  for (const b of cols) w.addOrientedBox(x + c * b.x + s * b.z, z - s * b.x + c * b.z, b.hx, b.hz, ry, b.h, undefined, b.surface);
 }

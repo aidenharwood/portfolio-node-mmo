@@ -10,8 +10,9 @@
 //              its colliders
 //   sky        the fog and sky take on the colour (and the fog its depth) of the biome you're in
 //   roads      ribbons draped over the terrain between waystones, camps and landmarks
-//   colliders  a spatial hash with ownership, so streamed-out content takes its colliders with it:
-//              round ones (trees, rocks, posts, folk) and boxes (a dungeon's walls and doors)
+//   colliders  a spatial hash with ownership, so streamed-out content takes its colliders with it;
+//              scenery and built props use clipped mesh geometry where available, with box/circle
+//              fallbacks for abstract walls, doors and folk
 //   pockets    dungeons (world/Interior.js) are built far out east, past anywhere the land goes:
 //              there the ground is their floors, nothing of the land streams in, and no place of
 //              the world stands
@@ -19,7 +20,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { instancedToon, toonMaterial, disposeObject, noInk } from '../render/Toon.js';
 import { piece, bakeTree, flatten, G, shade } from '../render/ModelKit.js';
-import { building, bodyCols } from './build/kit.js';
+import { building, bodyCols, KIT } from './build/kit.js';
 import { mulberry32 } from '../core/rng.js';
 import { WorldGen, REGION, WATER_LEVEL, HUB } from './Gen.js';
 import { Chunk, CHUNK, RES0 } from './Chunks.js';
@@ -30,6 +31,7 @@ import { STORY_BUILDERS, foundryYard, placeObjects, objectProps } from './StoryS
 import { NPCS } from './mapData.js';
 import { inPocket, POCKET } from './dungeons.js';
 import { storyPlaces } from './story.js';
+import { attachMeshCollider, buildMeshColliderData, colliderCovers, meshCeilingAt, meshContainsPoint, meshSupportAt, pushOutOfMeshWalls } from './MeshCollision.js';
 
 const GRID = 8;
 const TAU = Math.PI * 2;
@@ -42,6 +44,37 @@ const SKY = {
 };
 const FOG = { jungle: [60, 200], marsh: [60, 210], fungal: [55, 200], ash: [60, 210], desert: [100, 270], snow: [70, 230] };
 const FOG_DEFAULT = [80, 240];
+const DAY_LENGTH = 720;
+const SUNSET = new THREE.Color(0xffa86b);
+const BLUE_SKY = new THREE.Color(0x4e91d0);
+const DAY_HEMI = new THREE.Color(0xdff1ff);
+const NIGHT_HEMI = new THREE.Color(0x596b9a);
+const DAY_GROUND = new THREE.Color(0x6a8f5a);
+const NIGHT_GROUND = new THREE.Color(0x252b48);
+const DAY_SUN = new THREE.Color(0xfff4e0);
+const NIGHT_SUN = new THREE.Color(0x8fa8ff);
+const NIGHT_SKY = new THREE.Color(0x10172e);
+const _skyColor = new THREE.Color();
+const SKY_VERTEX = `varying vec3 vDirection; void main() { vDirection = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`;
+const SKY_FRAGMENT = `
+  varying vec3 vDirection;
+  uniform vec3 uDayTop, uDayHorizon, uNightTop, uNightHorizon;
+  uniform float uNight, uTime;
+  void main() {
+    vec3 d = normalize(vDirection);
+    float h = smoothstep(-0.16, 0.64, d.y);
+    vec3 sky = mix(mix(uDayHorizon, uDayTop, h), mix(uNightHorizon, uNightTop, h), uNight);
+    float horizonGlow = exp(-abs(d.y) * 13.0);
+    sky += vec3(1.0, 0.48, 0.24) * horizonGlow * (1.0 - uNight) * 0.12;
+    vec3 cell = floor(d * 850.0);
+    float seed = fract(sin(dot(cell, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
+    float stars = step(0.9985, seed);
+    sky += vec3(0.62, 0.7, 0.92) * stars * (0.65 + 0.35 * sin(uTime * 2.0 + d.x * 90.0 + d.z * 61.0)) * smoothstep(0.18, 0.86, uNight);
+    gl_FragColor = vec4(sky, 1.0);
+    #include <tonemapping_fragment>
+    #include <colorspace_fragment>
+  }
+`;
 
 const VIEW = 4;            // chunks kept loaded around the player (Chebyshev radius)
 const LOD0_DIST = 110;
@@ -51,6 +84,8 @@ const DETAIL_DIST = 120;   // grass, flowers and glowing flora
 const COLLIDE_DIST = 150;  // tree and rock colliders
 const POI_LOAD = 300;
 const POI_UNLOAD = 360;
+const BUILD_DETAIL_NEAR = 110;
+const BUILD_DETAIL_FAR = 140;
 const LANDMARK_LOAD = 420; // landmarks and cities are big: built before they loom out of the fog
 const LANDMARK_UNLOAD = 480;
 const BIG = new Set(['landmark', 'city', 'district', 'citywall']);
@@ -187,16 +222,35 @@ const _e = new THREE.Euler();
 const _v = new THREE.Vector3();
 const _s = new THREE.Vector3();
 const _col = new THREE.Color();
+const _from = new THREE.Vector3();
+// How far past its outline a prop's mesh is asked whether a point is inside it.
+const MESH_REACH = 0.6;
 
 // Pushes a circle (`pos`, `radius`) out of box collider `c`: away from the box's nearest point, or
-// (its centre inside) out by the shortest way.
-function pushOutOfBox(pos, radius, c) {
+// (its centre inside) back out the side it came in by (`from`, where it was before), else out by
+// the shortest way.
+function pushOutOfBox(pos, radius, c, from = null) {
   const angle = c.ry ?? 0;
   const cos = Math.cos(angle);
   const sin = Math.sin(angle);
   const dx = pos.x - c.x;
   const dz = pos.z - c.z;
   const local = { x: cos * dx - sin * dz, z: sin * dx + cos * dz };
+  if (from && Math.abs(local.x) < c.hx && Math.abs(local.z) < c.hz) {
+    const fx = from.x - c.x;
+    const fz = from.z - c.z;
+    const lx = cos * fx - sin * fz;
+    const lz = sin * fx + cos * fz;
+    const outX = Math.abs(lx) - c.hx;
+    const outZ = Math.abs(lz) - c.hz;
+    if (outX > 0 || outZ > 0) {
+      if (outX >= outZ) local.x = Math.sign(lx) * (c.hx + radius);
+      else local.z = Math.sign(lz) * (c.hz + radius);
+      pos.x = c.x + cos * local.x + sin * local.z;
+      pos.z = c.z - sin * local.x + cos * local.z;
+      return;
+    }
+  }
   const qx = Math.min(c.hx, Math.max(-c.hx, local.x));
   const qz = Math.min(c.hz, Math.max(-c.hz, local.z));
   const ox = local.x - qx;
@@ -233,6 +287,7 @@ export class World {
     this.onPoiUnload = null;
     this.skyBiome = 'meadow';
     this.skyTimer = 0;
+    this.dayTime = 0.2;
     this.waystones = new Map(); // loaded waystones (id → state)
     this.chests = new Map();    // loaded chests
     this.root = new THREE.Group();
@@ -366,8 +421,8 @@ export class World {
     return this.addOrientedBox(x, z, hx, hz, 0, h, y);
   }
 
-  addOrientedBox(x, z, hx, hz, ry, h = 3, y = this.groundHeight(x, z)) {
-    const c = this.addCollider(x, z, Math.hypot(hx, hz), h, y);
+  addOrientedBox(x, z, hx, hz, ry, h = 3, y = this.groundHeight(x, z), surface = 'stone') {
+    const c = this.addCollider(x, z, Math.hypot(hx, hz), h, y, surface);
     c.box = true;
     c.hx = hx;
     c.hz = hz;
@@ -375,11 +430,30 @@ export class World {
     return c;
   }
 
-  addCollider(x, z, r, h = 3, y = this.groundHeight(x, z)) {
-    const c = { x, z, r, h, y, cells: [] };
+  addCollider(x, z, r, h = 3, y = this.groundHeight(x, z), surface = 'stone', meshData = null) {
+    const c = { x, z, r, h, y, surface, cells: [] };
+    if (meshData?.meshGeometry) attachMeshCollider(c, meshData);
     this.colliders.add(c);
-    for (let ix = Math.floor((x - r) / GRID); ix <= Math.floor((x + r) / GRID); ix++) {
-      for (let iz = Math.floor((z - r) / GRID); iz <= Math.floor((z + r) / GRID); iz++) {
+    this.gridAdd(c);
+    this.own?.colliders.push(c);
+    return c;
+  }
+
+  // Files a collider in the grid cells under it: its outline, and its mesh's triangles where they
+  // reach past that.
+  gridAdd(c) {
+    let x0 = c.x - c.r;
+    let x1 = c.x + c.r;
+    let z0 = c.z - c.r;
+    let z1 = c.z + c.r;
+    if (c.tris) {
+      x0 = Math.min(x0, c.tris.x0);
+      x1 = Math.max(x1, c.tris.x1);
+      z0 = Math.min(z0, c.tris.z0);
+      z1 = Math.max(z1, c.tris.z1);
+    }
+    for (let ix = Math.floor(x0 / GRID); ix <= Math.floor(x1 / GRID); ix++) {
+      for (let iz = Math.floor(z0 / GRID); iz <= Math.floor(z1 / GRID); iz++) {
         const k = this.cellKey(ix, iz);
         let cell = this.grid.get(k);
         if (!cell) this.grid.set(k, (cell = []));
@@ -387,12 +461,9 @@ export class World {
         c.cells.push(k);
       }
     }
-    this.own?.colliders.push(c);
-    return c;
   }
 
-  removeCollider(c) {
-    if (!this.colliders.delete(c)) return;
+  gridRemove(c) {
     for (const k of c.cells) {
       const cell = this.grid.get(k);
       if (!cell) continue;
@@ -400,6 +471,20 @@ export class World {
       if (i !== -1) cell.splice(i, 1);
       if (!cell.length) this.grid.delete(k);
     }
+    c.cells.length = 0;
+  }
+
+  // Files a collider again (it was given its mesh after it went in).
+  regrid(c) {
+    if (!this.colliders.has(c)) return;
+    this.gridRemove(c);
+    this.gridAdd(c);
+  }
+
+  removeCollider(c) {
+    if (!this.colliders.delete(c)) return;
+    if (c.ownsMeshGeometry) c.meshGeometry?.dispose();
+    this.gridRemove(c);
   }
 
   collidersNear(x, z, r = 0) {
@@ -424,48 +509,137 @@ export class World {
     return seen;
   }
 
-  // Highest standable surface at (x, z) not above maxY (terrain or collider tops).
-  supportHeight(x, z, maxY = Infinity) {
+  // Highest standable surface at (x, z) not above maxY (terrain, collider tops, the floors of
+  // props' meshes). `ceilFrom` is the mover's step height: anything whose underside is above it is
+  // overhead, and its top can't be stepped (or jumped) up onto through it.
+  // (`near`: the colliders to ask, when the caller has them already.)
+  supportHeight(x, z, maxY = Infinity, ceilFrom = Infinity, near = this.collidersNear(x, z)) {
     let h = this.groundHeight(x, z);
-    for (const c of this.collidersNear(x, z)) {
-      const top = c.y + c.h;
-      if (top <= h || top > maxY) continue;
-      const dx = x - c.x;
-      const dz = z - c.z;
-      const angle = c.ry ?? 0;
-      const lx = Math.cos(angle) * dx - Math.sin(angle) * dz;
-      const lz = Math.sin(angle) * dx + Math.cos(angle) * dz;
-      if (c.box ? Math.abs(lx) < c.hx && Math.abs(lz) < c.hz : dx * dx + dz * dz < c.r * c.r) h = top;
+    for (const c of near) {
+      const top = c.tris ? c.tris.y1 : c.y + c.h;
+      if (top <= h) continue;
+      if (c.tris) {
+        const meshHeight = meshSupportAt(c, x, z, maxY, ceilFrom);
+        if (meshHeight !== null && meshHeight > h) h = meshHeight;
+        continue;
+      }
+      if (top > maxY || c.y > ceilFrom) continue;
+      if (colliderCovers(c, x, z, -1e-9)) h = top;
     }
     return h;
   }
 
-  // Pushes a circle at `pos` out of colliders it overlaps vertically. stepUp lets a mover ignore
-  // colliders whose top is within that height of its feet.
-  resolve(pos, radius, stepUp = 0, height = 1.8) {
-    for (const c of this.collidersNear(pos.x, pos.z, radius)) {
-      if (pos.y + stepUp >= c.y + c.h || pos.y + height <= c.y) continue;
-      if (c.box) { pushOutOfBox(pos, radius, c); continue; }
-      const dx = pos.x - c.x;
-      const dz = pos.z - c.z;
-      const min = c.r + radius;
-      const d2 = dx * dx + dz * dz;
-      if (d2 >= min * min) continue;
-      const d = Math.sqrt(d2) || 0.001;
-      pos.x = c.x + (dx / d) * min;
-      pos.z = c.z + (dz / d) * min;
+  // The lowest underside over (x, z) above fromY (a dungeon's ceiling, a platform, the cap of a
+  // rock): how high a body there can rise.
+  headroom(x, z, fromY) {
+    let ceil = this.ceilingAt(x, z);
+    for (const c of this.collidersNear(x, z)) {
+      if (c.tris) {
+        if (c.tris.y1 > fromY) ceil = Math.min(ceil, meshCeilingAt(c, x, z, fromY));
+        continue;
+      }
+      if (c.y + c.h <= fromY) continue;
+      if (c.y > fromY && c.y < ceil && colliderCovers(c, x, z, -1e-9)) ceil = c.y;
     }
+    return ceil;
+  }
+
+  // Pushes a circle at `pos` out of colliders it overlaps vertically. stepUp lets a mover ignore
+  // colliders whose top is within that height of its feet; `height` is how tall it is. `from`,
+  // where it stood before this move, keeps it on the side of a mesh's wall it came from. Props
+  // with meshes push with their walls only (see world/MeshCollision.js), so a mover can stand
+  // inside a ring or a hut as well as outside it. Corners take a few passes to settle. A walker
+  // steps over a mesh's few centimetres (`minStep`: a rug's edge, a sill, a root); a ragdoll's
+  // joint, asking with none, doesn't.
+  resolve(pos, radius, stepUp = 0, height = 1.8, from = null, minStep = 0.15, near = this.collidersNear(pos.x, pos.z, radius + 0.5)) {
+    for (let pass = 0; pass < 3; pass++) {
+      let moved = false;
+      for (const c of near) {
+        if (c.tris) {
+          const over = Math.max(stepUp, minStep);
+          if (pos.y + over >= c.tris.y1 || pos.y + height <= c.tris.y0) continue;
+          if (pushOutOfMeshWalls(c, pos, radius, pos.y + over, pos.y + height, from)) moved = true;
+          continue;
+        }
+        if (pos.y + stepUp >= c.y + c.h || pos.y + height <= c.y) continue;
+        const bx = pos.x;
+        const bz = pos.z;
+        if (c.box) pushOutOfBox(pos, radius, c, from);
+        else {
+          let dx = pos.x - c.x;
+          let dz = pos.z - c.z;
+          const min = c.r + radius;
+          const d2 = dx * dx + dz * dz;
+          if (d2 >= min * min) continue;
+          // Gone past the middle since `from`: back out on the side it came from.
+          if (from && dx * (from.x - c.x) + dz * (from.z - c.z) < 0) {
+            dx = from.x - c.x;
+            dz = from.z - c.z;
+          }
+          const d = Math.hypot(dx, dz) || 0.001;
+          pos.x = c.x + (dx / d) * min;
+          pos.z = c.z + (dz / d) * min;
+        }
+        if (Math.abs(pos.x - bx) + Math.abs(pos.z - bz) > 1e-7) moved = true;
+      }
+      if (!moved) break;
+    }
+  }
+
+  // Moves a body (feet at `pos`) by (dx, dz) through the colliders, in steps of at most half its
+  // radius, so a fast one (a slide, a dash, a knockback) can't pass through a wall between frames.
+  // The pushes the colliders gave add up in `push` (x, z), which says which way it ran into them.
+  move(pos, dx, dz, radius, stepUp = 0, height = 1.8, push = null) {
+    const len = Math.hypot(dx, dz);
+    const n = Math.min(24, Math.max(1, Math.ceil(len / Math.max(0.05, radius * 0.5))));
+    for (let i = 0; i < n; i++) {
+      _from.set(pos.x, pos.y, pos.z);
+      pos.x += dx / n;
+      pos.z += dz / n;
+      const bx = pos.x;
+      const bz = pos.z;
+      this.resolve(pos, radius, stepUp, height, _from);
+      if (push) {
+        push.x += pos.x - bx;
+        push.z += pos.z - bz;
+      }
+    }
+    return push;
+  }
+
+  // The slope of what a body standing at (x, y, z) is on, as rise per metre along x and z (it
+  // slides down it). Samples that drop away or rise up past what it could walk (the foot of a
+  // wall, a ledge, the void round a dungeon's rooms) are left out rather than read as a cliff.
+  surfaceSlope(x, y, z, stepUp = 0.5, out = { x: 0, z: 0 }) {
+    const e = 0.5;
+    const lim = e * 1.6;
+    const top = y + stepUp;
+    const h0 = this.supportHeight(x, z, top);
+    const axis = (sx, sz) => {
+      const dp = this.supportHeight(x + sx * e, z + sz * e, top) - h0;
+      const dm = h0 - this.supportHeight(x - sx * e, z - sz * e, top);
+      const okp = Math.abs(dp) <= lim;
+      const okm = Math.abs(dm) <= lim;
+      if (okp && okm) return (dp + dm) / (2 * e);
+      if (okp) return dp / e;
+      if (okm) return dm / e;
+      return 0;
+    };
+    out.x = axis(1, 0);
+    out.z = axis(0, 1);
+    return out;
   }
 
   blocks(pos) {
     for (const c of this.collidersNear(pos.x, pos.z)) {
-      const dx = pos.x - c.x;
-      const dz = pos.z - c.z;
-      const angle = c.ry ?? 0;
-      const lx = Math.cos(angle) * dx - Math.sin(angle) * dz;
-      const lz = Math.sin(angle) * dx + Math.cos(angle) * dz;
-      const inside = c.box ? Math.abs(lx) < c.hx && Math.abs(lz) < c.hz : dx * dx + dz * dz < c.r * c.r;
-      if (inside && pos.y >= c.y && pos.y <= c.y + c.h) return true;
+      const T = c.tris;
+      if (T) {
+        if (pos.y >= T.y0 && pos.y <= T.y1 && colliderCovers(c, pos.x, pos.z, MESH_REACH)
+          && pos.x >= T.x0 && pos.x <= T.x1 && pos.z >= T.z0 && pos.z <= T.z1 && meshContainsPoint(c, pos)) return true;
+        continue;
+      }
+      if (pos.y < c.y || pos.y > c.y + c.h) continue;
+      if (colliderCovers(c, pos.x, pos.z, -1e-9)) return true;
     }
     return false;
   }
@@ -525,7 +699,8 @@ export class World {
       const n = p.npcs?.find((m) => m.id === id);
       if (n) {
         n.place ??= p.id;
-        return n;
+        // An overrun settlement's folk have fled (sim/WorldEvents.js).
+        return this.overrun?.has(p.id) ? null : n;
       }
     }
     return null;
@@ -546,7 +721,7 @@ export class World {
     for (const n of NPCS) if (n.role === role && Math.hypot(n.x - x, n.z - z) <= reach) out.push(n);
     for (const r of this.gen.regionsNear(x, z, this._fr ??= [])) {
       for (const p of r.pois) {
-        if (!p.npcs || Math.hypot(p.x - x, p.z - z) > reach + 40) continue;
+        if (!p.npcs || Math.hypot(p.x - x, p.z - z) > reach + 40 || this.overrun?.has(p.id)) continue;
         for (const n of p.npcs) if (n.role === role && Math.hypot(n.x - x, n.z - z) <= reach) out.push(n);
       }
     }
@@ -601,16 +776,18 @@ export class World {
     if (!below && this.planned.distanceTo(focus) > 10) this.plan(focus);
     if (!below) this.work(BUDGET_MS);
     for (const f of this.flames) {
-      const k = 1 + Math.sin(time * 13 + f.seed) * 0.08 + Math.sin(time * 7.3 + f.seed) * 0.06;
-      f.group.scale.set(k, 1 + (k - 1) * 2.5, k);
-      if (f.light) f.light.intensity = f.base * (0.85 + (k - 1) * 2);
+      // Keep light output steady; fire motion comes from the flame tongues, not a flashing lamp.
+      if (f.light) {
+        const phase = f.seed;
+        f.light.intensity = f.base * (0.98 + Math.sin(time * 1.1 + phase) * 0.012 + Math.sin(time * 2.3 + phase * 1.7) * 0.008);
+      }
     }
     for (const s of this.shards) {
       s.group.rotation.y = time * 0.3 + s.seed;
       s.group.position.y = s.base + Math.sin(time * 0.8 + s.seed) * 0.5;
     }
     for (const s of this.spinners) s.group.rotation.z = time * s.speed;
-    if (!below) this.updateSky(dt, focus);
+    this.updateSky(dt, focus);
     for (const w of this.waystones.values()) {
       w.crystal.rotation.y = time * 1.2;
       w.ring.rotation.z = time * (w.active ? 2.4 : 0.4);
@@ -618,8 +795,14 @@ export class World {
     }
   }
 
-  // The sky and fog drift towards the colour (and depth) of the biome underfoot.
+  // Sky, fog and lighting drift through a full day while retaining the biome's palette.
   updateSky(dt, focus) {
+    this.dayTime = (this.dayTime + dt / DAY_LENGTH) % 1;
+    const angle = this.dayTime * TAU;
+    const sunY = Math.sin(angle);
+    const daylight = THREE.MathUtils.smoothstep(sunY, -0.16, 0.2);
+    const night = 1 - daylight;
+    const twilight = 1 - THREE.MathUtils.smoothstep(Math.abs(sunY), 0.04, 0.42);
     this.skyTimer -= dt;
     if (this.skyTimer <= 0) {
       this.skyTimer = 0.5;
@@ -628,11 +811,31 @@ export class World {
     const s = this.scene;
     if (!s.fog || !s.background?.isColor) return;
     const k = 1 - Math.exp(-Math.min(dt, 0.1) * 0.7);
-    s.background.lerp(_col.set(SKY[this.skyBiome] ?? SKY.meadow), k);
+    const biome = _col.set(SKY[this.skyBiome] ?? SKY.meadow);
+    const dayColor = _skyColor.copy(biome).lerp(SUNSET, twilight * 0.48);
+    const u = this.skyDome.material.uniforms;
+    u.uDayTop.value.copy(dayColor).lerp(BLUE_SKY, 0.38);
+    u.uDayHorizon.value.copy(dayColor);
+    u.uNight.value = night;
+    u.uTime.value += dt;
+    this.skyDome.position.set(focus.x, focus.y, focus.z);
+    s.background.lerp(_skyColor.copy(dayColor).lerp(NIGHT_SKY, night), k);
     s.fog.color.copy(s.background);
     const [near, far] = FOG[this.skyBiome] ?? FOG_DEFAULT;
-    s.fog.near += (near - s.fog.near) * k;
-    s.fog.far += (far - s.fog.far) * k;
+    s.fog.near += (THREE.MathUtils.lerp(near, near * 0.78, night) - s.fog.near) * k;
+    s.fog.far += (THREE.MathUtils.lerp(far, far * 0.82, night) - s.fog.far) * k;
+    this.hemi.intensity += (THREE.MathUtils.lerp(0.7, 0.075, night) - this.hemi.intensity) * k;
+    this.hemi.color.lerpColors(DAY_HEMI, NIGHT_HEMI, night * 0.8);
+    this.hemi.groundColor.lerpColors(DAY_GROUND, NIGHT_GROUND, night);
+    this.sun.intensity += (THREE.MathUtils.lerp(2.6, 0.008, night) - this.sun.intensity) * k;
+    this.sun.color.lerpColors(DAY_SUN, NIGHT_SUN, night * 0.85);
+    const sunX = Math.cos(angle);
+    this.sun.position.set(focus.x + sunX * 100, focus.y + sunY * 100, focus.z + 28);
+    this.sun.target.position.set(focus.x, focus.y, focus.z);
+    this.sunDisc.position.set(focus.x + sunX * 300, focus.y + sunY * 300, focus.z + 84);
+    this.moonDisc.position.set(focus.x - sunX * 300, focus.y - sunY * 300, focus.z - 84);
+    this.sunDisc.material.opacity = THREE.MathUtils.smoothstep(sunY, -0.04, 0.2);
+    this.moonDisc.material.opacity = night;
   }
 
   // Switches to another world (new game / loading a save): everything streamed out, new generator.
@@ -706,7 +909,20 @@ export class World {
         if (rd < ROAD_LOAD && r.roads.length && !this.roads.has(r.key)) jobs.push({ d: rd, run: () => this.loadRoads(r) });
       }
     }
-    for (const [id, o] of this.pois) if (Math.hypot(o.poi.x - focus.x, o.poi.z - focus.z) > (BIG.has(o.poi.type) ? LANDMARK_UNLOAD : POI_UNLOAD)) this.unload(o, this.pois, id);
+    for (const [id, o] of this.pois) {
+      const d = Math.hypot(o.poi.x - focus.x, o.poi.z - focus.z);
+      if (d > (BIG.has(o.poi.type) ? LANDMARK_UNLOAD : POI_UNLOAD)) this.unload(o, this.pois, id);
+      else if (o.detailed && d >= BUILD_DETAIL_FAR || !o.detailed && d <= BUILD_DETAIL_NEAR) {
+        const detailed = d < BUILD_DETAIL_NEAR;
+        jobs.push({ d, run: () => {
+          if (this.pois.get(id) !== o) return;
+          const now = Math.hypot(o.poi.x - this.focus.x, o.poi.z - this.focus.z);
+          if ((o.detailed && now < BUILD_DETAIL_FAR) || (!o.detailed && now > BUILD_DETAIL_NEAR)) return;
+          this.unload(o, this.pois, id);
+          this.loadPoi(o.poi, detailed);
+        } });
+      }
+    }
     for (const [k, o] of this.roads) if (Math.hypot(o.region.x - focus.x, o.region.z - focus.z) > ROAD_UNLOAD) this.unload(o, this.roads, k);
     jobs.sort((a, b) => a.d - b.d);
     this.jobs = jobs;
@@ -742,7 +958,7 @@ export class World {
     }
     if (ch.wantColliders && !ch.collided) {
       this.own = ch;
-      for (const c of ch.sceneryColliders) this.addCollider(c.x, c.z, c.r, c.h, c.y);
+      for (const c of ch.sceneryColliders) this.addCollider(c.x, c.z, c.r, c.h, c.y, c.surface, c);
       this.own = null;
       ch.collided = true;
     } else if (!ch.wantColliders && ch.collided) {
@@ -820,11 +1036,16 @@ export class World {
     const lists = {};
     const colors = {};
     const colliders = [];
-    const push = (k, x, y, z, s, { ry = rnd() * Math.PI * 2, sy = s, tilt = 0, color = null } = {}) => {
+    const push = (k, x, y, z, s, { ry = rnd() * Math.PI * 2, sy = s, tilt = 0, color = null, collision = false } = {}) => {
       _e.set(tilt * (rnd() - 0.5), ry, tilt * (rnd() - 0.5));
       _m.compose(_v.set(x, y, z), _q.setFromEuler(_e), _s.set(s, sy, s));
       (lists[k] ??= []).push(..._m.elements);
       if (color !== null) (colors[k] ??= []).push(color.r, color.g, color.b);
+      if (collision) {
+        // (The server has no scenery sets: its colliders are the plain shapes.)
+        const set = this.sets[k];
+        return set ? { meshGeometry: set.colors ? set.mesh.geometry : set.body.geometry, meshMatrix: _m.clone() } : {};
+      }
     };
     const pois = this.poisNear(ch.x0 + CHUNK / 2, ch.z0 + CHUNK / 2, CHUNK + 40);
     const blocked = (x, z) => {
@@ -882,51 +1103,54 @@ export class World {
         if (!kind || (slope > 0.9 && kind !== 'boulder' && kind !== 'rock')) continue;
         const s = 0.75 + rnd() * 0.7;
         if (kind === 'pine' || kind === 'round' || kind === 'snowPine') {
-          push(kind, x, y - 0.1, z, s);
+          const meshData = push(kind, x, y - 0.1, z, s, { collision: true });
           const m = lists[kind].slice(-16);
           (lists.trunk ??= []).push(...m);
-          colliders.push({ x, z, r: 0.4 * s, h: 6 * s, y });
+          if (meshData.meshGeometry) meshData.meshGeometry = this.sets.trunk.body.geometry;
+          colliders.push({ x, z, r: 0.36 * s, h: 2.2 * s, y, surface: 'planks', ...meshData });
         } else if (kind === 'palm') {
-          push('palm', x, y - 0.1, z, s, { tilt: 0.3 });
+          const meshData = push('palm', x, y - 0.1, z, s, { tilt: 0.3, collision: true });
           (lists.tallTrunk ??= []).push(...lists.palm.slice(-16));
-          colliders.push({ x, z, r: 0.35 * s, h: 6.5 * s, y });
+          if (meshData.meshGeometry) meshData.meshGeometry = this.sets.tallTrunk.body.geometry;
+          colliders.push({ x, z, r: 0.32 * s, h: 6.3 * s, y, surface: 'planks', ...meshData });
         } else if (kind === 'shroom') {
           const ss = s * (0.8 + rnd() * 0.9);
-          push('shroomCap', x, y - 0.05, z, ss, { tilt: 0.2 });
+          const meshData = push('shroomCap', x, y - 0.05, z, ss, { tilt: 0.2, collision: true });
           (lists.shroomStem ??= []).push(...lists.shroomCap.slice(-16));
-          colliders.push({ x, z, r: 0.45 * ss, h: 3.6 * ss, y });
+          if (meshData.meshGeometry) meshData.meshGeometry = this.sets.shroomStem.body.geometry;
+          colliders.push({ x, z, r: 0.43 * ss, h: 3.2 * ss, y, surface: 'chitin', ...meshData });
         } else if (kind === 'cactus') {
-          push('cactus', x, y - 0.1, z, s, { tilt: 0.12 });
-          colliders.push({ x, z, r: 0.45 * s, h: 4.4 * s, y });
+          const meshData = push('cactus', x, y - 0.1, z, s, { tilt: 0.12, collision: true });
+          colliders.push({ x, z, r: 1.65 * s, h: 4.4 * s, y, surface: 'chitin', ...meshData });
         } else if (kind === 'hoodoo') {
           const hs = 0.8 + rnd() * 0.9;
-          push('hoodoo', x, y - 0.3, z, hs, { tilt: 0.1 });
-          colliders.push({ x, z, r: 1.3 * hs, h: 6 * hs, y });
+          const meshData = push('hoodoo', x, y - 0.3, z, hs, { tilt: 0.1, collision: true });
+          colliders.push({ x, z, r: 1.65 * hs, h: 7.2 * hs, y, surface: 'rock', ...meshData });
         } else if (kind === 'crystal') {
           const cs = 0.7 + rnd() * 1.2;
-          push('crystal', x, y - 0.15, z, cs, { tilt: 0.4 });
-          colliders.push({ x, z, r: 0.8 * cs, h: 2.4 * cs, y });
+          const meshData = push('crystal', x, y - 0.15, z, cs, { tilt: 0.4, collision: true });
+          colliders.push({ x, z, r: 1.05 * cs, h: 2.4 * cs, y, surface: 'crystal', ...meshData });
         } else if (kind === 'spire') {
           const cs = 0.6 + rnd() * 0.8;
-          push('spire', x, y - 0.5, z, cs, { tilt: 0.35 });
-          colliders.push({ x, z, r: 0.9 * cs, h: 8 * cs, y });
+          const meshData = push('spire', x, y - 0.5, z, cs, { tilt: 0.35, collision: true });
+          colliders.push({ x, z, r: 1.05 * cs, h: 9.5 * cs, y, surface: 'crystal', ...meshData });
         } else if (kind === 'sandRock' || kind === 'redRock') {
           const rs = 0.5 + rnd() * 1.4;
-          push(kind, x, y + rs * 0.25, z, rs, { sy: rs * 0.7, tilt: 3 });
-          colliders.push({ x, z, r: rs * 0.85, h: rs, y });
+          const meshData = push(kind, x, y + rs * 0.25, z, rs, { sy: rs * 0.7, tilt: 3, collision: true });
+          colliders.push({ x, z, r: rs, h: rs * 1.2, y, surface: 'rock', ...meshData });
         } else if (kind === 'fern' || kind === 'dryBush' || kind === 'puff') {
           push(kind, x, kind === 'puff' ? y + s * 0.3 : y, z, s * (kind === 'fern' ? 1.1 : 1), { sy: kind === 'dryBush' ? s * 0.7 : s, tilt: 0.3 });
         } else if (kind === 'dead' || kind === 'charred') {
-          push(kind, x, y - 0.1, z, s);
-          colliders.push({ x, z, r: 0.35 * s, h: 4 * s, y });
+          const meshData = push(kind, x, y - 0.1, z, s, { collision: true });
+          colliders.push({ x, z, r: 1.25 * s, h: 3.8 * s, y, surface: 'planks', ...meshData });
         } else if (kind === 'rock') {
           const rs = 0.4 + rnd() * 1.1;
-          push('rock', x, y + rs * 0.25, z, rs, { sy: rs * 0.75, tilt: 3 });
-          colliders.push({ x, z, r: rs * 0.85, h: rs, y });
+          const meshData = push('rock', x, y + rs * 0.25, z, rs, { sy: rs * 0.75, tilt: 3, collision: true });
+          colliders.push({ x, z, r: rs, h: rs, y, surface: 'rock', ...meshData });
         } else if (kind === 'boulder') {
           const bs = 1.8 + rnd() * 2.6;
-          push('boulder', x, y + bs * 0.3, z, bs, { sy: bs * 0.8, tilt: 3 });
-          colliders.push({ x, z, r: bs * 0.85, h: bs * 1.05, y });
+          const meshData = push('boulder', x, y + bs * 0.3, z, bs, { sy: bs * 0.8, tilt: 3, collision: true });
+          colliders.push({ x, z, r: bs, h: bs * 1.3, y, surface: 'rock', ...meshData });
         } else if (kind === 'bush') {
           push('bush', x, y + s * 0.3, z, s * 1.1, { sy: s * 0.75, tilt: 1 });
         } else if (kind === 'reed') {
@@ -990,11 +1214,13 @@ export class World {
   }
 
   // ------------------------------------------------------------ points of interest
-  loadPoi(p) {
+  loadPoi(p, detailed = Math.hypot(p.x - this.focus.x, p.z - this.focus.z) < BUILD_DETAIL_NEAR) {
     if (this.pois.has(p.id)) return;
-    const o = { poi: p, group: new THREE.Group(), colliders: [] };
+    const o = { poi: p, group: new THREE.Group(), colliders: [], detailed };
     this.own = o;
     this.rnd = mulberry32(hashStr(p.id) ^ this.seed);
+    const previousDetail = KIT.detail;
+    KIT.detail = detailed;
     switch (p.type) {
       case 'hub': this.buildHub(); break;
       case 'camp': this.buildCamp(p); break;
@@ -1016,7 +1242,10 @@ export class World {
     // The story's own touches on a camp or a landmark, and the objects quests use there.
     if (p.story === 'foundry') foundryYard(this, p);
     if (p.story && p.type !== 'story') placeObjects(this, p);
+    buildMeshColliderData(o.colliders, o.group);
+    for (const c of o.colliders) if (c.tris) this.regrid(c);
     this.onPoiLoad?.(p, o);
+    KIT.detail = previousDetail;
     this.own = null;
     this.rnd = Math.random;
     this.root.add(o.group);
@@ -1044,6 +1273,20 @@ export class World {
     s.fog = new THREE.Fog(0xa6d8f2, 80, 240);
     this.hemi = new THREE.HemisphereLight(0xdff1ff, 0x6a8f5a, 0.7);
     s.add(this.hemi);
+    this.skyDome = new THREE.Mesh(new THREE.SphereGeometry(390, 32, 20), new THREE.ShaderMaterial({
+      vertexShader: SKY_VERTEX, fragmentShader: SKY_FRAGMENT, side: THREE.BackSide, depthWrite: false, fog: false,
+      uniforms: {
+        uDayTop: { value: new THREE.Color(0x4e91d0) }, uDayHorizon: { value: new THREE.Color(0xa6d8f2) },
+        uNightTop: { value: new THREE.Color(0x080d20) }, uNightHorizon: { value: new THREE.Color(0x20233b) },
+        uNight: { value: 0 }, uTime: { value: 0 },
+      },
+    }));
+    this.skyDome.renderOrder = -1000;
+    const disc = (color, radius, opacity) => new THREE.Mesh(new THREE.SphereGeometry(radius, 16, 12), new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false, fog: false }));
+    this.sunDisc = disc(0xffe5a1, 9, 1);
+    this.moonDisc = disc(0xd9e4ff, 6, 0);
+    this.sunDisc.renderOrder = this.moonDisc.renderOrder = -999;
+    s.add(this.skyDome, this.sunDisc, this.moonDisc);
     const sun = (this.sun = new THREE.DirectionalLight(0xfff4e0, 2.6));
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
@@ -1085,8 +1328,8 @@ export class World {
     return g;
   }
 
-  flame(group, seed, light = null, base = 0) {
-    const f = { group, seed, light, base, owner: this.own };
+  flame(group, seed, light = null, base = 0, colors = [0xff7a1a, 0xffd84a], size = 1) {
+    const f = { group, seed, light, base, colors, size, owner: this.own };
     this.flames.push(f);
     return f;
   }
@@ -1135,7 +1378,7 @@ export class World {
         _m.makeTranslation(x, y, z);
         postSet.setMatrixAt(i, _m);
         caps.setMatrixAt(i, _m);
-        this.addCollider(x, z, 0.2, 1.6, y);
+        this.addCollider(x, z, 0.12, 1.6, y, 'stone', { meshGeometry: postSet.group.children[0].geometry, meshMatrix: _m.clone() });
       });
       postSet.finish();
       caps.instanceMatrix.needsUpdate = true;
@@ -1147,7 +1390,7 @@ export class World {
     this.roads.set(region.key, o);
   }
 
-  // Hub reactor (cyan plasma), a camp fire barrel (orange) or a hive node (violet); flicker.
+  // Hub reactor (cyan plasma), a camp fire barrel (orange) or a hive node (violet); GPU particles flicker.
   campfire(x, z, { scale = 1, style = 'barrel' } = {}) {
     const g = this.anchor(x, z);
     g.scale.setScalar(scale);
@@ -1185,12 +1428,10 @@ export class World {
     bakeTree(g);
     const flame = new THREE.Group();
     flame.position.y = flameY;
-    piece(flame, G.cone(0.38, 1.0, 7), colors[0], { pos: [0, 0.45, 0], glow: true, outline: 0.02 });
-    piece(flame, G.cone(0.22, 0.7, 6), colors[1], { pos: [0, 0.35, 0.03], glow: true, outline: 0 });
-    bakeTree(flame);
     g.add(flame);
     (this.own?.group ?? this.root).add(g);
-    this.flame(flame, x * 7 + z);
+    const sourceSize = style === 'reactor' ? 1.25 : style === 'node' ? 1.05 : 0.9;
+    this.flame(flame, x * 7 + z, null, 0, colors, sourceSize);
     this.addCollider(x, z, (style === 'reactor' ? 1.3 : 0.5) * scale, style === 'reactor' ? 2.0 : 1.0);
   }
 
@@ -1326,13 +1567,13 @@ export class World {
       piece(g, G.dome(0.4, 10, 5), C.metal, { pos: [2.7, 3.5, -1.6], rot: [0, 0, -1.1], outline: 0.012 });
       for (const yy of [1.4, 2.2]) piece(g, G.sphere(0.06, 6, 4), FORGE, { pos: [2.55, yy, -1.45], glow: true, outline: 0 });
       piece(g, G.box(1.0, 0.7, 0.04), 0xb8342a, { pos: [2.9, 2.2, -1.6], outline: 0.02 });
-      this.addCollider(x + 2.4, z - 1.6, 0.4, 3.4);
+      this.addCollider(x + 2.4, z - 1.6, 0.4, 3.4, undefined, 'panels');
       for (let a = 0; a < Math.PI * 2; a += 0.55) {
         if (rnd() < 0.4) continue;
         const bx = x + Math.cos(a) * (R + 1.2);
         const bz = z + Math.sin(a) * (R + 1.2);
         for (const off of [-0.45, 0.45]) this.stake(g, bx + Math.cos(a + Math.PI / 2) * off, bz + Math.sin(a + Math.PI / 2) * off, 1.3 + rnd() * 0.5, -0.4, -a + Math.PI / 2);
-        this.addCollider(bx, bz, 0.7, 1.4);
+        this.addCollider(bx, bz, 0.7, 1.4, undefined, 'corrugated');
       }
       for (let i = 0; i < 4; i++) this.crate(x + (rnd() - 0.5) * R, z + (rnd() - 0.5) * R, rnd() * 3, 0.8 + rnd() * 0.4);
     } else if (camp.style === 'salvage') {
@@ -1347,12 +1588,12 @@ export class World {
       }
       // Scrap heap and slag furnace, where the juggernauts' suits are patched up.
       for (let i = 0; i < 7; i++) piece(g, G.box(0.6 + rnd() * 0.6, 0.15, 0.5 + rnd() * 0.5), [C.rust, C.metalDark, C.metal][i % 3], { pos: [-3 + (rnd() - 0.5) * 1.6, 0.2 + i * 0.12, 2 + (rnd() - 0.5) * 1.6], rot: [rnd(), rnd() * 3, rnd()], outline: 0.012 });
-      this.addCollider(x - 3, z + 2, 1.2, 1.2);
+      this.addCollider(x - 3, z + 2, 1.2, 1.2, undefined, 'rust');
       piece(g, G.cyl(1.0, 1.2, 1.8, 10), C.metalDark, { pos: [3, 0.9, -2.5] });
       piece(g, G.cyl(0.25, 0.3, 2.0, 8), C.metal, { pos: [3.4, 2.6, -2.8], outline: 0.012 });
       piece(g, G.box(0.7, 0.5, 0.1), FORGE, { pos: [3, 0.7, -1.38], glow: true, outline: 0.01 });
       piece(g, G.torus(0.95, 0.06, Math.PI * 2, 4, 16), FORGE, { pos: [3, 1.8, -2.5], rot: [Math.PI / 2, 0, 0], glow: true, outline: 0 });
-      this.addCollider(x + 3, z - 2.5, 1.25, 2);
+      this.addCollider(x + 3, z - 2.5, 1.25, 2, undefined, 'panels');
     } else if (camp.style === 'nest') {
       // The Hive: resin mounds ringing a glowing node, creep spread over the ground with light in
       // its veins, clutches of eggs, and chitin spires curving up out of it all.
@@ -1372,7 +1613,7 @@ export class World {
         const gy = this.groundHeight(x + bx, z + bz) - g.position.y;
         piece(g, G.dodeca(s), rnd() < 0.5 ? C.resin : C.resinDark, { pos: [bx, gy + s * 0.25, bz], rot: [rnd() * 3, rnd() * 3, 0], scale: [1, 0.75, 1], outline: 0.02 });
         if (rnd() < 0.35) piece(g, G.sphere(0.16, 8, 6), HIVE, { pos: [bx, gy + s * 0.75, bz], glow: true, outline: 0.01 });
-        this.addCollider(x + bx, z + bz, s * 0.8, s);
+        this.addCollider(x + bx, z + bz, s * 0.8, s, undefined, 'resin');
       }
       // Clutches of eggs, each with a glowing seam.
       for (let i = 0; i < 4; i++) {
@@ -1389,7 +1630,7 @@ export class World {
           piece(g, G.sphere(0.3, 10, 8), C.egg, { pos: [ex, gy + h * 0.6, ez], scale: [0.9, h / 0.3 * 0.55, 0.9], outline: 0.012 });
           piece(g, G.box(0.04, h * 0.6, 0.02), HIVE, { pos: [ex, gy + h * 0.75, ez + 0.27], glow: true, outline: 0 });
         }
-        this.addCollider(x + cx, z + cz, 0.9, 0.8);
+        this.addCollider(x + cx, z + cz, 0.9, 0.8, undefined, 'chitin');
       }
       // Chitin spires, bowed toward the node.
       for (let i = 0; i < 3; i++) {
@@ -1407,7 +1648,7 @@ export class World {
           });
         }
         piece(g, G.torus(0.42, 0.05, Math.PI * 2, 4, 12), HIVE, { pos: [px, gy + h * 0.3, pz], rot: [Math.PI / 2, 0, 0], glow: true, outline: 0 });
-        this.addCollider(x + px, z + pz, 0.6, h);
+        this.addCollider(x + px, z + pz, 0.6, h, undefined, 'chitin');
       }
     } else if (camp.style === 'relay') {
       // Synths: a conduit platform round a humming pylon, cable runs and cargo pods.
@@ -1416,7 +1657,7 @@ export class World {
       piece(g, G.cyl(0.55, 0.8, 5.5, 8), C.steel, { pos: [0, 2.75, 0], outline: 0.03 });
       for (const y of [2, 3.6, 5]) piece(g, G.torus(0.95, 0.08, Math.PI * 2, 4, 20), ARC, { pos: [0, y, 0], rot: [Math.PI / 2, 0, 0], glow: true, outline: 0.01 });
       piece(g, G.octa(0.6), ARC, { pos: [0, 6.4, 0], scale: [1, 1.6, 1], glow: true, outline: 0.02 });
-      this.addCollider(x, z, 0.9, 5.5);
+      this.addCollider(x, z, 0.9, 5.5, undefined, 'panels');
       for (let i = 0; i < 4; i++) {
         const a = (i / 4) * Math.PI * 2 + rnd() * 0.4;
         const px = Math.cos(a) * (R - 1.5);
@@ -1424,7 +1665,7 @@ export class World {
         piece(g, G.box(0.5, 3.2, 0.5), C.metalDark, { pos: [px, 1.6, pz], outline: 0.02 });
         piece(g, G.sphere(0.22, 8, 6), ARC, { pos: [px, 3.4, pz], glow: true, outline: 0.01 });
         piece(g, G.tube([[px, 0.15, pz], [px * 0.5, 0.05, pz * 0.5], [0, 0.4, 0]], 0.06, 10, 5), 0x2a2e36, { outline: 0.008 });
-        this.addCollider(x + px, z + pz, 0.4, 3.2);
+        this.addCollider(x + px, z + pz, 0.4, 3.2, undefined, 'panels');
       }
       for (let i = 0; i < 3; i++) this.crate(x + (rnd() - 0.5) * R * 1.2, z + (rnd() - 0.5) * R * 1.2, rnd() * 3, 1 + rnd() * 0.3);
     } else {
@@ -1462,6 +1703,7 @@ export class World {
       synth: { wall: 0x6a7280, glow: ARC, cap: C.metalDark, fire: 'barrel' },
       fauna: { wall: C.stoneDark, glow: 0xffb030, cap: C.stone, fire: 'barrel', heaped: true },
     }[camp.race] ?? { wall: C.steel, glow: FORGE, cap: C.metalDark, fire: 'barrel' };
+    const wallSurface = camp.race === 'hive' ? 'chitin' : camp.race === 'synth' ? 'panels' : camp.race === 'scav' ? 'rust' : 'rock';
     const half = 15;
     const gate = 4;
     this.campfire(x - 6, z + 3, { scale: 1.2, style: look.fire });
@@ -1509,7 +1751,7 @@ export class World {
         }
         for (let k = -1; k <= 1; k++) {
           const o = (k * seg) / 3;
-          this.addCollider(x + px + (horizontal ? o : 0), z + pz + (horizontal ? 0 : o), 1.0, h, y0);
+          this.addCollider(x + px + (horizontal ? o : 0), z + pz + (horizontal ? 0 : o), 1.0, h, y0, wallSurface);
         }
       }
     }
@@ -1551,7 +1793,7 @@ export class World {
         piece(g, G.dome(2.0, 12, 6), look.cap, { pos: [cx, 7, cz], outline: 0.05 });
       }
       if (camp.race !== 'scav') piece(g, G.torus(2.25, 0.08, Math.PI * 2, 4, 24), look.glow, { pos: [cx, look.spires ? 3.6 : 6.2, cz], rot: [Math.PI / 2, 0, 0], scale: look.spires ? 0.62 : 1, glow: true, outline: 0 });
-      this.addCollider(x + cx, z + cz, 2.5, 7, y0);
+      this.addCollider(x + cx, z + cz, 2.5, 7, y0, wallSurface);
     }
     // Gate frame
     for (const s of [-1, 1]) {
@@ -1564,14 +1806,14 @@ export class World {
       const bx = -gate - 2.5 - i * 2.2;
       const bh = 1 + i;
       piece(g, G.box(2.2, bh, 2.2), look.cap, { pos: [bx, bh / 2, half - 2.4], outline: 0.04 });
-      this.addCollider(x + bx, z + half - 2.4, 1.2, bh, y0);
+      this.addCollider(x + bx, z + half - 2.4, 1.2, bh, y0, wallSurface);
     }
     // Throne
     piece(g, G.box(3, 1, 2), look.cap, { pos: [0, 0.5, -half + 3] });
     piece(g, G.box(3, 4, 0.8), look.wall, { pos: [0, 2.5, -half + 2.1] });
     piece(g, G.box(0.3, 3.2, 0.05), look.glow, { pos: [0, 2.6, -half + 2.52], glow: true, outline: 0 });
     for (const s of [-1, 1]) piece(g, G.cone(0.3, 1.2, 6), C.bone, { pos: [1.4 * s, 5, -half + 2.1], outline: 0.02 });
-    this.addCollider(x, z - half + 2.6, 1.8, 2, y0);
+    this.addCollider(x, z - half + 2.6, 1.8, 2, y0, wallSurface);
     flatten(g);
     this.finish(g);
   }

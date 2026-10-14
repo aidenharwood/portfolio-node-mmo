@@ -10,7 +10,8 @@
 //   Jump (hold for height), Dodge, Slide (on until tapped again or the stick is let go: slide,
 //   then jump for a bullet jump), Reload, quick melee.
 //   The HUD's own prompts are buttons too: the interaction prompt (E), the loot card (tap to pick
-//   up, hold to swap) and the weapon slots (switch weapon).
+//   up, hold to swap), the weapon slots (switch weapon), the minimap (opens the map) and the
+//   tracked quest (opens the journal).
 //   Abilities: a button for each filled slot over the cluster (X, G, T), its cooldown sweeping round.
 import { ABILITIES, cooldownOf } from '../combat/abilities.js';
 import { TREES } from '../rpg/talents.js';
@@ -22,6 +23,14 @@ const SPRINT_AFTER = 350;  // ...held this long (ms) to sprint, until it drops u
 const SPRINT_KEEP = 0.75;
 const LOOK = 2.4;          // touch pixels → mouse units (CameraRig turns 0.0025 rad per unit)
 const STICK_ZONE = 0.42;   // the left part of the screen where a touch becomes the stick
+
+// Line icons for the buttons at the top (24-unit boxes).
+const ICON = {
+  menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
+  chat: '<path d="M4 5h16v10H10l-4 4v-4H4z"/>',
+  view: '<path d="M2 12s3.6-6 10-6 10 6 10 6-3.6 6-10 6S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+};
+const icon = (name) => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICON[name]}</svg>`;
 
 const LABELS = {
   ranged: { Mouse0: 'Fire', Mouse2: 'Aim' },
@@ -48,9 +57,9 @@ export class TouchControls {
     el.innerHTML = `
       <div class="tc-stick hidden"><i class="tc-ring"></i><i class="tc-knob"></i></div>
       <div class="tc-top">
-        <button class="tc-btn tc-util" data-act="menu" aria-label="Menu"><i class="tc-burger"></i></button>
-        <button class="tc-btn tc-util" data-act="chat">Chat</button>
-        <button class="tc-btn tc-util" data-act="view">View</button>
+        <button class="tc-btn tc-util" data-act="menu" aria-label="Menu">${icon('menu')}</button>
+        <button class="tc-btn tc-util" data-act="chat" aria-label="Chat">${icon('chat')}</button>
+        <button class="tc-btn tc-util" data-act="view" aria-label="First or third person">${icon('view')}</button>
       </div>
       <div class="tc-left">
         <button class="tc-btn tc-lfire" data-code="Mouse0">Fire</button>
@@ -99,6 +108,25 @@ export class TouchControls {
     hud('prompt', 'KeyE');
     hud('loot-card', 'KeyF');
     hud('slots', 'Digit');
+    // …and a tap (not a drag that happens to start there) on the minimap opens the map, on the
+    // tracked quest the journal.
+    const tap = (el, open) => {
+      let down = null;
+      el.addEventListener('pointerdown', (e) => {
+        if (!this.shown) return;
+        e.preventDefault();
+        down = { id: e.pointerId, x: e.clientX, y: e.clientY };
+      });
+      el.addEventListener('pointerup', (e) => {
+        const d = down;
+        down = null;
+        if (this.shown && d?.id === e.pointerId && Math.hypot(e.clientX - d.x, e.clientY - d.y) < 24) open();
+      });
+      el.addEventListener('pointercancel', () => { down = null; });
+    };
+    tap(document.querySelector('#map-wrap .map-frame'), () => game.openGameMenu('map'));
+    tap(document.getElementById('quests'), () => game.openGameMenu('journal'));
+    this.menuBtn = el.querySelector('[data-act="menu"]');
   }
 
   setEnabled(on) {
@@ -141,6 +169,7 @@ export class TouchControls {
       if (cls === 'melee') this.toggle('Mouse2', false); // a held heavy attack isn't a thing
     }
     this.el.querySelector('[data-act="chat"]').classList.toggle('hidden', !this.game.net.inWorld);
+    this.menuBtn.classList.toggle('badge', this.game.stats.points > 0);
     // The ability buttons: what's in each slot, its cooldown sweeping round it.
     const s = this.game.stats;
     const kit = this.game.player.abilities;

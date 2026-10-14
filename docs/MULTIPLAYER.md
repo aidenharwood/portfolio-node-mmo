@@ -155,7 +155,11 @@ Built beyond the plan:
 - The client's `Enemy` view draws and animates an enemy from sim state (offline: the local sim;
   online: interpolated snapshots). It turns events into effects and sound.
 - The server keeps a headless `World` (terrain heights and colliders) loaded around every player,
-  runs `WorldSim` and streams the result.
+  runs `WorldSim` and streams the result. What comes into range is built a few milliseconds a
+  tick. A player who has just arrived waits out of the simulation (nothing spawns round them, no
+  camp wakes for them) while their surroundings are built, theirs first and with whatever the tick
+  has spare; that's usually well under a second. Brightwater's surroundings are built before a
+  layer opens and stay built.
 - Status effects (burn, chill, corrosion, shock chains) run on the server. Enemy projectiles and
   blasts are replayed on every screen and only hurt the player whose screen they hit.
 - Rewards: every player who damaged an enemy, or was close by, gets the kill's XP and gold. The
@@ -370,12 +374,40 @@ parties (a lone player counts as a party of one), twelve players.
   - server → client: `raid { raid: { id, leader, units: [{ key, leader, members }] } | null }`,
     `rinvite { from, size }` and `rp [[charId, x, z, hp, alive]]`
 
+## Public events
+
+The world's public events (gameplay phase 6, `sim/WorldEvents.js`) run inside each layer's world
+sim, like camps: a director per layer starts them near players, and everyone on the layer near one
+shares it. Offline single-player runs the same director for one player.
+
+- **Who's told:** twice a second, each player hears about the events within ~700 m of them when
+  anything about them changed (`wev`): each event's state, worked out once however many it goes
+  to, and their own part in each. Banners, the HUD tracker and the map markers all come from it.
+- **The vote:** `evote { id, tier }` while it gathers. The server counts it only from someone
+  standing at the beacon.
+- **The tier:** while an event is under way, its tier is the Threat of everyone in its area. The
+  server works it out from where it has each player (`core.eventTier`), and the screen from the
+  event's state, the same way.
+- **Server authority:** the server judges everything that pays out:
+  - what a player contributed (time in the area, and damage to the event's enemies from the kill
+    credit the server already keeps);
+  - the things to defend, whose health the sim wears down: no screen takes those blows;
+  - who earned the chest, rolled for each of them and sent as a server op (`event`).
+- **Overrun settlements:** `ovr { id, on }` goes to everyone on the layer, and `welcome` carries
+  the list. While a place is overrun, the server's rules find none of its folk (no trading, resting
+  or quests there), and screens hide them.
+- **Admins** start and settle events with `/admin event` ([DEPLOY.md](DEPLOY.md#admins)).
+- **Protocol:**
+  - client → server: `evote { id, tier }`
+  - server → client: `wev { l: [{ id, k, nm, pl, st, x, z, r, lv, ti, bx, bz, n, tl?, s: [[id, kind, x, z, hp, max]], v?, w?, f?, c?, rx?, rz?, ct?, ph?, res? }], me: { id: [points, vote, chest] } }`
+    and `ovr { id, on }`
+
 ## Known limits
 
 - Enemy attacks on a player are judged by that player's own client. A modified client could
   ignore damage. Server-side checks on health would close that gap.
-- Loot on the ground and camp respawn timers live in server memory. They start fresh after a
-  restart. Ground loot expires after a few minutes anyway.
+- Loot on the ground, camp respawn timers, public events and overrun settlements live in server
+  memory. They start fresh after a restart. Ground loot expires after a few minutes anyway.
 - The dev tools act on your own screen only when online (god mode, noclip, spawning, forging). The
   server corrects movement and reloads the character when the copies disagree.
 - Players on different layers don't see each other. Parties come together on one layer; friends

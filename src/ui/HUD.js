@@ -15,6 +15,10 @@ const $ = (id) => document.getElementById(id);
 const TAU = Math.PI * 2;
 const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 const COMPASS_PX = 260; // pixels per radian of heading
+// On a touchscreen a line's keys ("[E]", "(L)", "— press N") mean nothing: they're left out.
+const touch = () => document.body.classList.contains('touch');
+const untouched = (text) => text.replace(/\s*—\s*press [A-Z]\b/g, '').replace(/\s*[[(](?:[A-Z]|Esc)[\])]$/, '');
+const forScreen = (text) => (text && touch() ? untouched(text) : text);
 
 export class HUD {
   constructor(thumbs) {
@@ -72,7 +76,7 @@ export class HUD {
     e.lvl.textContent = s.level;
     e.gold.textContent = `${s.gold}g`;
     e.points.style.display = s.points > 0 ? '' : 'none';
-    e.points.textContent = `+${s.points} talent point${s.points > 1 ? 's' : ''} — press N`;
+    e.points.textContent = forScreen(`+${s.points} talent point${s.points > 1 ? 's' : ''} — press N`);
 
     this.renderSlots(p);
     this.renderWeapon(p);
@@ -129,9 +133,12 @@ export class HUD {
       e.ammo.innerHTML = w.cls === 'magic' ? `${Math.round(w.stats.manaCost)}<small> MP / cast</small>` : (p.combo > 0 ? `${p.combo}<small> hits</small>` : '');
       if (this.keys.mag !== 'none') { this.keys.mag = 'none'; e.mag.innerHTML = ''; }
     }
+    // (Nothing to count — a melee weapon between combos: touch layouts leave the card out.)
+    e.wpnCard.classList.toggle('quiet', !e.ammo.innerHTML);
   }
 
-  // Compass strip: ticks every 15°, cardinal letters, and diamonds for the quest/custom markers.
+  // Compass strip: ticks every 15°, cardinal letters, and diamonds for the quest/custom markers
+  // and the public event near us.
   buildCompass() {
     const strip = this.el.compass;
     const parts = [];
@@ -139,7 +146,7 @@ export class HUD {
       const card = { 0: 'N', 90: 'E', 180: 'S', 270: 'W', 45: 'NE', 135: 'SE', 225: 'SW', 315: 'NW' }[d];
       parts.push(card ? `<span class="cd ${d === 0 ? 'n' : ''}" data-b="${d}">${card}</span>` : `<i class="tick ${d % 45 === 0 ? 'major' : ''}" data-b="${d}"></i>`);
     }
-    parts.push('<i class="mk" data-mk="quest"></i><i class="mk custom" data-mk="custom"></i>');
+    parts.push('<i class="mk" data-mk="quest"></i><i class="mk custom" data-mk="custom"></i><i class="mk event" data-mk="event"></i>');
     // Party members (up to three others).
     for (let i = 0; i < 3; i++) parts.push(`<i class="mk party" data-mk="party${i}"></i>`);
     strip.innerHTML = parts.join('');
@@ -155,7 +162,7 @@ export class HUD {
     for (const it of this.compassItems) {
       let b = it.b;
       if (it.mk) {
-        const t = it.mk === 'quest' ? qw : it.mk === 'custom' ? cm : mates[+it.mk.slice(5)];
+        const t = it.mk === 'quest' ? qw : it.mk === 'custom' ? cm : it.mk === 'event' ? game.eventUI?.compassTarget() : mates[+it.mk.slice(5)];
         if (!t) { it.el.style.display = 'none'; continue; }
         it.el.style.display = '';
         b = Math.atan2(t.x - p.x, -(t.z - p.z));
@@ -226,7 +233,7 @@ export class HUD {
     this.setHTML('slots', key, () => inv.slots.map((w, i) => {
       const color = w ? RARITY[w.rarity].css : 'transparent';
       const img = w ? `<img src="${this.thumbs.get(w)}" alt="">` : '';
-      return `<div class="slot ${i === inv.active ? 'active' : ''}" style="--rc:${color}">
+      return `<div class="slot ${i === inv.active ? 'active' : ''} ${w ? '' : 'empty'}" style="--rc:${color}">
         <span class="key">${i + 1}</span>${img}
         <span class="name">${w ? esc(w.name) : 'Empty'}</span>
         <span class="type">${w ? WEAPON_TYPES[w.type].label : ''}</span></div>`;
@@ -306,15 +313,15 @@ export class HUD {
 
   // Focused loot card (looking at a drop), compared against the equipped weapon (or the armour in
   // its slot); `sets` counts the set pieces worn, for the card's set bonuses.
-  setLoot(weapon, current, backpackFull, armorSlots = {}, sets = {}) {
+  setLoot(weapon, current, canPickUp, armorSlots = {}, sets = {}) {
     if (weapon && isArmor(weapon)) current = armorSlots[weapon.slot];
-    const key = weapon ? `${weapon.uid}|${current?.uid}|${backpackFull}|${weapon.set ? sets[weapon.set] ?? 0 : ''}` : '';
+    const key = weapon ? `${weapon.uid}|${current?.uid}|${canPickUp}|${weapon.set ? sets[weapon.set] ?? 0 : ''}` : '';
     if (this.keys.loot === key) return;
     this.keys.loot = key;
     const el = this.el.loot;
     if (!weapon) { el.classList.add('hidden'); return; }
     const hold = current ? `Swap for ${esc(current.name)}` : 'Equip now';
-    const footer = `<div class="lc-prompt"><kbd>F</kbd> ${backpackFull ? 'Pick up (swaps with equipped)' : 'Pick up'}</div>`
+    const footer = (canPickUp ? `<div class="lc-prompt"><kbd>F</kbd> Pick up</div>` : '')
       + `<div class="lc-prompt lc-hold"><kbd>Hold F</kbd> ${hold}<i></i></div>`;
     el.innerHTML = itemCardHTML(weapon, { compare: current, thumb: this.thumbs.get(weapon), footer, sets });
     el.classList.remove('hidden');
@@ -340,12 +347,13 @@ export class HUD {
 
   showBanner(text, sub) {
     this.bannerText = text;
-    this.el.banner.innerHTML = `${esc(text)}${sub ? `<small>${esc(sub)}</small>` : ''}`;
+    sub = forScreen(sub);
+    this.el.banner.innerHTML = `${esc(forScreen(text))}${sub ? `<small>${esc(sub)}</small>` : ''}`;
     this.bannerTime = 2.6;
   }
 
   toast(text) {
-    this.el.toast.textContent = text;
+    this.el.toast.textContent = forScreen(text);
     this.toastTime = 1.8;
   }
 

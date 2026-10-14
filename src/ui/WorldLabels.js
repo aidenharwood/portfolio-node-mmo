@@ -6,7 +6,7 @@ import { esc } from './cards.js';
 import { AFFIXES } from '../sim/affixes.js';
 
 const css = (hex) => `#${(hex ?? 0xffd23f).toString(16).padStart(6, '0')}`;
-// A marker's look: '!' (gold) a quest to take, '?' one to hand in, '…' someone a quest wants.
+// A marker's state: '!' a quest to take, '?' one to hand in, '…' someone a quest wants.
 const MARK = { '?': 'turnin', '…': 'talk' };
 
 const _v = new THREE.Vector3();
@@ -91,13 +91,18 @@ export class WorldLabels {
         const el = this.el(n, 'npc-label');
         seen.add(n);
         const marker = n.marker;
+        const markerKind = n.markerKind;
         // What they call out as you come near (main.js updateBarks), for a few seconds.
         const say = n.bark && n.bark.until > game.time ? n.bark.text : '';
-        const key = `${marker ?? ''}|${say}`;
+        const key = `${marker ?? ''}|${markerKind ?? ''}|${say}`;
         if (el._key !== key) {
           el._key = key;
-          el.innerHTML = `${say ? `<div class="np-say">${esc(say)}</div>` : ''}${marker ? `<div class="marker ${MARK[marker] ?? ''}">${marker}</div>` : ''}<div class="np-name">${esc(n.name)}</div><div class="np-title">${esc(n.title)}</div>`;
+          const typeClass = markerKind === 'story' ? 'story' : markerKind === 'side' ? 'side' : '';
+          const typeLabel = markerKind === 'story' ? 'Story quest' : markerKind === 'side' ? 'Side quest' : '';
+          el.innerHTML = `${say ? `<div class="np-say">${esc(say)}</div>` : ''}${marker ? `<div class="marker ${MARK[marker] ?? ''} ${typeClass}" aria-label="${typeLabel || 'Quest'}">${typeLabel || marker}</div>` : ''}<div class="np-name">${esc(n.name)}</div><div class="np-title">${esc(n.title)}</div>`;
         }
+        // (Touch layouts show the titles of townsfolk only up close.)
+        el.classList.toggle('far', d > 10 && !marker);
         this.place(el, this.project(n.position, n.height + 0.3, w, h));
       }
 
@@ -145,9 +150,11 @@ export class WorldLabels {
         let x = _v.x;
         let y = _v.y;
         if (_v.z > 1) { x = -x; y = -y; }
-        const off = _v.z > 1 || Math.abs(x) > 0.9 || Math.abs(y) > 0.85;
+        // (Touch layouts keep it off the top and bottom rows of buttons and bars.)
+        const ey = game.touchActive ? 0.65 : 0.85;
+        const off = _v.z > 1 || Math.abs(x) > 0.9 || Math.abs(y) > ey;
         if (off) {
-          const k = Math.min(0.9 / Math.max(Math.abs(x), 1e-3), 0.85 / Math.max(Math.abs(y), 1e-3));
+          const k = Math.min(0.9 / Math.max(Math.abs(x), 1e-3), ey / Math.max(Math.abs(y), 1e-3));
           x *= k;
           y *= k;
         }

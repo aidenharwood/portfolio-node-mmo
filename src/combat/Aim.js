@@ -1,10 +1,13 @@
 // Reticle aiming: casts a ray from the camera through screen centre against enemies,
 // world colliders and the ground. Ranged/magic fire toward the resulting point.
 import * as THREE from 'three';
+import { componentAtPoint, rayHitModel } from './HitComponents.js';
+import { rayHitColliderMesh } from '../world/MeshCollision.js';
 
 const _o = new THREE.Vector3();
 const _d = new THREE.Vector3();
 const MAX_RANGE = 150;
+const _order = [];
 
 // Ray vs vertical cylinder (side only). Returns distance along ray or Infinity.
 export function rayCylinder(o, d, cx, cz, r, y0, y1) {
@@ -72,9 +75,11 @@ export function rayBoxCollider(o, d, c, pad = 0, below = 0, above = 0) {
   return rayBox(_lo, _ld, -c.hx - pad, c.hx + pad, c.y - below, c.y + c.h + above, -c.hz - pad, c.hz + pad);
 }
 
-// A ray against any world collider (a round one's side, or a box), widened by `pad` and stretched
-// `below`/`above` its bottom and top.
+// A ray against a world collider. Mesh-backed props use their actual triangles; abstract colliders
+// retain their widened round/box tests for projectile radius and low/high padding.
 export function rayCollider(o, d, c, pad = 0, below = 0, above = 0) {
+  const meshHit = rayHitColliderMesh(c, o, d);
+  if (meshHit !== undefined) return meshHit?.distance ?? Infinity;
   if (c.box) return rayBoxCollider(o, d, c, pad, below, above);
   return rayCylinder(o, d, c.x, c.z, c.r + pad, c.y - below, c.y + c.h + above);
 }
@@ -84,6 +89,7 @@ export class Aim {
     this.point = new THREE.Vector3();
     this.dir = new THREE.Vector3(0, 0, -1);
     this.target = null;
+    this.component = null;
     this.distance = MAX_RANGE;
   }
 
@@ -93,6 +99,7 @@ export class Aim {
     const hit = this.cast(game, cam.position, this.dir, this.point);
     this.distance = hit.distance;
     this.target = hit.target;
+    this.component = hit.component;
     return this;
   }
 
@@ -109,23 +116,40 @@ export class Aim {
 
     let best = MAX_RANGE;
     let target = null;
+    let hitComponent = null;
+    // Nearest along the ray first: once a body is hit, the rest are only tested up to it (and
+    // those beyond are turned away before their bones are touched).
+    _order.length = 0;
     for (const e of game.enemies) {
       if (!e.alive) continue;
-      const t = rayCylinder(_o, _d, e.position.x, e.position.z, e.radius * 1.1, e.position.y, e.position.y + e.height);
-      if (t > minEnemyT && t < best) { best = t; target = e; }
+      const q = e.position;
+      _order.push({ e, t: (q.x - _o.x) * _d.x + (q.y + e.height * 0.5 - _o.y) * _d.y + (q.z - _o.z) * _d.z });
+    }
+    _order.sort((a, b) => a.t - b.t);
+    for (const { e } of _order) {
+      const meshHit = rayHitModel(e, _o, _d, best);
+      const t = meshHit === undefined
+        ? rayCylinder(_o, _d, e.position.x, e.position.z, e.radius * 1.1, e.position.y, e.position.y + e.height)
+        : meshHit?.distance ?? Infinity;
+      if (t > minEnemyT && t < best) {
+        best = t;
+        target = e;
+        hitComponent = meshHit ? componentAtPoint(e, meshHit.point) : null;
+      }
     }
     for (const c of game.world.collidersAlongRay(_o, _d, best)) {
       const t = rayCollider(_o, _d, c);
-      if (t > minT && t < best) { best = t; target = null; }
+      if (t > minT && t < best) { best = t; target = null; hitComponent = null; }
     }
     // Indoors, the ceiling.
     if (_d.y > 1e-4) {
       const t = (game.world.ceilingAt(_o.x, _o.z) - _o.y) / _d.y;
-      if (t > minT && t < best) { best = t; target = null; }
+      if (t > minT && t < best) { best = t; target = null; hitComponent = null; }
     }
     const tg = game.world.raycastGround(_o, _d, best);
-    if (tg > minT && tg < best) { best = tg; target = null; }
+    if (tg > minT && tg < best) { best = tg; target = null; hitComponent = null; }
+    _order.length = 0;
     out.copy(_o).addScaledVector(_d, best);
-    return { distance: best, target };
+    return { distance: best, target, component: hitComponent };
   }
 }

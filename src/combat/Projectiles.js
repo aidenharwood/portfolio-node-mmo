@@ -8,7 +8,8 @@ import { FX_TEXTURES } from '../fx/Effects.js';
 import { dealDamage } from './Damage.js';
 import { PERKS } from '../items/perks.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { rayBoxCollider } from './Aim.js';
+import { rayCollider } from './Aim.js';
+import { bodyRegions, componentAtPoint, rayHitModel, rayHitRegion } from './HitComponents.js';
 
 const arrowGeo = (() => {
   const shaft = new THREE.CylinderGeometry(0.015, 0.015, 0.7, 5).rotateX(Math.PI / 2).toNonIndexed();
@@ -277,7 +278,7 @@ export class Projectiles {
       let surface = null;
       for (const c of world.collidersAlongRay(_from, _dir, len)) {
         const pr = p.radius * 0.5;
-        const t = c.box ? rayBoxCollider(_from, _dir, c, pr) : rayCapsuleCyl(_from, _dir, c.x, c.z, c.r + pr, c.y, c.y + c.h);
+        const t = rayCollider(_from, _dir, c, pr);
         if (t < tWorld) { tWorld = t; surface = c; }
       }
       const tg = world.raycastGround(_from, _dir, tWorld);
@@ -301,14 +302,29 @@ export class Projectiles {
       const targets = p.owner.remote ? NO_TARGETS : p.owner.faction === 'player' ? g.enemies : [g.player];
       for (const t of targets) {
         if (!t.alive || p.hitSet.has(t)) continue;
-        const tc = rayCapsuleCyl(_from, _dir, t.position.x, t.position.z, t.radius + p.radius, t.position.y, t.position.y + t.height);
-        if (tc <= tWorld) _hits.push({ t, tc });
+        let tc = Infinity;
+        let component = null;
+        const meshHit = rayHitModel(t, _from, _dir, tWorld);
+        if (meshHit !== undefined) {
+          if (meshHit) {
+            tc = meshHit.distance;
+            if (t.faction === 'enemy') component = componentAtPoint(t, meshHit.point);
+          }
+        } else {
+          const regions = bodyRegions(t);
+          for (const region of regions) {
+            const rt = rayHitRegion(_from, _dir, region, p.radius);
+            if (rt < tc) { tc = rt; component = region.id; }
+          }
+          if (!regions.length) tc = rayCapsuleCyl(_from, _dir, t.position.x, t.position.z, t.radius + p.radius, t.position.y, t.position.y + t.height);
+        }
+        if (tc <= tWorld) _hits.push({ t, tc, component });
       }
       _hits.sort((a, b) => a.tc - b.tc);
 
       let end = len;
       let dead = false;
-      for (const { t, tc } of _hits) {
+      for (const { t, tc, component } of _hits) {
         p.hitSet.add(t);
         _hit.copy(_from).addScaledVector(_dir, tc);
         if (p.aoe > 0) { end = tc; dead = true; break; }
@@ -316,7 +332,7 @@ export class Projectiles {
         dealDamage(g, {
           attacker: p.owner, target: t, base: p.damage, weapon: p.weapon,
           direction: _look.copy(_dir).setY(0).normalize(), knockback: p.knockback ?? 1,
-          poise: p.damage * 0.6, source: 'projectile', scaled: p.scaled, element: p.element, inflict: p.inflict,
+          poise: p.damage * 0.6, source: 'projectile', scaled: p.scaled, element: p.element, inflict: p.inflict, component,
         });
         if (p.kind === 'bullet') g.effects.bulletImpact(_hit, _n.copy(_dir).negate(), 'body', p.tracerColor ?? KINETIC);
         else g.effects.spawnImpact(_hit, p.color);
@@ -397,8 +413,12 @@ export class Projectiles {
       if (pos.y >= surface.y + surface.h - 0.02 || _n.lengthSq() < 1e-6) _n.set(0, 1, 0);
       else _n.normalize();
     }
-    if (p.kind === 'bullet') g.effects.bulletImpact(pos, _n, surface === 'ground' ? 'dirt' : 'hard', p.tracerColor ?? KINETIC);
-    else g.effects.spawnImpact(pos, p.color);
+    const material = surface === 'ground' ? 'dirt' : surface.surface ?? 'stone';
+    if (p.kind === 'bullet') g.effects.bulletImpact(pos, _n, material, p.tracerColor ?? KINETIC);
+    else {
+      g.effects.spawnImpact(pos, p.color);
+      g.effects.surfaceImpact(pos, _n, material, p.kind === 'arrow' || p.kind === 'quarrel' ? 7 : 5);
+    }
     const kind = p.kind === 'bullet' ? (surface === 'ground' ? 'dirt' : 'hard') : p.kind === 'arrow' || p.kind === 'quarrel' ? 'wood' : 'magic';
     g.audio.impact(pos, kind, p.weapon?.element ?? 'none');
   }

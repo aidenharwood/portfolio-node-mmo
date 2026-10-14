@@ -1,9 +1,9 @@
 // Rotating minimap (camera-forward is up): explored terrain tiles under fog, roads, camps,
-// waystones, chests, enemies, notable loot, NPCs, quest target and custom marker.
+// waystones, chests, enemies, notable loot, NPCs, public events, quest target and custom marker.
 import { RARITY } from '../items/rarity.js';
 import { CHUNK } from '../world/Chunks.js';
-import { FOG_CELL, FOG_PER_CHUNK } from '../world/Discovery.js';
 import { PARTY_COLOR } from './PartyUI.js';
+import { FogLayer } from './MapFog.js';
 
 // Settlements of every size on the minimap: their ground, a little brighter the smaller they are.
 const PLACE_FILL = {
@@ -21,6 +21,7 @@ export class Minimap {
     canvas.height = SIZE * 2;
     this.ctx = canvas.getContext('2d');
     this.timer = 0;
+    this.fog = new FogLayer([18, 14, 26, 235]);
   }
 
   dot(x, z, r, color) {
@@ -68,8 +69,17 @@ export class Minimap {
     const s = styles[kind] ?? styles.default;
     ctx.save();
     ctx.translate(x, z);
+    const matrix = ctx.getTransform();
+    const scale = Math.hypot(matrix.a, matrix.b) || 1;
+    ctx.beginPath();
+    ctx.arc(0, 0, r + 3 / scale, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(8,12,20,.88)';
+    ctx.fill();
+    ctx.strokeStyle = s.stroke;
+    ctx.lineWidth = 1.25 / scale;
+    ctx.stroke();
     ctx.strokeStyle = '#0a0c13';
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 1.5 / scale;
     ctx.fillStyle = s.fill;
     ctx.beginPath();
     if (s.mark === 'diamond') {
@@ -101,6 +111,25 @@ export class Minimap {
     }
     ctx.fill();
     ctx.stroke();
+    ctx.restore();
+  }
+
+  questSearchArea(x, z, kind, radius) {
+    if (!['goto', 'defend', 'clear'].includes(kind) || radius <= 8) return;
+    const ctx = this.ctx;
+    const color = kind === 'goto' ? '#a3f5b0' : kind === 'defend' ? '#ff9d7d' : '#d8b5ff';
+    const matrix = ctx.getTransform();
+    const scale = Math.hypot(matrix.a, matrix.b) || 1;
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(x, z, radius, 0, Math.PI * 2);
+    ctx.fillStyle = `${color}06`;
+    ctx.fill();
+    ctx.setLineDash([4 / scale, 5 / scale]);
+    ctx.lineWidth = 1.25 / scale;
+    ctx.strokeStyle = `${color}70`;
+    ctx.stroke();
+    ctx.setLineDash([]);
     ctx.restore();
   }
 
@@ -152,20 +181,14 @@ export class Minimap {
     }
     ctx.restore();
 
-    // Fog over unexplored cells (soft-edged).
-    ctx.filter = 'blur(5px)';
-    ctx.fillStyle = 'rgba(18,14,26,0.92)';
-    for (let cx = cx0; cx <= cx1; cx++) {
-      for (let cz = cz0; cz <= cz1; cz++) {
-        const m = d.mask(cx, cz);
-        if (!m) { ctx.fillRect(cx * CHUNK, cz * CHUNK, CHUNK, CHUNK); continue; }
-        for (let b = 0; b < 64; b++) {
-          if ((m[b >> 5] >>> (b & 31)) & 1) continue;
-          ctx.fillRect(cx * CHUNK + (b % FOG_PER_CHUNK) * FOG_CELL, cz * CHUNK + Math.floor(b / FOG_PER_CHUNK) * FOG_CELL, FOG_CELL, FOG_CELL);
-        }
-      }
+    // Fog over unexplored cells: one cached picture, soft-edged by being scaled up (ui/MapFog.js).
+    if (this.fog.cover(d, cx0, cz0, cx1, cz1)) {
+      const f = this.fog.bounds;
+      ctx.save();
+      ctx.scale(1, -1);
+      ctx.drawImage(this.fog.canvas, f.x, -f.zTop, f.w, f.h);
+      ctx.restore();
     }
-    ctx.filter = 'none';
 
     const regions = world.gen.regionsNear(p.x, p.z, this._rn ??= []);
     ctx.strokeStyle = 'rgba(214,180,120,0.95)';
@@ -222,6 +245,15 @@ export class Minimap {
       ctx.arc(horde.x, horde.z, 10 + Math.sin(performance.now() / 260) * 1.5, 0, Math.PI * 2);
       ctx.stroke();
     }
+    // Public events (ui/EventUI.js): their area, pulsing — gilt while gathering, red under way.
+    const events = game.eventUI?.markers() ?? [];
+    for (const m of events) {
+      ctx.strokeStyle = m.stage === 'gather' ? 'rgba(255, 210, 90, 0.95)' : 'rgba(255, 106, 74, 0.95)';
+      ctx.lineWidth = 2.4;
+      ctx.beginPath();
+      ctx.arc(m.x, m.z, m.r + 2 + Math.sin(performance.now() / 300) * 1.5, 0, Math.PI * 2);
+      ctx.stroke();
+    }
     for (const n of game.npcs) this.dot(n.position.x, n.position.z, 1.3, n.marker ? '#ffd23f' : '#ffffff');
     for (const s of game.props?.values() ?? []) this.dot(s.position.x, s.position.z, 1.5, s.marker ? '#ffd23f' : '#e8d4a0');
     for (const r of game.remotes?.list ?? []) if (!game.partyUI?.isMate(r.netId)) this.dot(r.position.x, r.position.z, 1.6, '#5ee6ff');
@@ -229,13 +261,18 @@ export class Minimap {
     for (const m of mates) this.dot(m.x, m.z, 2.1, PARTY_COLOR);
 
     const wp = game.questWaypoint();
-    if (wp) this.questMarker(wp.x, wp.z, wp.kind ?? 'default', wp.radius ?? 4);
+    if (wp) {
+      this.questSearchArea(wp.x, wp.z, wp.kind, wp.radius ?? 0);
+      this.questMarker(wp.x, wp.z, wp.kind ?? 'default', 6 / k);
+    }
     if (game.customMarker) this.dot(game.customMarker.x, game.customMarker.z, 2, '#4ad2ff');
     ctx.restore();
 
     if (wp) this.rimArrow(wp, p, yaw, '#ffd23f');
     if (game.customMarker) this.rimArrow(game.customMarker, p, yaw, '#4ad2ff');
     if (horde) this.rimArrow(horde, p, yaw, '#ff4632');
+    const ev = game.eventUI?.compassTarget();
+    if (ev) this.rimArrow(ev, p, yaw, '#ff6a4a');
     for (const m of mates) this.rimArrow(m, p, yaw, PARTY_COLOR);
 
     ctx.save();

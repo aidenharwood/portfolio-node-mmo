@@ -5,8 +5,11 @@
 //   magic  — casts at the reticle; hold LMB to charge a stronger cast; RMB aims
 import * as THREE from 'three';
 import { Character, MAX_SLOPE, wrapAngle } from './Character.js';
+import { stopAgainst } from '../world/MeshCollision.js';
 import { MELEE_COMBOS, WHIRLWIND, DODGE, resolveMeleeAttack } from '../combat/attacks.js';
-import { performSweep, dealDamage } from '../combat/Damage.js';
+import { dealDamage } from '../combat/Damage.js';
+import { WeaponSweep, strikePoints } from '../combat/MeleeContact.js';
+import { aimPoint } from '../combat/HitComponents.js';
 import { updateStatuses } from '../combat/Status.js';
 import { armorReduction, tierOf } from '../rpg/balance.js';
 import { AbilityKit } from './AbilityKit.js';
@@ -58,12 +61,15 @@ const _sightPoint = new THREE.Vector3();
 const _origin = new THREE.Vector3();
 const _dir = new THREE.Vector3();
 const _u = new THREE.Vector3();
+const _push = new THREE.Vector3();
+const _slope = { x: 0, z: 0 };
 const _v = new THREE.Vector3();
 const _pose = [0, 0, 0];
 const UP = new THREE.Vector3(0, 1, 0);
 
 const lerp = (a, b, t) => a + (b - a) * t;
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const smooth01 = (t) => t * t * (3 - 2 * t);
 const _grip = { obj: null, local: new THREE.Vector3() };
 const _hold = { at: new THREE.Vector3(), rot: [0, 0, 0], twist: 0, lean: 0 };
 const _rest = { at: new THREE.Vector3(), rot: [0, 0, 0], twist: 0, lean: 0 };
@@ -88,6 +94,7 @@ export class Player extends Character {
     this.attack = null;
     this.comboIndex = 0;
     this.hitSet = new Set();
+    this.sweep = new WeaponSweep(); // swings hit what the weapon's model passes through
     this.trailSpawned = false;
     this.buffer = null;
     this.bufferTime = 0;
@@ -156,6 +163,8 @@ export class Player extends Character {
     this.gliding = false;
     this.attackFacing = null;
     this.groundFn = (x, z) => this.game.world.supportHeight(x, z, this.position.y + 0.6);
+    this.supportFn = (x, z, maxY) => this.game.world.supportHeight(x, z, maxY);
+    this.resolveFn = (pos, radius, stepUp, height) => this.game.world.resolve(pos, radius, stepUp, height);
     this.collectMaterials();
   }
 
@@ -256,6 +265,7 @@ export class Player extends Character {
     }
     this.weaponModel = this.weapon && this.weapon.kind !== 'armor' ? buildWeaponModel(this.weapon) : null;
     if (this.weaponModel && this.weapon.cls === 'ranged') this.weaponModel.scale.setScalar(HELD_GUN_SCALE);
+    if (this.weaponModel && this.weapon.cls === 'melee') strikePoints(this.weaponModel); // now, not mid-swing
     if (this.weaponModel) {
       this.rig.weaponMount.add(this.weaponModel);
       this.weaponModel.add(this.muzzle);
@@ -340,9 +350,10 @@ export class Player extends Character {
       this.integrate(dt);
       this.animate(dt);
       this.updateMaterials(dt);
+      this.sweep.reset();
       return;
     }
-    if (this.noclip) { this.updateNoclip(dt); return; }
+    if (this.noclip) { this.updateNoclip(dt); this.sweep.reset(); return; }
     this.stateTime += dt;
     this.bufferTime -= dt;
     if (this.bufferTime <= 0) this.buffer = null;
@@ -392,6 +403,7 @@ export class Player extends Character {
     const kick = Math.min(18, Math.max(0, planar - 7) * 0.65) + (this.bulletJumpT > 0 ? 5 : 0) + (this.state === 'airdash' ? 4 : 0) + (this.state === 'dodge' ? 2 : 0);
     this.fovKick += (kick - this.fovKick) * (1 - Math.exp(-6 * dt));
     this.animate(dt);
+    this.strikeContact(dt);
     this.tint.setRGB(0, 0, 0);
     if (this.charge > 0) this.tint.setRGB(0.25, 0.18, 0.4).multiplyScalar(Math.min(1, this.charge / CHARGE_TIME));
     this.updateMaterials(dt);
@@ -487,6 +499,8 @@ export class Player extends Character {
     const target = this.game.findSoftTarget(this.position, face, 5, this.firstPerson ? 0.35 : Math.PI * 0.6);
     if (target) face = this.angleTo(target.position);
     this.attackFacing = face;
+    this.swingTarget = target;
+    this.swingAim = null;
   }
 
   // Swings never take the controls away: you keep steering (and sprinting) while the swing's
@@ -520,12 +534,12 @@ export class Player extends Character {
       if (!this.trailSpawned) {
         this.trailSpawned = true;
         const w = this.weapon;
-        this.game.effects.spawnSlash(this.position, this.facing, {
-          arc: a.arc, range: a.range, vertical: a.vertical,
+        const shownWeapon = this.game.firstPerson && this.game.viewModel?.model ? this.game.viewModel.model : this.weaponModel;
+        this.game.effects.spawnWeaponTrail(shownWeapon, this.facing, {
+          direction: a.swing?.path === 'slashL' ? -1 : 1,
           color: w.element !== 'none' ? ELEMENTS[w.element].color : MANUFACTURERS[w.manufacturer].palette.energy,
         });
       }
-      performSweep(this.game, this, a, this.game.enemies, this.hitSet, this.weapon);
       if (a.shockwave && !this.shockDone) {
         this.shockDone = true;
         const w = this.weapon;
@@ -905,7 +919,7 @@ export class Player extends Character {
     for (const d of [0.55, 0.95]) {
       const px = p.x + _dir.x * (this.radius + d);
       const pz = p.z + _dir.z * (this.radius + d);
-      const top = world.supportHeight(px, pz, p.y + reach);
+      const top = world.supportHeight(px, pz, p.y + reach, p.y + MOVE.stepUp);
       const rise = top - p.y;
       if (rise < minRise || rise > reach) continue;
       // Needs headroom above the ledge and something to stand on (not the far side of a thin post).
@@ -967,11 +981,10 @@ export class Player extends Character {
     let vx = this.velocity.x;
     let vz = this.velocity.z;
     if (this.grounded) {
-      const e = 0.8;
-      const gx = (w.groundHeight(p.x + e, p.z) - w.groundHeight(p.x - e, p.z)) / (2 * e);
-      const gz = (w.groundHeight(p.x, p.z + e) - w.groundHeight(p.x, p.z - e)) / (2 * e);
-      vx -= gx * MOVE.slideGravity * dt;
-      vz -= gz * MOVE.slideGravity * dt;
+      // Downhill on what's underfoot — not toward the drop behind a wall or off a ledge.
+      const g = w.surfaceSlope(p.x, p.y, p.z, MOVE.stepUp, _slope);
+      vx -= g.x * MOVE.slideGravity * dt;
+      vz -= g.z * MOVE.slideGravity * dt;
       const f = Math.exp(-MOVE.slideFriction * dt);
       vx *= f;
       vz *= f;
@@ -1024,15 +1037,63 @@ export class Player extends Character {
     };
     const w = this.weapon;
     const color = w.element !== 'none' ? ELEMENTS[w.element].color : MANUFACTURERS[w.manufacturer].palette.energy;
-    this.game.effects.spawnSlash(this.position, this.facing, { arc: 360, range: this.slideAttack.def.range, color, height: 0.6 });
+    const shownWeapon = this.game.firstPerson && this.game.viewModel?.model ? this.game.viewModel.model : this.weaponModel;
+    this.game.effects.spawnWeaponTrail(shownWeapon, this.facing, { color });
     this.game.audio.swing({ weapon: w, weight: 0.5, dur: 0.32, spin: true });
   }
 
   updateSlideAttack(dt) {
     const sa = this.slideAttack;
     sa.t += dt;
-    if (sa.t >= 0.05 && sa.t <= 0.3) performSweep(this.game, this, sa.def, this.game.enemies, sa.hitSet, this.weapon);
     if (sa.t >= 0.4) this.slideAttack = null;
+  }
+
+  // Once the body is posed for the frame: while a swing's strike is live, it hits whatever the
+  // weapon passed through on its way from last frame's pose to this one (combat/MeleeContact.js).
+  strikeContact(dt) {
+    this.sweep.follow(this.weaponClass === 'melee' ? this.weaponModel : null);
+    const live = (t, from, to) => t >= from && t - dt <= to;
+    if (this.state === 'attack' && live(this.stateTime, this.attack.windup, this.attack.windup + this.attack.active)) {
+      this.sweep.strike(this.game, this, this.attack, this.game.enemies, this.hitSet, this.weapon);
+    } else if (this.slideAttack && live(this.slideAttack.t, 0.05, 0.3)) {
+      this.sweep.strike(this.game, this, this.slideAttack.def, this.game.enemies, this.slideAttack.hitSet, this.weapon);
+    }
+  }
+
+  // Swings only hit what the weapon meets, so they're aimed: at the soft target the swing locked
+  // on to (first person without one, where the camera looks). Overhead chops turn in to come down
+  // on its centre line rather than past the right shoulder; cuts, spins and thrusts tilt down to
+  // reach anything lower than the chest, bending the knees. Eased in through the wind-up and out
+  // through the recovery.
+  aimSwing(hold, a) {
+    const t = this.stateTime;
+    const strikeEnd = a.windup + a.active;
+    const k = t < a.windup ? smooth01(t / a.windup) : t <= strikeEnd ? 1
+      : 1 - smooth01(Math.min(1, (t - strikeEnd) / Math.max(0.05, a.duration - strikeEnd)));
+    if (k <= 0) return;
+    const chestY = this.rig.chest.getWorldPosition(_u).y;
+    const target = this.swingTarget;
+    if (target?.alive) {
+      // How far ahead the point to aim at is, and how far below the chest.
+      const at = aimPoint(target, _v);
+      this.swingAim = { d: Math.hypot(at.x - this.position.x, at.z - this.position.z), drop: chestY - at.y };
+    } else if (!target && this.firstPerson) {
+      const down = -Math.asin(clamp(this.game.aim.dir.y, -1, 1));
+      this.swingAim = { d: 1.4, drop: Math.tan(clamp(down, 0, 1.2)) * 1.4 };
+    }
+    const aim = this.swingAim;
+    const d = Math.max(0.6, aim?.d ?? 1.4);
+    if (!a.spin && a.swing.path === 'overhead') {
+      const turn = Math.atan2(-hold.at.x, d) * k;
+      hold.at.applyAxisAngle(UP, turn);
+      hold.rot[1] += turn;
+      return;
+    }
+    if (!aim || aim.drop <= 0) return;
+    const reach = Math.max(0.4, d - Math.hypot(hold.at.x, hold.at.z));
+    const dip = clamp(Math.atan2(aim.drop + hold.at.y, reach) - hold.rot[0], 0, 1.1) * k;
+    hold.rot[0] += dip;
+    hold.crouch = Math.max(hold.crouch ?? 0, dip * 0.6);
   }
 
   // Bullet jump: launch from a slide along the camera's aim, carrying slide speed into the air.
@@ -1169,10 +1230,12 @@ export class Player extends Character {
     const ox = p.x;
     const oz = p.z;
     const oy = p.y;
-    p.x += (this.velocity.x + this.knockback.x) * dt;
-    p.z += (this.velocity.z + this.knockback.z) * dt;
+    // Swept in short steps (nothing thin is passed through at speed); whatever it ran into takes
+    // the speed going into it, so pressing or sliding into a wall stops or runs along it.
+    _push.set(0, 0, 0);
+    world.move(p, (this.velocity.x + this.knockback.x) * dt, (this.velocity.z + this.knockback.z) * dt, this.radius, MOVE.stepUp, this.height, _push);
+    stopAgainst(_push, this.velocity, this.knockback);
     this.knockback.multiplyScalar(Math.exp(-7 * dt));
-    world.resolve(p, this.radius, MOVE.stepUp, this.height);
     // Terrain cliffs: walkers can't climb steeper than MAX_SLOPE (jump + clamber instead).
     const gOld = world.groundHeight(ox, oz);
     const gNew = world.groundHeight(p.x, p.z);
@@ -1196,8 +1259,16 @@ export class Player extends Character {
     } else if (this.state !== 'airdash') this.vy -= MOVE.gravity * dt;
     if (this.state === 'slam') this.vy = Math.min(this.vy, -MOVE.slamSpeed);
     p.y += this.vy * dt;
+    // Rising into a ceiling (a dungeon's, a platform, a ledge overhead) stops the rise there.
+    if (this.vy > 0) {
+      const ceil = world.headroom(p.x, p.z, oy + this.height - 0.05);
+      if (p.y + this.height > ceil) {
+        p.y = Math.max(oy, ceil - this.height);
+        this.vy = 0;
+      }
+    }
     this.airPeak = Math.max(this.airPeak, p.y);
-    const support = world.supportHeight(p.x, p.z, Math.max(p.y, oy) + MOVE.stepUp);
+    const support = world.supportHeight(p.x, p.z, Math.max(p.y, oy) + MOVE.stepUp, oy + MOVE.stepUp);
     if (p.y <= support) {
       const wasAir = !this.grounded;
       p.y = support;
@@ -1326,7 +1397,9 @@ export class Player extends Character {
     }
   }
 
-  onDeath() {
+  onDeath(hit) {
+    const direction = hit?.direction;
+    this.deathKick = direction ? [direction.x, direction.y, direction.z] : [0, 0, 0];
     this.setState('dead');
     this.game.onPlayerDeath();
   }
@@ -1337,6 +1410,8 @@ export class Player extends Character {
     this.mana = this.maxMana;
     this.stamina = this.maxStamina;
     this.deathFall = 0;
+    this.deathKick = null;
+    this.animator.resetRagdoll();
     this.statuses = {};
     this.knockback.set(0, 0, 0);
     this.velocity.set(0, 0, 0);
@@ -1378,6 +1453,9 @@ export class Player extends Character {
     s.grounded = this.grounded;
     s.sprint = this.sprinting;
     s.ground = this.groundFn;
+    s.supportHeight = this.supportFn;
+    s.resolve = this.resolveFn;
+    s.world = this.game.world;
     s.flinch = this.flinch > 0 ? this.flinch / 0.3 : 0;
     s.flip = this.flipT;
     s.corkscrew = this.bulletJumpT > 0 && st === 'move' ? 1 - this.bulletJumpT / 0.45 : 0;
@@ -1399,6 +1477,7 @@ export class Player extends Character {
     s.poseRate = 16;
     s.recoil = this.recoil;
     s.armSwing = cls === 'melee' ? 1 : 0.25;
+    s.deathKick = this.deathKick;
     s.t = 0;
     if (!this.alive) {
       this.deathFall = Math.min(1, this.deathFall + dt * 1.6);
@@ -1439,6 +1518,7 @@ export class Player extends Character {
         const a = this.attack;
         if (a.spin) s.spin = sampleSpin(this.stateTime, a, this.swingFrom, this.carryHold(type), weight, _hold);
         else sampleSwing(this.stateTime, a, a.swing.path, this.swingFrom, this.carryHold(type), weight, _hold);
+        this.aimSwing(_hold, a);
         s.snap = true;
         s.placeRate = 0;
         s.twist = _hold.twist;

@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { PERKS } from '../items/perks.js';
 import { applyStatus } from './Status.js';
 import { levelGapMult } from '../rpg/balance.js';
+import { componentSpec, componentForSweep } from './HitComponents.js';
 
 const _d = new THREE.Vector3();
 const _f = new THREE.Vector3();
@@ -17,6 +18,7 @@ const ZERO = new THREE.Vector3();
  * @param o.source     'melee' | 'projectile' | 'explosion' | 'status'
  * @param o.scaled     base already includes the attacker's damage multiplier
  * @param o.inflict    element whose status a weaponless (enemy) hit applies
+ * @param o.point      where on the target it landed (melee contact), for the hit's effects
  */
 export function dealDamage(game, o) {
   const { attacker, target, weapon = null, source = 'melee' } = o;
@@ -24,6 +26,9 @@ export function dealDamage(game, o) {
 
   const stats = weapon?.stats;
   let damage = o.base * (o.scaled ? 1 : attacker.damageMultiplier);
+  const region = o.component && target.faction === 'enemy'
+    ? componentSpec(o.component, target.rigKind ?? target.rig?.kind ?? 'biped') : null;
+  if (region?.weak) damage *= region.weak;
   const crit = o.canCrit !== false && !!stats && source !== 'status' && Math.random() < stats.critChance + (attacker.critBonus ?? 0);
   if (crit) damage *= stats.critMult + (attacker.critDamage ?? 0);
   const element0 = o.element ?? weapon?.element ?? 'none';
@@ -49,6 +54,8 @@ export function dealDamage(game, o) {
   const hit = {
     damage: ctx.damage, crit, element, source, attacker,
     attack: o.attack,
+    component: region?.id ?? null,
+    point: o.point ?? null,
     direction: o.direction ?? ZERO,
     knockback: o.knockback ?? 0,
     poise: o.poise ?? ctx.damage,
@@ -81,11 +88,13 @@ export function performSweep(game, attacker, attack, targets, hitSet, weapon = n
     // Vertical reach: can't sweep someone standing on a tower above you.
     if (t.position.y > attacker.position.y + attacker.height * 0.9 || t.position.y + t.height < attacker.position.y - 0.4) continue;
     if (attack.arc < 360 && dist > 0.001 && _f.angleTo(_d) > halfArc + Math.atan2(t.radius, dist)) continue;
+    const component = t.rig ? componentForSweep(t, attacker, attack) : null;
+    if (t.rig && component === null) continue;
     hitSet.add(t);
     const dir = dist > 0.001 ? _d.clone().divideScalar(dist) : _f.clone();
     dealDamage(game, {
       attacker, target: t, base: attack.damage, weapon, direction: dir,
-      knockback: attack.knockback, poise: attack.poise, source: 'melee', attack,
+      knockback: attack.knockback, poise: attack.poise, source: 'melee', attack, component,
       ...(weapon ? {} : { element: attack.element, inflict: attack.status ?? attack.element }),
     });
   }

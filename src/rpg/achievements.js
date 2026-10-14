@@ -2,7 +2,7 @@
 // a title to wear. Progress comes from the character's records (CharacterCore.records: kills by
 // faction, type and Threat, bosses, warbands broken, places visited, sets worn…), which change only
 // through the character's operations — so the server counts them online, and both copies agree.
-// Dungeons, raids, public events and the story add theirs in later phases.
+// Dungeons, raids, public events and the story add theirs as they come.
 //   stat(records, core) → how far along · goal · points · title (worn in the Character tab)
 import { BIOMES, LANDMARKS } from '../world/Gen.js';
 import { GEAR_SETS } from '../items/sets.js';
@@ -32,11 +32,14 @@ const clears = (r, from = 0, to = 3) => Object.values(r.dungeons ?? {}).reduce((
 // the same with nobody falling, `clears` the raid beaten }).
 const raidKills = (r, raid, key, from = 0) => (r.raids?.[raid]?.[key] ?? []).slice(from).reduce((a, b) => a + b, 0);
 const flawless = (r) => Object.values(r.raids ?? {}).reduce((s, rec) => s + Object.entries(rec).filter(([k]) => k.endsWith(':flawless')).reduce((a, [, row]) => a + row.reduce((x, y) => x + y, 0), 0), 0);
+// Public events won (records.events: kind → [Normal, Veteran, Elite] wins).
+const eventWins = (r, kind = null, tier = null) => Object.entries(r.events ?? {}).filter(([k]) => !kind || k === kind)
+  .reduce((s, [, row]) => s + (tier === null ? row.reduce((a, b) => a + b, 0) : row[tier] ?? 0), 0);
 // The sets that drop anywhere (a raid's own sets have achievements of their own).
 const OPEN_SETS = Object.keys(GEAR_SETS).filter((id) => !GEAR_SETS[id].raid);
 
 export const CATEGORIES = {
-  story: 'Story', dungeons: 'Dungeons', raids: 'Raids', combat: 'Combat', exploration: 'Exploration', collections: 'Collections', progression: 'Progression', feats: 'Feats',
+  story: 'Story', dungeons: 'Dungeons', raids: 'Raids', events: 'Events', combat: 'Combat', exploration: 'Exploration', collections: 'Collections', progression: 'Progression', feats: 'Feats',
 };
 
 export const ACHIEVEMENTS = [
@@ -62,6 +65,15 @@ export const ACHIEVEMENTS = [
   { id: 'raid_elite', cat: 'raids', name: 'The Brood Ends', desc: 'Beat the Brood Mother\'s raid on Elite.', goal: 1, points: 30, title: 'Queenslayer', stat: (r) => raidKills(r, 'broodmother', 'clears', 2) },
   { id: 'raid_flawless', cat: 'raids', name: 'Untouched', desc: 'Defeat a raid boss without anyone in the raid falling.', goal: 1, points: 20, stat: (r) => flawless(r) },
   { id: 'raid_set', cat: 'raids', name: 'Broodbane', desc: 'Wear all five pieces of the Broodbane set.', goal: 1, points: 25, title: 'Broodbane', stat: (r) => +!!r.fullSets.broodbane },
+  // ---------------------------------------------------------------- public events
+  { id: 'event_1', cat: 'events', name: 'First Responder', desc: 'Complete a public event.', goal: 1, points: 10, stat: (r) => eventWins(r) },
+  { id: 'event_25', cat: 'events', name: 'Steadfast', desc: 'Complete 25 public events.', goal: 25, points: 25, title: 'the Steadfast', stat: (r) => eventWins(r) },
+  { id: 'event_surge', cat: 'events', name: 'Hold the Line', desc: 'Repel a Hive Surge.', goal: 1, points: 10, stat: (r) => eventWins(r, 'surge') },
+  { id: 'event_siege', cat: 'events', name: 'Raise the Siege', desc: 'Break a Scav Siege.', goal: 1, points: 10, stat: (r) => eventWins(r, 'siege') },
+  { id: 'event_anomaly', cat: 'events', name: 'Signal in the Noise', desc: 'Stabilise a Maker anomaly.', goal: 1, points: 10, stat: (r) => eventWins(r, 'anomaly') },
+  { id: 'event_elite', cat: 'events', name: 'Not On My Watch', desc: 'Complete a public event voted to Elite.', goal: 1, points: 20, stat: (r) => eventWins(r, null, 2) },
+  { id: 'event_retake', cat: 'events', name: 'Reclaimer', desc: 'Retake an overrun settlement.', goal: 1, points: 15, stat: (r) => eventWins(r, 'retake') },
+  { id: 'event_lead', cat: 'events', name: 'Leading from the Front', desc: 'Contribute the most to a public event with three or more taking part.', goal: 1, points: 15, stat: (r) => r.eventLead },
   // ---------------------------------------------------------------- combat
   { id: 'kills_1', cat: 'combat', name: 'First Blood', desc: 'Defeat an enemy.', goal: 1, points: 5, stat: (r) => r.kills },
   { id: 'kills_250', cat: 'combat', name: 'Hunter', desc: 'Defeat 250 enemies.', goal: 250, points: 10, stat: (r) => r.kills },
@@ -122,6 +134,7 @@ export function newRecords() {
   return {
     kills: 0, race: {}, types: {}, variants: {}, typeAffixes: {}, elites: 0, champions: 0, bosses: {}, affixes: {}, threat: [0, 0, 0],
     warbands: 0, strongholds: 0, quests: 0, biomes: {}, landmarks: [], landmarkKinds: {}, settlements: [], regionLevel: 0, dungeons: {}, raids: {},
+    events: {}, eventLead: 0,
     legendaries: 0, fullSets: {}, makers: {}, bestCombo: 0, bestMulti: 0, airKills: 0,
   };
 }

@@ -13,7 +13,10 @@
 // Operations: move, select, equip, unequip, scrap, sell, buy, learn, respec, slot, filter, threat,
 // title, feat, accept, attune, respawn, use, choose (predicted) · pick, drop, chest, turnin, talk,
 // rest, travel, enter, leave, dloot, dchest (rolled by the authority) · reward, bonus, visit, camp,
-// stock, reach, defended, dclear, rclear (sent by the server).
+// stock, reach, defended, dclear, rclear, event (sent by the server).
+// Public events (gameplay phase 6, sim/WorldEvents.js): an event's chest is an 'event' op, rolled
+// by the authority for each participant who earned it; inside an event under way its voted tier
+// is the character's Threat (the host plugs in `eventTier`).
 // Raids (gameplay phase 7) are copies like dungeons (world/raids.js): the same enter and leave, and
 // each arena's chest is a 'dchest' locked for the week (per raid, encounter and tier).
 // Dungeons (gameplay phase 5): going in and out of a copy, and its chests, are rolled by the
@@ -69,6 +72,7 @@ export class CharacterCore {
     this.dungeon = null;       // the dungeon copy they're in: { id, d, tier, ..., back }
     this.dungeons = null;      // the instance manager's port (the host's: sim/Dungeons.js)
     this.inCombat = () => false; // the host says whether the character is in a fight
+    this.eventTier = () => null; // the host: the tier of the public event they're in, if any
     this.records = newRecords();
     this.achievements = {};      // achievement id → when it was reached
   }
@@ -154,8 +158,13 @@ export class CharacterCore {
     return !!n && this.near(n.x, n.z, REACH.npc);
   }
 
-  // The Threat that counts: a private run's tier while in one, else their own setting.
-  get tier() { return this.dungeon && Number.isInteger(this.dungeon.tier) ? this.dungeon.tier : this.settings.threat ?? 0; }
+  // The Threat that counts: a private run's tier while in one, a public event's while in one under
+  // way, else their own setting.
+  get tier() {
+    if (this.dungeon && Number.isInteger(this.dungeon.tier)) return this.dungeon.tier;
+    const ev = this.eventTier();
+    return Number.isInteger(ev) ? ev : this.settings.threat ?? 0;
+  }
 
   // ================================================================ the authority's dice
   roll(op) {
@@ -339,8 +348,6 @@ export class CharacterCore {
         fx.push({ k: 'toast', text: `Threat: ${TIERS[op.v].name}` });
         return true;
       case 'respawn': {
-        const lost = Math.floor(s.gold * 0.1);
-        s.gold -= lost;
         this.teleportUntil = this.time + 10;
         return true;
       }
@@ -514,6 +521,15 @@ export class CharacterCore {
       // ---- from the server
       case 'reward': return this.reward(op.roll, fx);
       case 'bonus': return this.bonus(op.roll, fx);
+      // From the authority: a public event won with this character in it — its chest (`top`: an
+      // extra item for a top contributor; `lead`: the top of three or more).
+      case 'event': {
+        const r = op.roll;
+        if (!r || !EVENT_KINDS.includes(r.kind) || !Number.isInteger(r.tier) || r.tier < 0 || r.tier > 2) return false;
+        (this.records.events[r.kind] ??= [0, 0, 0])[r.tier]++;
+        if (r.lead) this.records.eventLead++;
+        return this.bonus(r, fx);
+      }
       // Somewhere new (the authority watches where the character goes): a biome, a region's
       // level, a landmark, a settlement.
       case 'visit': {
@@ -634,17 +650,19 @@ export class CharacterCore {
     fx.push({ k: 'toast', text: 'Backpack full — reward dropped at your feet' });
   }
 
-  // Tap F: into an empty matching slot or the backpack; when everything is full (or on a hold of
-  // F) it takes the place of what's worn there — the armour in its slot, or the wielded weapon —
-  // and that is left on the ground where the new one lay.
+  // Tap F adds loot when there's room. Hold F equips it in place of the current item, keeping the
+  // replaced item in the backpack when possible or on the ground where this drop landed.
   pick(op, fx) {
     const g = this.ground.get(op.gid);
     if (!g || !op.roll || !this.near(g.at[0], g.at[2], REACH.loot)) return false;
     const inv = this.inventory;
     const item = g.item;
+    const at = Array.isArray(op.at) && op.at.length === 3 && op.at.every(Number.isFinite) ? op.at : g.at;
+    if (Math.hypot(at[0] - g.at[0], at[2] - g.at[2]) > 6 || !this.near(at[0], at[2], REACH.loot)) return false;
     let where = op.swap ? null : inv.add(item);
+    if (!op.swap && !where) return false;
     let old = null;
-    if (!where) {
+    if (op.swap) {
       if (isArmor(item)) {
         old = inv.armor[item.slot];
         inv.armor[item.slot] = item;
@@ -657,7 +675,7 @@ export class CharacterCore {
     this.ground.delete(op.gid);
     this.recordItem(item);
     fx.push({ k: 'unground', gid: op.gid });
-    if (old) this.spawn(op.roll.gid, old, op.swap ? g.at : [this.position.x, this.position.y, this.position.z], fx, false);
+    if (old && (!op.swap || !inv.stash(old))) this.spawn(op.roll.gid, old, at, fx, false);
     if (where !== 'backpack') fx.push({ k: 'gear' });
     fx.push({ k: 'toast', text: where === 'backpack' ? `${item.name} → backpack` : old && op.swap ? `Swapped ${old.name} for ${item.name}` : `Equipped ${item.name}` });
     return true;
@@ -754,6 +772,21 @@ export function bonusRoll({ title, kind, xp, level, race = null, items = 1, at }
     loot, at: at.map(r2),
   };
 }
+
+// A public event's chest for one participant (sim/WorldEvents.js; the authority rolls it, 'event'
+// applies it): a third of what the event's enemies were worth in XP (between 40 and 120 × its
+// level: the kills themselves pay too), gold, two rare-or-better items and one more for a top
+// contributor, at the event's tier — landing at its beacon.
+export function eventRoll(ev, person, playerLevel, gid) {
+  const kind = ev.type;
+  const at = [ev.bx, ev.by ?? 0, ev.bz];
+  const r = bonusRoll({
+    title: EVENT_WON[kind]?.replace('{place}', ev.place) ?? `${ev.name}: won`, kind, xp: Math.min(120 * ev.level, Math.max(40 * ev.level, ev.xp / 3)), level: ev.level, race: ev.race, items: 2 + (person.top ? 1 : 0), at,
+  }, playerLevel, gid, ev.tier);
+  return { ...r, tier: ev.tier, top: !!person.top || undefined, lead: !!person.lead || undefined };
+}
+const EVENT_KINDS = ['surge', 'siege', 'anomaly', 'retake'];
+const EVENT_WON = { surge: 'Surge repelled at {place}', siege: 'Siege lifted at {place}', anomaly: 'Anomaly stabilised', retake: '{place} retaken' };
 
 // Somewhere new for a character with `records`, at (x, z): the biome, the region's level, a
 // landmark or settlement (a hamlet, village, town or city) they're at — or null when there's

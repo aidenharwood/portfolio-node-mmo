@@ -10,6 +10,7 @@ import { Dungeons } from '../sim/Dungeons.js';
 import { EnemyReplica } from '../net/EnemyReplica.js';
 import { Enemy, prewarmRace, RACE_GLOW } from './Enemy.js';
 import { ELEMENTS } from '../items/elements.js';
+import { detachComponent } from './Dismemberment.js';
 
 // Projectile looks by the sim's `proj`: spitters' acid and lancers' spines, energy bolts from
 // techs and synths, psions' homing psi orbs, crawlers' sticky resin, grenades and mortar shells.
@@ -73,6 +74,9 @@ export class EnemyLayer {
     };
     this.sim = new WorldSim({
       world: g.world,
+      worldEvents: true, // public events, here as the server runs them online (sim/WorldEvents.js)
+      onEventEnd: (ev) => g.onEventEnd(ev),
+      onOverrun: () => {},
       emit: (ev) => this.onEvent(ev),
       onSpawn: (e) => this.addView(e),
       onRemove: (e) => this.removeView(e.id),
@@ -199,6 +203,7 @@ export class EnemyLayer {
   reportHit(view, hit) {
     const msg = {
       by: this.myId, damage: hit.damage, source: hit.source, poise: hit.poise ?? 0, knockback: hit.knockback ?? 0,
+      component: hit.component ?? null,
       dir: { x: hit.direction?.x ?? 0, z: hit.direction?.z ?? 0 },
     };
     if (this.sim) {
@@ -209,7 +214,7 @@ export class EnemyLayer {
     }
     // Online: reported to the server, and shown at once (a kill too) — the server's word follows.
     const r = (v) => Math.round(v * 100) / 100;
-    this.game.net.send({ t: 'hit', id: view.id, d: msg.damage, src: msg.source, po: msg.poise, kb: msg.knockback, dx: r(msg.dir.x), dz: r(msg.dir.z) });
+    this.game.net.send({ t: 'hit', id: view.id, d: msg.damage, src: msg.source, po: msg.poise, kb: msg.knockback, cp: msg.component, dx: r(msg.dir.x), dz: r(msg.dir.z) });
     const soak = Math.min(view.shield ?? 0, msg.damage);
     view.shield -= soak;
     view.hp = Math.max(0, view.hp - (msg.damage - soak));
@@ -305,6 +310,20 @@ export class EnemyLayer {
       case 'wave':
         g.hud.toast(ev.of ? `Wave ${ev.wave} of ${ev.of}: ${ev.n} coming for ${ev.name}` : `Reinforcements: ${ev.n} more from ${ev.name}`);
         break;
+      // Public events (sim/WorldEvents.js): a spore pod hatching, a pylon or beacon falling, a turn
+      // in the fight.
+      case 'hatch':
+        if (v) { g.effects.spawnPuff(v.position, { size: 2.2, life: 0.8, color: 0x6a3a7a }); g.effects.spawnRing(v.position, 3, RACE_GLOW.hive); }
+        break;
+      case 'evfall':
+        _p.fromArray(ev.p);
+        g.effects.spawnSparks(_p.clone().setY(_p.y + 2.5), 0x58cfff, 24);
+        g.effects.spawnRing(_p, 4, 0x58cfff);
+        g.hud.toast(ev.kind === 'beacon' ? 'The beacon is falling apart!' : 'A pylon has fallen!');
+        break;
+      case 'evstep':
+        g.hud.toast(ev.text);
+        break;
       case 'defend':
         g.hud.banner(`Hold ${ev.name}`, `${ev.waves} waves are coming`);
         break;
@@ -323,6 +342,9 @@ export class EnemyLayer {
           }
           g.audio.ward?.(_p);
         }
+        break;
+      case 'part':
+        if (v) detachComponent(v, ev.part);
         break;
       case 'poof':
         if (v) g.effects.spawnPuff(v.position, { size: 1.4, life: 0.6, color: 0x3a3440 });

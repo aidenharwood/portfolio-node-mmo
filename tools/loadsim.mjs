@@ -34,6 +34,7 @@ for (let i = 0; i < players; i++) {
   s.proxy.position.set(camp.x + Math.cos(a) * (camp.radius + 4), 0, camp.z + Math.sin(a) * (camp.radius + 4));
   s.proxy.position.y = world.groundHeight(s.proxy.position.x, s.proxy.position.z);
   s.proxy.placed = true;
+  s.proxy.ready = true;
   s.proxy.alive = true;
   s.camp = camp;
   realm.sessions.set(s.id, s);

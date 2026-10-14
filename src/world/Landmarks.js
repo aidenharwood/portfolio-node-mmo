@@ -505,7 +505,7 @@ export const LANDMARK_BUILDERS = {
       piece(fl, G.cone(r * 0.18, 1.1, 6), 0xffd84a, { pos: [0, 0.5, 0], glow: true, outline: 0 });
       bakeTree(fl);
       w.own.group.add(fl);
-      w.flame(fl, wx * 7 + wz);
+      w.flame(fl, wx * 7 + wz, null, 0, [LAVA, 0xffd84a], 0.7 + r * 0.12);
       col(lx, lz, r * 0.85, h);
     }
     for (let i = 0; i < 8; i++) {

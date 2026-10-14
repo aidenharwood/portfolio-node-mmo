@@ -19,6 +19,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { FXAAShader } from 'three/addons/shaders/FXAAShader.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { Pass, FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 import { GLOW, INK, INK_MARK } from './Toon.js';
@@ -37,6 +38,9 @@ const SpeedShader = {
     uTime: { value: 0 },
     uCenter: { value: new THREE.Vector2(0.5, 0.5) },
     uAspect: { value: 1 },
+    uShock: { value: new THREE.Vector4(0.5, 0.5, 0, 0) },
+    uShockOn: { value: 0 },
+    uHitFlash: { value: 0 },
   },
   vertexShader: /* glsl */ `
     varying vec2 vUv;
@@ -50,17 +54,32 @@ const SpeedShader = {
     uniform float uTime;
     uniform vec2 uCenter;
     uniform float uAspect;
+    uniform vec4 uShock; // projected centre, age, projected blast radius
+    uniform float uShockOn;
+    uniform float uHitFlash;
     varying vec2 vUv;
     float hash(float n) { return fract(sin(n) * 43758.5453123); }
     void main() {
       vec2 d = vUv - uCenter;
       float r = length(d * vec2(uAspect, 1.0));
+      vec2 sampleUv = vUv;
+      if (uShockOn > 0.5) {
+        vec2 sd = vUv - uShock.xy;
+        vec2 radial = sd * vec2(uAspect, 1.0);
+        float dist = length(radial);
+        float progress = clamp(uShock.z / 0.55, 0.0, 1.0);
+        float front = uShock.w * mix(0.18, 1.75, progress);
+        float width = max(0.0035, uShock.w * 0.045);
+        float wave = exp(-pow((dist - front) / width, 2.0)) * (1.0 - progress);
+        vec2 dir = dist > 1e-5 ? radial / dist : vec2(0.0, 1.0);
+        sampleUv -= dir * vec2(1.0 / uAspect, 1.0) * wave * 0.018;
+      }
       // Zoom blur: samples pulled toward the vanishing point, none at the focus, most at the edges.
       float blur = uStrength * 0.09 * smoothstep(0.06, 0.8, r);
       vec4 col = vec4(0.0);
       for (int i = 0; i < 12; i++) {
         float k = float(i) / 11.0;
-        col += texture2D(tDiffuse, vUv - d * blur * k);
+        col += texture2D(tDiffuse, sampleUv - d * blur * k);
       }
       col /= 12.0;
       // Comic speed lines radiating from the vanishing point, re-rolled ~16 times a second.
@@ -75,6 +94,7 @@ const SpeedShader = {
       line *= smoothstep(reach, reach + 0.3, r);
       col.rgb = mix(col.rgb, vec3(1.0), line * 0.55 * min(1.0, uStrength * 1.5));
       col.rgb *= 1.0 - 0.2 * uStrength * smoothstep(0.55, 1.25, r);
+      col.rgb = mix(col.rgb, vec3(1.0), clamp(uHitFlash, 0.0, 0.42));
       gl_FragColor = col;
     }`,
 };
@@ -287,6 +307,7 @@ class InkPass extends Pass {
 // ---------------------------------------------------------------- the chain
 const _v = new THREE.Vector3();
 const _p = new THREE.Vector3();
+const _right = new THREE.Vector3();
 
 export class PostFX {
   constructor(renderer, scene, camera) {
@@ -296,13 +317,15 @@ export class PostFX {
     this.quality = null;
     this.strength = 0;
     this.time = 0;
+    this.shock = null;
+    this.impactFlash = 0;
     this.speedEnabled = true;
     this.composer = null;
   }
 
   // (Re)builds the chain for a quality preset (render/Quality.js) and the player's settings.
-  configure(q, { outlines = true } = {}) {
-    const msaa = q.msaa ?? 0;
+  configure(q, { outlines = true, antialias = 'msaa' } = {}) {
+    const msaa = antialias === 'msaa' || antialias === 'msaa+fxaa' ? 4 : 0;
     if (!this.composer || this.msaa !== msaa) {
       this.composer?.dispose();
       this.ink?.dispose();
@@ -324,11 +347,14 @@ export class PostFX {
       this.composer.addPass(this.keepHue);
       this.speed = new ShaderPass(SpeedShader);
       this.composer.addPass(this.speed);
+      this.fxaa = new ShaderPass(FXAAShader);
+      this.composer.addPass(this.fxaa);
       this.composer.addPass(new OutputPass());
       this.msaa = msaa;
       this.resize();
     }
     this.quality = q;
+    this.antialias = antialias;
     this.ink.ink = q.ink && outlines;
     this.ink.ao = q.ao;
     GLOW.value = q.bloom ? GLOW_LIFT : 1;
@@ -347,9 +373,22 @@ export class PostFX {
     this.composer.setSize(w, h);
     this.ink.setSize(Math.round(w * r), Math.round(h * r));
     this.speed.uniforms.uAspect.value = w / h;
+    this.fxaa.material.uniforms.resolution.value.set(1 / Math.max(1, Math.round(w * r)), 1 / Math.max(1, Math.round(h * r)));
+  }
+
+  shockwave(position, radius) {
+    this.shock = { position: position.clone(), radius: Math.max(0.5, radius), age: 0, duration: 0.55 };
+  }
+
+  hitFlash(intensity = 0.24) {
+    this.impactFlash = Math.max(this.impactFlash, intensity);
   }
 
   render(dt, game) {
+    if (this.shock) {
+      this.shock.age += dt;
+      if (this.shock.age >= this.shock.duration) this.shock = null;
+    }
     const p = game.player;
     _v.set(p.velocity.x, p.vy, p.velocity.z);
     const speed = _v.length();
@@ -362,13 +401,29 @@ export class PostFX {
     this.strength += (target - this.strength) * (1 - Math.exp(-7 * dt));
     const moving = this.strength >= 0.01;
     const post = !!this.quality?.post;
+    const chain = post || this.antialias !== 'off';
+    const shock = !!this.shock;
+    const hitFlash = this.impactFlash > 0;
     // Nothing to add: straight to the screen.
-    if (!moving && !post) {
+    if (!moving && !chain && !shock && !hitFlash) {
       INK_MARK.value = 0;
       this.renderer.render(this.scene, this.camera);
       return;
     }
-    this.speed.enabled = moving;
+    this.speed.enabled = moving || shock || hitFlash;
+    this.fxaa.enabled = this.antialias === 'fxaa' || this.antialias === 'msaa+fxaa';
+    const shockUniforms = this.speed.uniforms;
+    if (!moving) shockUniforms.uStrength.value = 0;
+    shockUniforms.uShockOn.value = shock ? 1 : 0;
+    shockUniforms.uHitFlash.value = this.impactFlash;
+    if (shock) {
+      this.camera.updateMatrixWorld(true);
+      _v.copy(this.shock.position).project(this.camera);
+      _right.setFromMatrixColumn(this.camera.matrixWorld, 0);
+      _p.copy(this.shock.position).addScaledVector(_right, this.shock.radius).project(this.camera);
+      const radius = Math.hypot((_p.x - _v.x) * 0.5, (_p.y - _v.y) * 0.5);
+      shockUniforms.uShock.value.set((_v.x + 1) * 0.5, (_v.y + 1) * 0.5, this.shock.age, Math.max(0.004, radius));
+    }
     if (moving) {
       this.time += dt;
       const u = this.speed.uniforms;
@@ -389,5 +444,7 @@ export class PostFX {
     this.keepHue.enabled = this.bloom.enabled;
     INK_MARK.value = this.ink.enabled ? 1 : 0;
     this.composer.render(dt);
+    this.impactFlash *= Math.exp(-dt * 90);
+    if (this.impactFlash < 0.01) this.impactFlash = 0;
   }
 }

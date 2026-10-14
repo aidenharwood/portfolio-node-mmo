@@ -17,6 +17,11 @@ export class Inventory {
   get backpackFree() { return this.backpack.filter((w) => !w).length; }
   get isFull() { return this.backpackFree === 0; }
 
+  canAdd(item) {
+    if (isArmor(item)) return !this.armor[item.slot] || this.backpackFree > 0;
+    return this.slots.some((slot) => !slot) || this.backpackFree > 0;
+  }
+
   // Pick-up rule: empty matching equipment slot first, then backpack. Returns where it went, or null if full.
   add(item) {
     if (isArmor(item)) {

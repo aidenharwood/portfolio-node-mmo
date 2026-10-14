@@ -17,7 +17,7 @@ export class Moments {
     this.el = document.createElement('div');
     this.el.id = 'moment';
     this.el.className = 'hidden';
-    this.el.innerHTML = '<div class="mo-bar top"></div><div class="mo-title"></div><div class="mo-line"></div><div class="mo-bar bottom"><small>Esc · Space · click to skip</small></div>';
+    this.el.innerHTML = '<div class="mo-bar top"></div><div class="mo-title"></div><div class="mo-line"></div><div class="mo-bar bottom"><small><span class="kb-only">Esc · Space · click to skip</span><span class="touch-only">Tap to skip</span></small></div>';
     document.body.appendChild(this.el);
     this.el.addEventListener('pointerdown', (e) => { e.preventDefault(); this.skip(); });
     this.playing = null;
@@ -36,8 +36,9 @@ export class Moments {
     }
     const anchor = this.anchorOf(M.at);
     if (!anchor) return;
-    // A moment from a conversation (a quest taken or handed in) takes over from it.
-    if (this.game.dialogue?.isOpen) this.game.closeMenus();
+    // A moment from a conversation or objective takes over any open game panel. In particular,
+    // reaching the Brightwater waystone can complete its quest while the map is open.
+    if (this.game.dialogue?.isOpen || this.game.menu?.isOpen || this.game.state === 'menu') this.game.closeMenus();
     this.game.player.inCutscene = true;
     this.game.player.invulnTimer = Math.max(this.game.player.invulnTimer, 1.2);
     this.playing = { id, M, anchor, shot: 0, t: 0, total: 0 };

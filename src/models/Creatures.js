@@ -9,8 +9,10 @@ import { HIVE_MODELS } from './Hive.js';
 import { SYNTH_MODELS } from './Synths.js';
 import { FAUNA_MODELS } from './Fauna.js';
 import { BROOD_MODELS } from './Brood.js';
+import { EVENT_MODELS } from './EventFoes.js';
 
 export { bindAny, legSkeleton, hoverSkeleton } from './Rigs.js';
 
-// (models/Brood.js: what the Brood Mother brings into her raid — her eggs and hearts.)
-export const MODELS = { ...SCAV_MODELS, ...HIVE_MODELS, ...SYNTH_MODELS, ...FAUNA_MODELS, ...BROOD_MODELS };
+// (models/Brood.js: what the Brood Mother brings into her raid — her eggs and hearts;
+// models/EventFoes.js: what public events set down — spore pods and siege engines.)
+export const MODELS = { ...SCAV_MODELS, ...HIVE_MODELS, ...SYNTH_MODELS, ...FAUNA_MODELS, ...BROOD_MODELS, ...EVENT_MODELS };

@@ -16,6 +16,7 @@ const CHUNK_UNLOAD = 200;
 const POI_LOAD = 220;      // point-of-interest colliders within this of any player
 const POI_UNLOAD = 280;
 const BUDGET_MS = 6;       // per tick, for building what came into range
+const ARRIVAL_BUDGET_MS = 15; // ...while someone who just arrived waits on their surroundings
 const ckey = (cx, cz) => `${cx},${cz}`;
 const TILE = 32;           // grid vertices per side of a cached tile of heights (64 m)
 const MAX_TILES = 4096;    // ~34 MB of heights, then the cache starts over
@@ -61,30 +62,45 @@ export class HeadlessWorld extends World {
     return h;
   }
 
+  // What's missing round one focus, as jobs that build it; `want` collects the keys of the chunks
+  // that should be there.
+  missing(f, want = null) {
+    const jobs = [];
+    if (inPocket(f.x)) return jobs; // players down in a dungeon need nothing of the land round them
+    const r = Math.ceil(CHUNK_LOAD / CHUNK);
+    const fcx = Math.floor(f.x / CHUNK);
+    const fcz = Math.floor(f.z / CHUNK);
+    for (let dx = -r; dx <= r; dx++) {
+      for (let dz = -r; dz <= r; dz++) {
+        const cx = fcx + dx;
+        const cz = fcz + dz;
+        const d = Math.hypot((cx + 0.5) * CHUNK - f.x, (cz + 0.5) * CHUNK - f.z);
+        if (d > CHUNK_LOAD) continue;
+        const k = ckey(cx, cz);
+        want?.add(k);
+        if (!this.chunks.has(k)) jobs.push({ d, k, run: () => this.loadChunk(cx, cz) });
+      }
+    }
+    for (const p of this.poisNear(f.x, f.z, POI_LOAD)) {
+      if (!this.pois.has(p.id)) jobs.push({ d: Math.hypot(p.x - f.x, p.z - f.z), k: p.id, run: () => this.loadPoi(p) });
+    }
+    return jobs;
+  }
+
+  // Everything round (x, z) built? (A player arriving waits for it: see track.)
+  ready(f) { return this.missing(f).length === 0; }
+
   // Keeps colliders loaded around `foci` (player positions); builds new ones within a time budget.
-  track(foci) {
-    // Players down in a dungeon need nothing of the land round them.
+  // `waiting`: those of `foci` whose surroundings must be built before they count (players just
+  // arrived); theirs is built first, in the order given, with a bigger budget: `spare` ms, between
+  // the usual budget and ARRIVAL_BUDGET_MS.
+  track(foci, waiting = [], spare = ARRIVAL_BUDGET_MS) {
     foci = foci.filter((f) => !inPocket(f.x));
     const want = new Set();
     const jobs = [];
     for (const f of foci) {
-      const r = Math.ceil(CHUNK_LOAD / CHUNK);
-      const fcx = Math.floor(f.x / CHUNK);
-      const fcz = Math.floor(f.z / CHUNK);
-      for (let dx = -r; dx <= r; dx++) {
-        for (let dz = -r; dz <= r; dz++) {
-          const cx = fcx + dx;
-          const cz = fcz + dz;
-          const d = Math.hypot((cx + 0.5) * CHUNK - f.x, (cz + 0.5) * CHUNK - f.z);
-          if (d > CHUNK_LOAD) continue;
-          const k = ckey(cx, cz);
-          want.add(k);
-          if (!this.chunks.has(k)) jobs.push({ d, k, run: () => this.loadChunk(cx, cz) });
-        }
-      }
-      for (const p of this.poisNear(f.x, f.z, POI_LOAD)) {
-        if (!this.pois.has(p.id)) jobs.push({ d: Math.hypot(p.x - f.x, p.z - f.z), k: p.id, run: () => this.loadPoi(p) });
-      }
+      const rank = waiting.indexOf(f);
+      for (const j of this.missing(f, want)) jobs.push({ ...j, rank: rank < 0 ? Infinity : rank });
     }
     // Unload what nobody is near any more.
     for (const [k, ch] of this.chunks) {
@@ -97,14 +113,14 @@ export class HeadlessWorld extends World {
       if (foci.every((f) => Math.hypot(o.poi.x - f.x, o.poi.z - f.z) > POI_UNLOAD)) this.unload(o, this.pois, id);
     }
     const seen = new Set();
-    this.queue = jobs.filter((j) => !seen.has(j.k) && seen.add(j.k)).sort((a, b) => a.d - b.d);
-    this.work(BUDGET_MS);
+    this.queue = jobs.sort((a, b) => a.rank - b.rank || a.d - b.d).filter((j) => !seen.has(j.k) && seen.add(j.k));
+    this.work(this.queue[0]?.rank < Infinity ? Math.max(BUDGET_MS, Math.min(ARRIVAL_BUDGET_MS, spare)) : BUDGET_MS);
   }
 
-  // Everything near `foci` at once (startup, a player arriving): nothing may spawn inside a wall.
+  // Everything near `foci` at once (startup, tools): nothing may spawn inside a wall. What's
+  // loaded elsewhere stays (track lets go of it once nobody is near).
   prime(foci) {
-    this.track(Array.isArray(foci) ? foci : [foci]);
-    this.work(Infinity);
+    for (const f of Array.isArray(foci) ? foci : [foci]) for (const j of this.missing(f)) j.run();
   }
 
   work(budget) {

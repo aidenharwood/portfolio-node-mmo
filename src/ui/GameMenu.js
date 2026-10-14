@@ -73,7 +73,8 @@ const CONTROLS = [
     ['Interact · pick up', 'Tap the prompt · tap the loot card (hold to swap)'],
     ['Weapons', 'Tap a weapon slot'],
     ['Abilities', 'The three buttons over the action cluster'],
-    ['Menu · chat · view', 'The buttons at the top'],
+    ['Map · journal', 'Tap the minimap · tap the tracked quest'],
+    ['Menu · chat · view', 'The buttons at the top left (a dot on the menu: talent points to spend)'],
   ]],
 ];
 
@@ -87,6 +88,8 @@ const toggle = (key, label, on) => `
 const CHOICES = {
   touchControls: [['auto', 'Auto'], ['on', 'On'], ['off', 'Off']],
   graphics: [['low', 'Low'], ['medium', 'Medium'], ['high', 'High']],
+  antialias: [['off', 'Off'], ['fxaa', 'FXAA'], ['msaa', '4× MSAA'], ['msaa+fxaa', 'MSAA + FXAA']],
+  shadowQuality: [['low', 'Low'], ['medium', 'Medium'], ['high', 'High']],
 };
 const choice = (key, label, value) => `
   <label class="pm-set"><span>${label}</span><button type="button" class="pm-toggle on" data-choice="${key}">${CHOICES[key].find(([v]) => v === value)?.[1] ?? value}</button></label>`;
@@ -194,6 +197,10 @@ export class GameMenu {
     const g = this.game;
     this.q('.gm-tabs').innerHTML = this.tabs.map((t) => `
       <button role="tab" class="gm-tab ${t.id === tab ? 'on' : ''}" aria-selected="${t.id === tab}" data-tab="${t.id}">${t.id === 'inventory' && this.shop ? 'Trade' : t.label}${t.key && this.context === 'game' ? `<kbd>${t.key}</kbd>` : ''}</button>`).join('');
+    // (On a narrow screen the tabs scroll sideways: the open one is brought into sight.)
+    const nav = this.q('.gm-tabs');
+    const on = nav.querySelector('.gm-tab.on');
+    if (on && nav.scrollWidth > nav.clientWidth) nav.scrollLeft = on.offsetLeft - (nav.clientWidth - on.offsetWidth) / 2;
     const title = this.context === 'title';
     this.q('.gm-quit').textContent = title ? 'Back to Title' : g.net.inWorld ? 'Leave World' : 'Quit to Title';
     this.q('.gm-quit').dataset.act = title ? 'back' : 'quit';
@@ -453,6 +460,8 @@ export class GameMenu {
     const done = log.isComplete(id);
     const stages = log.stagesOf(q);
     const at = Math.min(log.stage[id] ?? 0, stages.length - 1);
+    const objectives = done ? [] : log.objectivesOf(id);
+    const completed = done ? objectives.length : objectives.reduce((n, o, i) => n + (prog[i] >= (o.count ?? 1) ? 1 : 0), 0);
     const goals = done ? `<li class="done">${q.returnTo === null ? 'Done' : `Ready to hand in to ${esc(log.returnTo(q))}`}</li>`
       : log.objectivesOf(id).map((o, i) => {
         const n = o.count ?? 1;
@@ -464,8 +473,8 @@ export class GameMenu {
     const text = done ? '' : log.fill(stages[at]?.text ?? '', q);
     const tracked = g.tracked === id;
     return `<article class="gm-quest ${done ? 'ready' : ''} ${tracked ? 'tracked' : ''}">
-      <h4><span>${esc(q.title)}</span><button class="gm-btn" data-act="track" data-v="${esc(id)}">${tracked ? 'Untrack' : 'Track'}</button></h4>
-      <small>${esc(meta)}</small>${text ? `<p>${esc(text)}</p>` : ''}<ul>${goals}</ul></article>`;
+      <h4><span>${esc(q.title)}</span><button class="gm-btn" aria-pressed="${tracked}" data-act="track" data-v="${esc(id)}">${tracked ? '✓ Tracking' : 'Track quest'}</button></h4>
+      <small>${esc(meta)}</small>${text ? `<p>${esc(text)}</p>` : ''}<div class="gm-quest-progress"><span>${done ? 'Complete' : `${completed} of ${objectives.length} objectives`}</span><i><b style="width:${done ? 100 : objectives.length ? Math.round(completed / objectives.length * 100) : 0}%"></b></i></div><ul>${goals}</ul></article>`;
   }
 
   // Where the story goes next, when nothing of it is under way.
@@ -549,15 +558,18 @@ export class GameMenu {
         </section>
         <section class="gm-card"><h3>Display</h3>
           ${choice('graphics', 'Graphics quality', pr.graphics)}
+          ${choice('antialias', 'Antialiasing', pr.antialias)}
+          ${choice('shadowQuality', 'Shadow map quality', pr.shadowQuality)}
           ${toggle('shadows', 'Shadows', pr.shadows)}
           ${toggle('outlines', 'Ink outlines', pr.outlines)}
           ${toggle('hatching', 'Comic hatching', pr.hatching)}
           ${toggle('motionFX', 'Speed blur & lines', pr.motionFX)}
+          ${toggle('gore', 'Gore effects', pr.gore)}
           ${slider('shake', 'Camera shake', 0, 1, 0.05, pr.shake, FMT.shake)}
-          ${slider('renderScale', 'Resolution', 0.5, 1, 0.05, pr.renderScale, FMT.renderScale)}
+          ${slider('renderScale', 'Resolution scale', 0.5, 1.5, 0.05, pr.renderScale, FMT.renderScale)}
           ${toggle('dynamicRes', 'Adaptive resolution', pr.dynamicRes)}
           ${toggle('fullscreen', 'Fullscreen in play', pr.fullscreen)}
-          <p class="hint">Fullscreen lets Esc open and close menus without the browser taking the mouse away (Chrome, Edge). Hold Esc to leave it. Adaptive resolution lowers the resolution while the frame rate struggles. Graphics quality: Low draws the scene as it is; Medium adds finer ink, a soft glow and a field of grass; High adds ambient occlusion, long-range shadows and denser grass.</p>
+          <p class="hint">FXAA smooths the finished image, including ink outlines; MSAA smooths geometry during rendering. Try MSAA + FXAA if outlines still look jagged. Higher shadow-map quality and resolution use more GPU memory and time. Resolution scale tops out at twice the screen's CSS resolution, and adaptive resolution can lower it while frames run slow. Fullscreen lets Esc open and close menus without the browser taking the mouse away (Chrome, Edge); hold Esc to leave it. Graphics quality: Low draws the scene as it is; Medium adds finer ink, a soft glow and a field of grass; High adds ambient occlusion, long-range shadows and denser grass.</p>
         </section>
       </div>
       <div class="pm-foot"><button class="gm-btn" data-act="defaults">Reset to defaults</button></div>`;

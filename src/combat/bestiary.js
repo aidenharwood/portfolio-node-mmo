@@ -224,6 +224,27 @@ export const ENEMY_TYPES = {
     ],
   },
 
+  // ======================================================== World events (gameplay phase 6)
+  // Rooted in place, set down by a public event (sim/WorldEvents.js) rather than living in a camp:
+  // a Hive surge's spore pods, which hatch drones until they're burst, and a Scav siege's engines,
+  // which shell a settlement's defences from outside its walls.
+  sporepod: {
+    race: 'hive', name: 'Spore Pod', model: 'hive:sporepod', rig: 'hover', behavior: 'support', hover: 0,
+    hp: 260, radius: 1.1, height: 2.3, speed: 0, mass: 60, poise: 99999, staggerTime: 0.1,
+    xp: 30, gold: [4, 8], dropChance: 0.2, cooldown: [1.5, 2.5],
+    attacks: [{ id: 'burst', kind: 'nova', range: 4.5, windup: 1.1, active: 0.1, recover: 2.2, damage: 22, radius: 4.5, knockback: 9, element: 'corrosive', cooldown: 7 }],
+  },
+  siegeengine: {
+    race: 'scav', name: 'Siege Engine', model: 'scav:siege', rig: 'hover', behavior: 'lobber', hover: 0, muzzle: { y: 0.95, f: 0.6 },
+    lure: 60, // it's aimed at walls: only someone really hurting it turns it from them
+    hp: 420, radius: 1.6, height: 3.2, speed: 0, mass: 60, poise: 99999, staggerTime: 0.1,
+    xp: 45, gold: [8, 15], dropChance: 0.35, cooldown: [1.2, 2.0],
+    attacks: [
+      { id: 'shell', kind: 'lob', range: 60, min: 8, windup: 1.6, active: 0.1, recover: 1.4, damage: 40, radius: 3.6, fuse: 0.8, knockback: 14, cooldown: 4.5, element: 'fire' },
+      { id: 'vent', kind: 'nova', range: 4, windup: 1.0, active: 0.1, recover: 1.6, damage: 26, radius: 4.5, knockback: 14, cooldown: 6 },
+    ],
+  },
+
   // ======================================================== Raids (gameplay phase 7)
   ...RAID_TYPES,
 };

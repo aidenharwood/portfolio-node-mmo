@@ -673,6 +673,11 @@ export class QuestLog {
 
   // Does a running quest want this one now — someone to talk to or answer, an object to use?
   wants(npcId) {
+    return !!this.wantedQuest(npcId);
+  }
+
+  // The active quest asking this person or object for an interaction, if any.
+  wantedQuest(npcId) {
     for (const id of Object.keys(this.active)) {
       const q = this.defs.get(id);
       const prog = this.active[id];
@@ -680,11 +685,11 @@ export class QuestLog {
       for (let i = 0; i < objectives.length; i++) {
         const o = objectives[i];
         if (prog[i] >= (o.count ?? 1)) continue;
-        if ((o.type === 'talk' || o.type === 'choose') && this.npcOf(o.npc, q) === npcId) return true;
-        if (o.type === 'use' && this.npcOf(o.object, q) === npcId) return true;
+        if ((o.type === 'talk' || o.type === 'choose') && this.npcOf(o.npc, q) === npcId) return q;
+        if (o.type === 'use' && this.npcOf(o.object, q) === npcId) return q;
       }
     }
-    return false;
+    return null;
   }
 
   // A condition on the story's state (story folk who only appear at a stage, what people call

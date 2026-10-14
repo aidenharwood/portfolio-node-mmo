@@ -5,14 +5,11 @@
 //           procedural surfaces (planks, brick, tiles… render/Surfaces.js).
 //   High    all that, plus a light ambient occlusion, cascaded shadows out to 130 m and a wider,
 //           denser grass field.
-// Medium and High are anti-aliased (multisampled) except on phones, as the plain screen is.
-import { TOUCH_DEVICE } from '../core/Device.js';
-
-const MSAA = TOUCH_DEVICE ? 0 : 4;
+// Multisampling is a device preference (core/Prefs.js), not part of the quality preset.
 export const QUALITY = {
-  low: { post: false, ink: false, ao: false, bloom: false, csm: false, grass: 0, grassRadius: 0, msaa: 0, surfaces: false },
-  medium: { post: true, ink: true, ao: false, bloom: true, csm: false, grass: 16000, grassRadius: 26, msaa: MSAA, surfaces: true },
-  high: { post: true, ink: true, ao: true, bloom: true, csm: true, grass: 32000, grassRadius: 36, msaa: MSAA, surfaces: true },
+  low: { post: false, ink: false, ao: false, bloom: false, csm: false, grass: 0, grassRadius: 0, surfaces: false },
+  medium: { post: true, ink: true, ao: false, bloom: true, csm: false, grass: 16000, grassRadius: 26, surfaces: true },
+  high: { post: true, ink: true, ao: true, bloom: true, csm: true, grass: 32000, grassRadius: 36, surfaces: true },
 };
 
 export const qualityOf = (name) => QUALITY[name] ?? QUALITY.medium;

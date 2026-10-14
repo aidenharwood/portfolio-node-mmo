@@ -19,7 +19,9 @@ import { MODELS, bindAny } from '../models/Creatures.js';
 import { applyComic } from '../render/Toon.js';
 import { Animator, makeAnimState } from '../anim/Animator.js';
 import { LegAnimator, makeLegState, HoverAnimator, makeHoverState } from '../anim/LegAnimator.js';
+import { prepareRagdoll } from '../anim/Ragdoll.js';
 import { AFFIXES, RALLY } from '../sim/affixes.js';
+import { detachComponent, updateDetachedParts, removeDetachedPart } from './Dismemberment.js';
 
 export { ENEMY_TYPES };
 
@@ -28,6 +30,8 @@ const FRENZY = new THREE.Color(0x5a0a04);
 const _fwd = new THREE.Vector3();
 const _p = new THREE.Vector3();
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const CORPSE_FADE_START = 8;
+const CORPSE_FADE_TIME = 1.5;
 
 export const RACE_GLOW = { scav: 0xff8a2a, hive: 0xc46aff, synth: 0x3ad8ff, fauna: 0xffb030 };
 const WARD = 0x7fd8ff; // a tech's shield bubble
@@ -64,6 +68,7 @@ function instantiate(key) {
   let tpl = TEMPLATES.get(key);
   if (!tpl) {
     tpl = MODELS[key]();
+    prepareRagdoll(tpl.model);
     TEMPLATES.set(key, tpl);
   }
   const model = cloneSkinned(tpl.model);
@@ -153,6 +158,9 @@ export class Enemy extends Character {
     this.alt = 0;
     this.foe = null;
     this.predicted = 0; // online: seconds a predicted kill / health waits for the server's word
+    this.severed = new Set();
+    this.detachedParts = [];
+    this.severedGeometry = new Set();
 
     const scale = type.scale ?? 1;
     this.rig = instantiate(type.model);
@@ -183,6 +191,8 @@ export class Enemy extends Character {
       }
     }
     this.groundFn = (x, z) => game.world.groundHeight(x, z);
+    this.supportFn = (x, z, maxY) => game.world.supportHeight(x, z, maxY);
+    this.resolveFn = (pos, radius, stepUp, height) => game.world.resolve(pos, radius, stepUp, height);
     this.collectMaterials();
     this.sync();
     this.root.rotation.y = this.facing;
@@ -212,6 +222,7 @@ export class Enemy extends Character {
     this.facing = s.facing;
     this.velocity.copy(s.velocity);
     this.knockback.copy(s.knockback);
+    this.height = s.height;
     this.maxHp = s.maxHp;
     // A predicted hit or kill (online) stands until the server has had time to agree.
     if (this.predicted <= 0) {
@@ -254,6 +265,8 @@ export class Enemy extends Character {
     if (this.alive && this.state === 'attack') this.strike(dt);
     this.visuals(dt);
     this.animate(dt);
+    for (const part of this.src.brokenParts ?? []) if (!this.severed.has(part)) detachComponent(this, part);
+    updateDetachedParts(this, dt);
     this.updateMaterials(dt);
   }
 
@@ -327,8 +340,7 @@ export class Enemy extends Character {
       this.model.position.y = -2 * (1 - k) * (1 - k);
     } else this.model.position.y = this.lift - (this.hidden ? 0.15 : 0);
     if (this.state === 'dead') {
-      const k = Math.min(this.stateTime / 1.3, 1);
-      const shrink = Math.max(0, (k - 0.6) / 0.4);
+      const shrink = clamp((this.stateTime - CORPSE_FADE_START) / CORPSE_FADE_TIME, 0, 1);
       this.model.scale.setScalar((this.type.scale ?? 1) * Math.max(0.001, 1 - shrink * shrink));
     }
     if (this.rig.arrow) this.rig.arrow.scale.setScalar(this.state === 'windup' && this.alive ? 1 : 1e-4);
@@ -437,6 +449,9 @@ export class Enemy extends Character {
     this.rig.skeleton?.dispose();
     this.wardMesh?.material.dispose();
     this.aura?.material.dispose();
+    for (const geometry of this.severedGeometry) geometry.dispose();
+    for (const part of this.detachedParts) removeDetachedPart(this, part);
+    this.detachedParts.length = 0;
   }
 
   // ================================================================ animation
@@ -469,11 +484,15 @@ export class Enemy extends Character {
 
   animateLegs(dt, p) {
     const s = this.anim;
+    s.brokenLegs = this.src.brokenParts ?? [];
     s.facing = this.facing;
     s.vx = this.velocity.x + this.knockback.x;
     s.vz = this.velocity.z + this.knockback.z;
     s.grounded = this.lift < 0.05;
     s.ground = this.state === 'spawn' ? null : this.groundFn;
+    s.supportHeight = this.supportFn;
+    s.resolve = this.resolveFn;
+    s.world = this.game.world;
     s.flinch = Math.max(this.flashTimer / 0.1, 0);
     s.mode = this.state === 'dead' ? 'dead' : this.state === 'stagger' ? 'stagger' : 'ground';
     const [phase, t] = this.phaseInfo();
@@ -493,6 +512,10 @@ export class Enemy extends Character {
     s.vz = this.velocity.z + this.knockback.z;
     s.flinch = Math.max(this.flashTimer / 0.1, 0);
     s.mode = this.state === 'dead' ? 'dead' : this.state === 'stagger' ? 'stagger' : 'ground';
+    s.ground = this.state === 'spawn' ? null : this.groundFn;
+    s.supportHeight = this.supportFn;
+    s.resolve = this.resolveFn;
+    s.world = this.game.world;
     const [phase, t] = this.phaseInfo();
     s.pose = this.cur && (this.cur.kind === 'burst' || this.behavior === 'flyer') ? 'fire' : 'cast';
     s.phase = phase;
@@ -503,6 +526,7 @@ export class Enemy extends Character {
 
   animateBiped(dt, p) {
     const s = this.anim;
+    s.brokenLegs = this.src.brokenParts ?? [];
     s.facing = this.facing;
     s.vx = this.velocity.x + this.knockback.x;
     s.vz = this.velocity.z + this.knockback.z;
@@ -510,13 +534,17 @@ export class Enemy extends Character {
     s.grounded = this.lift < 0.05;
     s.sprint = this.state === 'attack' && this.cur?.kind === 'charge';
     s.ground = this.state === 'spawn' ? null : this.groundFn;
+    s.supportHeight = this.supportFn;
+    s.resolve = this.resolveFn;
+    s.world = this.game.world;
     s.flinch = Math.max(this.flashTimer / 0.1, 0) * 0.7;
     s.mode = this.state === 'dead' ? 'dead' : this.state === 'stagger' ? 'stagger' : 'ground';
     s.t = this.state === 'dead' ? Math.min(1, this.stateTime / 0.7) : 0;
     this.lookAngles(s, p);
     s.strike = 0;
     s.twist = 0;
-    s.crouch = 0;
+    const lostLegs = Number(s.brokenLegs.includes('leftLeg')) + Number(s.brokenLegs.includes('rightLeg'));
+    s.crouch = lostLegs === 2 ? 0.8 : lostLegs === 1 ? 0.22 : 0;
     s.offGrip = null;
     s.offPose = this.type.offPose ?? null;
 

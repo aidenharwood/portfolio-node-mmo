@@ -13,6 +13,8 @@
 //   onHordeBroken(pack, last)  a roaming warband wiped out (`last`: the final kill)
 //   onDefended(defence)        a place held against its waves (a quest's 'defend': Encounters.defend)
 //   onRoomCleared(camp) / onRoomRestored(camp)  a dungeon room's encounter (sim/Dungeons.js)
+//   worldEvents   true: run public events here (sim/WorldEvents.js), with
+//   onEventEnd(ev) / onOverrun(place, on)        an event won or lost; a settlement overrun or freed
 // }
 // Players are proxies the host keeps current: { id, position, velocity, radius, height, alive }.
 import * as THREE from 'three';
@@ -23,6 +25,7 @@ import { inPocket } from '../world/dungeons.js';
 const DEFEND = { first: 3, gap: 5, reach: 45, idle: 20 }; // a defence's waves, and how long it waits for someone
 import { EnemySim } from './EnemySim.js';
 import { enemyType } from './enemyDefs.js';
+import { WorldEvents } from './WorldEvents.js';
 
 // Attack tokens per player: how many enemies may be attacking one player at once — more as the
 // crowd on them grows (`per` more enemies on them add one, up to `max`).
@@ -55,6 +58,7 @@ export class WorldSim {
     this.freezeAI = false;
     this.slow = null;          // optional (enemy) → time scale (offline hitstop)
     this.encounters = new Encounters(this);
+    this.director = host.worldEvents ? new WorldEvents(this) : null; // public events
     this.bodies = [];          // scratch list for separate()
   }
 
@@ -99,6 +103,7 @@ export class WorldSim {
     this.separate();
     for (let i = this.enemies.length - 1; i >= 0; i--) if (this.enemies[i].removeMe) this.removeEnemy(this.enemies[i]);
     this.encounters.update(this.time, dt);
+    this.director?.update(dt);
   }
 
   // Bodies don't overlap: enemies shove each other apart (heavier ones give way less) and step out
@@ -171,6 +176,7 @@ export class WorldSim {
 
   onKilled(e, hit) {
     this.host.onKilled?.(e, hit, [...e.credit]);
+    this.director?.onKilled(e);
     // The last of a warband down: it's broken.
     const pack = e.camp;
     if (pack?.horde && !pack.broken && pack.enemies.every((x) => !x.alive)) {
@@ -188,6 +194,8 @@ export class WorldSim {
   }
   tokenAvailable(e, kind) {
     if (!e.foe) return false;
+    // A thing to defend can be set on by any number at once.
+    if (e.foe.structure) return true;
     const set = this.tokensOf(e.foe)[kind];
     const T = TOKENS[kind];
     return set.has(e) || set.size < Math.min(T.max, T.base + Math.floor((this.pressure.get(e.foe.id) ?? 0) / T.per));

@@ -11,6 +11,7 @@
 // Owners fill a state like makeLegState() each frame and call update().
 import * as THREE from 'three';
 import { solveTwoBone, Spring } from './IK.js';
+import { Ragdoll, severRagdoll, deathKick } from './Ragdoll.js';
 
 const TAU = Math.PI * 2;
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
@@ -31,6 +32,7 @@ export function makeLegState() {
   return {
     mode: 'ground',      // ground | air | stagger | dead
     vx: 0, vz: 0, facing: 0, grounded: true,
+    brokenLegs: [],
     ground: null,        // (x, z) => world height
     pose: 'idle',        // idle | bite | charge | howl | pounce | spit | rear | swipe
     phase: 'none',       // windup | active | recover | none
@@ -55,10 +57,13 @@ export class LegAnimator {
     this.mem = rig.legs.map(() => ({ perp: new THREE.Vector3(), set: false }));
     this.feet = rig.legs.map(() => new THREE.Vector3());
     this.dir = new THREE.Vector2(0, 1);
+    this.ragdoll = null;
   }
 
   update(dt, s) {
     if (dt <= 0) return;
+    // A body at rest only keeps lying where it lies.
+    if (s.mode === 'dead' && this.ragdoll?.asleep) { this.ragdoll.update(dt, null); return; }
     dt = Math.min(dt, 1 / 20);
     const r = this.rig;
     const c = this.cfg;
@@ -96,8 +101,14 @@ export class LegAnimator {
     let backH = 0;
     let leftH = 0;
     let rightH = 0;
+    let nf = 0, nb = 0, nl = 0, nr = 0, supported = 0;
     r.legs.forEach((leg, i) => {
       const lc = leg.cfg;
+      if (s.brokenLegs?.includes(`leg${i}`)) {
+        // The detached limb no longer plants a foot or carries the body's weight.
+        this.feet[i].set(lc.foot[0], -L * 0.2, lc.foot[2]);
+        return;
+      }
       const ph = (this.phase + lc.phase) % 1;
       let a;
       let y;
@@ -134,29 +145,32 @@ export class LegAnimator {
         h = clamp((s.ground(_v.x, _v.z) - modelY) / mScale, -0.6, 0.6);
       }
       rest.y += h + (c.ankle ?? 0.05);
-      if (lc.front) frontH += h; else backH += h;
-      if (lc.side > 0) leftH += h; else rightH += h;
+      if (lc.front) { frontH += h; nf++; } else { backH += h; nb++; }
+      if (lc.side > 0) { leftH += h; nl++; } else { rightH += h; nr++; }
+      supported++;
     });
-    const nf = r.legs.filter((l) => l.cfg.front).length || 1;
-    const nb = r.legs.length - nf || 1;
-    const nl = r.legs.filter((l) => l.cfg.side > 0).length || 1;
-    frontH /= nf;
-    backH /= nb;
-    leftH /= nl;
-    rightH /= r.legs.length - nl || 1;
+    const allH = supported ? (frontH + backH) / supported : 0;
+    frontH = nf ? frontH / nf : allH;
+    backH = nb ? backH / nb : allH;
+    leftH = nl ? leftH / nl : allH;
+    rightH = nr ? rightH / nr : allH;
+    const lost = r.legs.length - supported;
+    const loss = lost / Math.max(1, r.legs.length);
 
     // ---- body
     const crouch = sp.crouch.step(s.crouch + (s.pose === 'charge' && s.phase === 'windup' ? 0.25 : 0) + (s.pose === 'pounce' && s.phase === 'windup' ? 0.35 : 0)
       + (s.pose === 'howl' ? 0.1 : 0) + (s.mode === 'stagger' ? 0.15 : 0), dt);
-    const bob = Math.cos(TAU * 2 * this.phase) * L * 0.035 * move;
-    const baseY = c.bodyY * (1 - crouch * 0.4) + Math.min(frontH, backH) * 0.5 + Math.max(frontH, backH) * 0.5 - dead * c.bodyY * 0.55;
+    const bob = Math.cos(TAU * 2 * this.phase) * L * 0.035 * move * (1 - loss * 0.75);
+    const collapse = L * 0.45 * loss;
+    const baseY = c.bodyY * (1 - crouch * 0.4) + Math.min(frontH, backH) * 0.5 + Math.max(frontH, backH) * 0.5 - dead * c.bodyY * 0.55 - collapse;
     r.body.position.y = sp.y.step(baseY, dt) + bob;
     const len = c.bodyLen ?? 1;
-    let pitch = Math.atan2(backH - frontH, len);
+    let pitch = Math.atan2(backH - frontH, len) + ((nf - nb) / Math.max(1, supported)) * 0.12;
     if (s.pose === 'spit') pitch -= poseActive('spit') * 0.4;
     pitch -= rear * 1.05;
     if (s.pose === 'charge' && s.phase === 'active') pitch += 0.12;
-    const roll = Math.atan2(rightH - leftH, (c.bodyWidth ?? 0.6)) * 0.6 + dead * 1.4 - clamp(yawRate * speed * 0.01, -0.2, 0.2);
+    const roll = Math.atan2(rightH - leftH, (c.bodyWidth ?? 0.6)) * 0.6
+      + ((nr - nl) / Math.max(1, supported)) * 0.22 + dead * 1.4 - clamp(yawRate * speed * 0.01, -0.2, 0.2);
     const lean = sp.lean.step(s.flinch * -0.2 + (s.pose === 'bite' && s.phase === 'active' ? 0.12 : 0), dt);
     _e.set(sp.pitch.step(pitch, dt) + lean, 0, sp.roll.step(roll, dt), 'YXZ');
     r.body.quaternion.setFromEuler(_e);
@@ -189,6 +203,12 @@ export class LegAnimator {
     // ---- legs: IK to the feet
     m.updateMatrixWorld(true);
     r.legs.forEach((leg, i) => {
+      if (s.brokenLegs?.includes(`leg${i}`)) {
+        leg.upper.quaternion.setFromAxisAngle(X, 0.45);
+        leg.lower.quaternion.identity();
+        leg.foot.quaternion.identity();
+        return;
+      }
       const lc = leg.cfg;
       _p.copy(this.feet[i]).applyMatrix4(m.matrixWorld);
       // Knee/elbow direction: front elbows back, hind knees forward, spider knees up and out.
@@ -201,6 +221,15 @@ export class LegAnimator {
       leg.upper.parent.getWorldQuaternion(_q).multiply(leg.upper.quaternion).multiply(leg.lower.quaternion).invert();
       if (leg.foot) leg.foot.quaternion.copy(_q).multiply(m.getWorldQuaternion(_q2));
     });
+    if (s.mode === 'dead') this.updateRagdoll(dt, s);
+    else this.ragdoll = null;
+  }
+
+  // Dead: a ragdoll of its own skeleton (anim/Ragdoll.js), from the pose it fell in.
+  updateRagdoll(dt, s) {
+    if (!this.ragdoll) this.ragdoll = legRagdoll(this.rig, s);
+    severRagdoll(this.ragdoll, s.brokenLegs, (id) => (id === 'head' ? this.rig.head : this.rig.legs[Number(id.slice(3))]?.upper));
+    this.ragdoll.update(dt, s.world ?? null, s.ground ?? null);
   }
 
   // How far the creature rears up onto its hind legs (rear pose, and the swipe's half-rear).
@@ -228,10 +257,12 @@ export class HoverAnimator {
     this.rig = rig;
     this.time = Math.random() * 10;
     this.sp = { pitch: new Spring(3), roll: new Spring(3), dead: new Spring(2), cast: new Spring(6), recoil: new Spring(8) };
+    this.ragdoll = null;
   }
 
   update(dt, s) {
     if (dt <= 0) return;
+    if (s.mode === 'dead' && this.ragdoll?.asleep) { this.ragdoll.update(dt, null); return; }
     dt = Math.min(dt, 1 / 20);
     const r = this.rig;
     const sp = this.sp;
@@ -249,7 +280,7 @@ export class HoverAnimator {
     const roll = sp.roll.step(clamp(-lx * 0.06, -0.4, 0.4) + dead * 1.2, dt);
     _e.set(pitch + dead * 0.6, 0, roll, 'YXZ');
     r.body.quaternion.setFromEuler(_e);
-    for (const ring of r.spin ?? []) ring.rotation.y += dt * (ring.userData.rate ?? 4) * (1 - dead * 0.9);
+    if (s.mode !== 'dead') for (const ring of r.spin ?? []) ring.rotation.y += dt * (ring.userData.rate ?? 4) * (1 - dead * 0.9);
     if (r.arms) {
       r.arms.forEach((arm, i) => {
         const side = i === 0 ? 1 : -1;
@@ -258,5 +289,158 @@ export class HoverAnimator {
       });
     }
     if (r.robe) r.robe.rotation.set(clamp(lz * 0.08, -0.4, 0.5) + Math.sin(this.time * 2.6) * 0.06, Math.sin(this.time * 1.9) * 0.1, 0, 'YXZ');
+    if (s.mode === 'dead') this.updateRagdoll(dt, s);
+    else this.ragdoll = null;
   }
+
+  updateRagdoll(dt, s) {
+    if (!this.ragdoll) this.ragdoll = hoverRagdoll(this.rig, s);
+    this.ragdoll.update(dt, s.world ?? null, s.ground ?? null);
+  }
+}
+
+// ---------------------------------------------------------------- ragdolls
+// Which ways a body's outline is found (model frame): all six, and the edges between.
+const SHELL = [];
+for (let x = -1; x <= 1; x++) for (let y = -1; y <= 1; y++) for (let z = -1; z <= 1; z++) {
+  if (Math.abs(x) + Math.abs(y) + Math.abs(z) === 1 || (Math.abs(x) + Math.abs(y) + Math.abs(z) === 2 && y !== 1)) SHELL.push(new THREE.Vector3(x, y, z));
+}
+// A many-legged body's ragdoll: its torso a braced block (middle, front, back, sides, back-ridge),
+// the neck and head and tail chains hanging off it, each leg two rods from its hip; knees fold
+// only so far, and the head and tail bend only so far.
+function legRagdoll(r, s) {
+  const c = r.cfg;
+  const rd = new Ragdoll(r.model, Math.max(0.5, (c.height ?? 1) / 1.1));
+  const V = (x, y, z) => new THREE.Vector3(x, y, z);
+  const len = c.bodyLen ?? 1;
+  const wide = c.bodyWidth ?? 0.5;
+  const core = Math.max(0.08, Math.min(wide, len) * 0.4) / rd.size;
+  const mid = rd.point(r.body, null, core);
+  const front = rd.point(r.body, V(0, 0, len * 0.45), core * 0.85);
+  const back = rd.point(r.body, V(0, 0, -len * 0.45), core * 0.85);
+  const left = rd.point(r.body, V(wide * 0.45, 0, 0), core * 0.6);
+  const right = rd.point(r.body, V(-wide * 0.45, 0, 0), core * 0.6);
+  const top = rd.point(r.body, V(0, core, 0), core * 0.5);
+  // The torso and everything fixed on it (hips, the root of the neck and of the tail) are one
+  // rigid piece.
+  const block = [mid, front, back, left, right, top];
+  const fix = (p) => { block.push(p); };
+  // Neck and head: the neck's root is fixed on the torso; the head nods only so far.
+  let headFrom = -1;
+  if (r.neck) {
+    headFrom = rd.point(r.neck, null, core * 0.45);
+    fix(headFrom);
+  }
+  // The head (and jaw) one stiff piece, as wide as it is, on the neck (or the body).
+  let skull = null;
+  if (r.head) {
+    const base = headFrom >= 0 ? rd.point(r.neck, V(0, 0, 0.001), core * 0.3) : -1;
+    const root = rd.point(r.head, null, core * 0.3);
+    if (headFrom >= 0) { rd.link(headFrom, root); rd.link(base, root); } else fix(root);
+    skull = rd.piece(r.head, [r.head, r.jaw].filter(Boolean), root, V(0, 0, 1), V(1, 0, 0), core * 0.25, 10, 0.12);
+    rd.range(front, skull.pivot, 0.75, 1.1);
+    rd.range(top, skull.pivot, 0.75, 1.1);
+    if (skull.end >= 0) rd.range(headFrom >= 0 ? headFrom : front, skull.end, 0.8, 1.02);
+    if (base >= 0) fix(base);
+  }
+  // Tail: a chain from its root on the torso, stiff enough to curve rather than fold.
+  const tail = (r.tail ?? []).map((b) => rd.point(b, null, core * 0.3));
+  if (tail.length) {
+    const seg = c.tail?.seg ?? 0.15;
+    tail.push(rd.point(r.tail[r.tail.length - 1], V(0, 0, -seg), core * 0.25));
+    fix(tail[0]);
+    for (let i = 0; i + 1 < tail.length; i++) rd.link(tail[i], tail[i + 1], 1, true);
+    for (let i = 0; i + 2 < tail.length; i++) rd.range(tail[i], tail[i + 2], 0.8, 1.01);
+    rd.range(mid, tail[1], 0.85, 1.05);
+  }
+  const legs = r.legs.map((leg) => {
+    const hip = rd.point(leg.upper, null, core * 0.35);
+    const knee = rd.point(leg.lower, null, core * 0.25);
+    const ankle = rd.point(leg.foot, null, core * 0.22);
+    // A paw or hoof reaching past the ankle: balls on its sole, toe and heel, one stiff piece
+    // that bends at the ankle only so far.
+    const paw = rd.tip(leg.foot, new THREE.Vector3(0, -1, 0.3), core * 0.18, core * 0.3);
+    const toe = rd.tip(leg.foot, new THREE.Vector3(0, -0.5, 1), core * 0.15, core * 0.3);
+    const heel = rd.tip(leg.foot, new THREE.Vector3(0, -0.5, -1), core * 0.15, core * 0.3);
+    fix(hip);
+    rd.thick(hip, leg.upper, knee, core * 0.8);
+    rd.thick(knee, leg.lower, ankle, core * 0.6);
+    rd.link(hip, knee, 1, true);
+    rd.link(knee, ankle, 1, true);
+    // Shin and paw one stiff piece (no ankle to speak of on a dead beast).
+    const shank = rd.group([knee, ankle, paw, toe, heel]);
+    rd.apart(hip, ankle, 0.3);
+    rd.apart(knee, mid, 0, core * 1.1);
+    rd.apart(ankle, mid, 0, core * 1.1);
+    return { leg, hip, knee, ankle, paw, toe, shank };
+  });
+  // The body's outline (its bulk, hide, shell) is balls too.
+  const torso = [r.body, r.chest].filter(Boolean);
+  const trunk = rd.group([...block, ...rd.shell(torso, SHELL, core * 0.3, r.body, 16)]);
+  // The head turns and tips only so far: each side of it stays about as far from the body's.
+  if (skull?.ok) {
+    rd.range(left, skull.left, 0.85, 1.18); rd.range(right, skull.right, 0.85, 1.18);
+    rd.range(left, skull.right, 0.85, 1.18); rd.range(right, skull.left, 0.85, 1.18);
+  }
+  rd.drive(r.body, 'root', mid, top, { side: [right, left], group: trunk });
+  if (r.neck && skull) rd.drive(r.neck, 'aim', headFrom, skull.pivot, { cone: 2.4 });
+  if (skull?.ok) rd.drive(r.head, 'frame', skull.pivot, skull.end, { side: [skull.right, skull.left], group: skull.group, cone: 2.4 });
+  else if (skull?.end >= 0) rd.drive(r.head, 'aim', skull.pivot, skull.end, { cone: 2.4 });
+  for (let i = 0; i + 1 < tail.length; i++) rd.drive(r.tail[i], 'aim', tail[i], tail[i + 1], { cone: 2.4 });
+  for (const { leg, hip, knee, ankle, paw, toe, shank } of legs) {
+    rd.drive(leg.upper, 'aim', hip, knee);
+    // The shin turned with its paw (one piece), so the paw sits on it as it was.
+    const sidePt = toe >= 0 ? toe : paw;
+    if (sidePt >= 0) rd.drive(leg.lower, 'frame', knee, ankle, { side: [ankle, sidePt], group: shank });
+    else rd.drive(leg.lower, 'aim', knee, ankle);
+    if (paw >= 0 && toe >= 0) rd.drive(leg.foot, 'frame', ankle, paw, { side: [ankle, toe], group: shank, cone: 2.4 });
+    else if (paw >= 0) rd.drive(leg.foot, 'aim', ankle, paw, { cone: 2.4 });
+  }
+  const { velocity, kick } = deathKick(s);
+  rd.start(velocity, kick.multiplyScalar(0.8), [top, front, skull?.pivot ?? -1, skull?.end ?? -1]);
+  return rd;
+}
+
+// A floating body's ragdoll: what kept it up is gone, so the body (a braced block round its
+// middle) drops and rolls, its arms and its robe or tendrils swinging loose.
+function hoverRagdoll(r, s) {
+  const c = r.cfg;
+  const rd = new Ragdoll(r.model, Math.max(0.5, (c.height ?? 1) / 1.5));
+  const V = (x, y, z) => new THREE.Vector3(x, y, z);
+  const size = Math.max(0.12, (c.height ?? 1) * 0.16);
+  const ball = size / rd.size;
+  const mid = rd.point(r.body, null, ball);
+  const top = rd.point(r.body, V(0, size * 1.2, 0), ball * 0.6);
+  const front = rd.point(r.body, V(0, 0, size), ball * 0.6);
+  const back = rd.point(r.body, V(0, 0, -size), ball * 0.6);
+  const left = rd.point(r.body, V(size, 0, 0), ball * 0.6);
+  const right = rd.point(r.body, V(-size, 0, 0), ball * 0.6);
+  const block = [mid, top, front, back, left, right];
+  const fix = (p) => { block.push(p); };
+  const root = rd.drive(r.body, 'root', mid, top, { side: [right, left] });
+  for (const arm of r.arms ?? []) {
+    const sh = rd.point(arm.upper, null, ball * 0.35);
+    const el = rd.point(arm.fore, null, ball * 0.3);
+    const wr = rd.point(arm.hand, null, ball * 0.28);
+    fix(sh);
+    rd.link(sh, el, 1, true);
+    rd.link(el, wr, 1, true);
+    rd.apart(sh, wr, 0.3);
+    rd.drive(arm.upper, 'aim', sh, el);
+    rd.drive(arm.fore, 'aim', el, wr);
+  }
+  if (r.robe) {
+    // A robe or skirt as wide as it hangs: one loose piece swinging from the body.
+    const hang = rd.point(r.robe, null, ball * 0.4);
+    fix(hang);
+    const robe = rd.piece(r.robe, [r.robe], hang, V(0, -1, 0), V(1, 0, 0), ball * 0.35, 12, 0.25);
+    if (robe.end >= 0) rd.range(mid, robe.end, 0.8, 1.02);
+    if (robe.ok) rd.drive(r.robe, 'frame', robe.pivot, robe.end, { side: [robe.right, robe.left], group: robe.group, cone: 2.4 });
+    else if (robe.end >= 0) rd.drive(r.robe, 'aim', robe.pivot, robe.end, { cone: 2.4 });
+  }
+  const body = [r.body, ...(r.spin ?? [])];
+  root.group = rd.group([...block, ...rd.shell(body, SHELL, ball * 0.4, r.body, 16)]);
+  const { velocity, kick } = deathKick(s);
+  rd.start(velocity, kick.multiplyScalar(0.6), [top, front]);
+  return rd;
 }
