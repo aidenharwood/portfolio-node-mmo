@@ -50,19 +50,19 @@ Still open in DEC-1: what the Synths' true orders are, what the Makers are, and 
 
 ## 3. Beat sheet (DEC-9)
 
-Objective types are ones the quest system already has, plus A-2's event hook and A-6's dungeon clear. Givers use the existing NPC ids: `warden` (Maren), `sage` (Ysolde) and `city1:warden` (Ashe). The Farcall captain is new (`city2:warden`, name open, section 5).
+Objective types are ones the quest system already has, plus A-2's event hook and A-6's dungeon clear. Givers use the existing NPC ids: `warden` (Maren), `sage` (Ysolde) and `city1:warden` (Ashe). The Farcall captain is new: Captain Vey Okonta (`city2:captain`, section 5).
 
 | # | Quest | Lvl | Giver | Objectives | What happens |
 |---|---|---|---|---|---|
 | 1 | **The Road to Farcall** | 8 | `city1:warden` | talk, goto | Ashe has had no word from Farcall for weeks and sends the player there. Farcall's hub opens, and its Warden captain becomes the act's local giver. |
-| 2 | **Gone Quiet** | 9 | `city2:warden` | goto, use, kill | Three hamlets past Farcall have gone silent, with spore pods rooted outside them. Burn the pods. A survivor says the masts "started singing wrong". |
-| 3 | **Hold the Line** | 10 | `city2:warden` | event hook (A-2) | A quest-started Hive Surge on a named settlement. Taking part counts. Afterwards: the Hive is moving *toward* something. |
-| 4 | **The Farcall Array** | 11 | `city2:warden` | goto, use, defend | Follow the swarms to the Array. Power down the first console while holding off waves. Moment `array`: Warden sigils welded onto Maker machinery. The Pilgrim: *"They built a lullaby. You woke it screaming."* |
+| 2 | **Gone Quiet** | 9 | `city2:captain` | goto, use, kill | Three hamlets past Farcall have gone silent, with spore pods rooted outside them. Burn the pods. A survivor says the masts "started singing wrong". |
+| 3 | **Hold the Line** | 10 | `city2:captain` | event hook (A-2) | A quest-started Hive Surge on a named settlement. Taking part counts. Afterwards: the Hive is moving *toward* something. |
+| 4 | **The Farcall Array** | 11 | `city2:captain` | goto, use, defend | Follow the swarms to the Array. Power down the first console while holding off waves. Moment `array`: Warden sigils welded onto Maker machinery. The Pilgrim: *"They built a lullaby. You woke it screaming."* |
 | 5 | **Ysolde's Confession** | 11 | `sage` | talk, choose | In Brightwater, Ysolde tells the truth about the Wardens' founding. **Choice** (section 4). Her opening line depends on Act I's `trusted_ysolde` / `kept_secret`. |
-| 6 | **Voice in the Chitin** | 12 | `city2:warden` | kill named foe, collect | A Hive Psion is directing the swarms. Kill it, and its chitin carries the Brood Pits' coordinates. |
-| 7 | **Into the Brood Pits** | 13 | `city2:warden` | dungeon clear | The existing dungeon, down to the Brood Matron. |
-| 8 | **What the Matron Knew** | 14 | `city2:warden` | talk, use | Reading the Matron's nest-node shows the Array's call feeding a deeper nest: the Brood Mother's. |
-| 9 | **Silence the Array** | 15 | `city2:warden` | defend, use | Destroy the transmitter under heavy waves. Moment `deathpulse`: every waystone flickers red, and far off something metal answers. The Array's fate is fixed; there is no choice here. |
+| 6 | **Voice in the Chitin** | 12 | `city2:captain` | kill named foe, collect | A Hive Psion is directing the swarms. Kill it, and its chitin carries the Brood Pits' coordinates. |
+| 7 | **Into the Brood Pits** | 13 | `city2:captain` | dungeon clear | The existing dungeon, down to the Brood Matron. |
+| 8 | **What the Matron Knew** | 14 | `city2:captain` | talk, use | Reading the Matron's nest-node shows the Array's call feeding a deeper nest: the Brood Mother's. |
+| 9 | **Silence the Array** | 15 | `city2:captain` | defend, use | Destroy the transmitter under heavy waves. Moment `deathpulse`: every waystone flickers red, and far off something metal answers. The Array's fate is fixed; there is no choice here. |
 | 10 | **Marshal the Wardens** | 15 | `city1:warden` | talk | The war table, which introduces raid groups. Varies by the section 4 choice. |
 | 11 | **The Gate Opens** | 16 | `city1:warden` | goto | Sets the flag that opens the Brood Mother raid gate (rule: DEC-4). |
 | 12 | **Report to Ashe** | 16 | `city1:warden` | talk, moment | Act II closes with moment `act2end`, and Act III is seeded: reports of Synth movement in the highlands. |
@@ -93,7 +93,7 @@ Lines quoted in this spec are proposals. The user owns the final dialogue.
 
 ## 5. Open items (not decided here)
 
-- The Farcall Warden captain's name and voice.
+- ~~The Farcall Warden captain's name and voice.~~ Decided 2026-10-14: **Captain Vey Okonta**, a new character (not High Warden Imre, who already stands in Farcall's citadel). Vey is a signal-mast officer: dry and exact, and runs Farcall's watch from the masts. Ref `city2:captain`.
 - The name of the founding Warden whose sigil is on the Array, if one is named at all.
 - The rest of DEC-1: what the Synths' true orders are, what the Makers are, and the meaning of the endings.
 - DEC-4, the raid gate rule (tech, task A-3).
