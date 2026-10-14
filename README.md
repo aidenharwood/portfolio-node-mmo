@@ -7,7 +7,7 @@ a Node server runs the shared world.
 npm install               # once (three, the WebSocket library and the Postgres driver, for the server)
 npm start                 # game server: serves the client + the online realm at http://localhost:8080
 ADMINS=youraccount npm start   # the same, with your account as an admin
-npm test                  # power curve, horde, progression, place, settlement, story, dungeon, surface, building, raid, event and physics checks, then the smoke test: sign up, join the world, chat, form a raid group, go down a dungeon
+npm test                  # power curve, horde, progression, place, settlement, story, dungeon, surface, building, raid, event, physics and persistence checks, then the smoke test: sign up, join the world, chat, form a raid group, go down a dungeon
 npm run load [-- <url>]   # load tests (HTTP, sign-ins, players in the world) on localhost:8080, a throwaway server, or <url>
 python serve.py 5173      # or: offline-only dev server (single-player), http://localhost:5173
 ```
