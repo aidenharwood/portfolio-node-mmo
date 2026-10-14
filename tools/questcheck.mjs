@@ -101,6 +101,8 @@ function playStage(id) {
       const t = ref(o.camp, q) ?? { poi: o.camp, x: position.x, z: position.z };
       go(t.x, t.z);
       give({ op: 'camp', id: typeof t.camp === 'string' ? t.camp : t.poi });
+    } else if (o.type === 'dungeon') {
+      give({ op: 'dclear', roll: { d: o.d, tier: 0, name: o.d } });
     } else if (o.type === 'attune') {
       const ws = w.poisNear(position.x, position.z, 900, ['waystone']).find((p) => !core.attuned.has(p.id));
       go(ws.x + 1, ws.z + 1);
@@ -150,6 +152,26 @@ console.log('Act II\'s people and places:');
   log.flags.krell_freed = false;
   log.flags.krell_captured = true;
   check(!!k?.when && !log.whenHolds(k.when), 'but not if he was taken in chains');
+}
+
+// ---------------------------------------------------------------- dungeon objectives
+console.log('Dungeon objectives:');
+{
+  const dstats = new Stats();
+  const dlog = new QuestLog({ ...host, stats: dstats });
+  const dcore = new CharacterCore({
+    stats: dstats, inventory: new Inventory(3), quests: dlog, attuned: new Set(['w-hub']), chests: new Set(), shop: { stock: [], fine: [] },
+    settings: { lootFilter: 1 }, position, world: w, strict: true,
+  });
+  const clear = (d) => dcore.apply({ op: 'dclear', roll: { d, tier: 0, name: d } });
+  dlog.defs.set('zd', { id: 'zd', kind: 'story', giver: 'warden', stages: [{ text: 't', objectives: [{ type: 'dungeon', d: 'brood', count: 1 }] }] });
+  clear('brood');
+  dlog.begin('zd');
+  check(dlog.active.zd[0] === 0, 'a dungeon cleared before the step was taken doesn\'t count');
+  clear('foundry');
+  check(dlog.active.zd[0] === 0, 'nor does clearing a different one');
+  clear('brood');
+  check(dlog.isComplete('zd'), 'clearing it with the step under way does');
 }
 
 // ---------------------------------------------------------------- the story

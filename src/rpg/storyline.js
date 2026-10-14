@@ -8,7 +8,7 @@
 //
 // Objective types (all the quest log knows): talk · goto · use · kill (type, tag, race, near) ·
 // killRace · killAny · clear (camp) · collect (quest drops) · defend (hold a place against waves) ·
-// choose (answer someone) · attune · chest.
+// choose (answer someone) · attune · chest · dungeon (`d`: a world/dungeons.js id, beaten at any tier).
 
 export const ACTS = [
   { act: 0, title: 'Prologue', sub: 'The Last Sleeper', levels: '1–3' },

@@ -460,6 +460,7 @@ export class CharacterCore {
         // [open world, Normal, Veteran, Elite]
         row[Number.isInteger(r.tier) ? Math.min(3, r.tier + 1) : 0]++;
         fx.push({ k: 'banner', title: `${r.name} cleared`, sub: Number.isInteger(r.tier) ? `${TIERS[r.tier].name} run` : 'Open world' });
+        this.quests.dungeonCleared(r.d);
         return true;
       }
       // From the authority: one of a raid's encounters beaten with this character in it (`final`:

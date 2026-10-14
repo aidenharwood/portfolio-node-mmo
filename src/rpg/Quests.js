@@ -624,6 +624,11 @@ export class QuestLog {
     this.advance((o, q) => o.type === 'clear' && (o.camp === campId || this.ref(o.camp, q)?.camp === campId || (this.ref(o.camp, q)?.camp === true && this.ref(o.camp, q)?.poi === campId)));
   }
 
+  // A dungeon (world/dungeons.js id) beaten with this character in it, at any tier or open world.
+  dungeonCleared(d) {
+    this.advance((o) => o.type === 'dungeon' && o.d === d);
+  }
+
   // Talked to someone: their line for a quest's stage (said before it moves on), and progress on
   // any objective to talk to them.
   talkTo(npcId) {
