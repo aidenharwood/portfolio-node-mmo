@@ -493,6 +493,7 @@ export class Enemy extends Character {
     s.ground = this.state === 'spawn' ? null : this.groundFn;
     s.supportHeight = this.supportFn;
     s.resolve = this.resolveFn;
+    s.world = this.game.world;
     s.flinch = Math.max(this.flashTimer / 0.1, 0);
     s.mode = this.state === 'dead' ? 'dead' : this.state === 'stagger' ? 'stagger' : 'ground';
     const [phase, t] = this.phaseInfo();
@@ -515,6 +516,7 @@ export class Enemy extends Character {
     s.ground = this.state === 'spawn' ? null : this.groundFn;
     s.supportHeight = this.supportFn;
     s.resolve = this.resolveFn;
+    s.world = this.game.world;
     const [phase, t] = this.phaseInfo();
     s.pose = this.cur && (this.cur.kind === 'burst' || this.behavior === 'flyer') ? 'fire' : 'cast';
     s.phase = phase;
@@ -535,6 +537,7 @@ export class Enemy extends Character {
     s.ground = this.state === 'spawn' ? null : this.groundFn;
     s.supportHeight = this.supportFn;
     s.resolve = this.resolveFn;
+    s.world = this.game.world;
     s.flinch = Math.max(this.flashTimer / 0.1, 0) * 0.7;
     s.mode = this.state === 'dead' ? 'dead' : this.state === 'stagger' ? 'stagger' : 'ground';
     s.t = this.state === 'dead' ? Math.min(1, this.stateTime / 0.7) : 0;

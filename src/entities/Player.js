@@ -1400,6 +1400,7 @@ export class Player extends Character {
     s.ground = this.groundFn;
     s.supportHeight = this.supportFn;
     s.resolve = this.resolveFn;
+    s.world = this.game.world;
     s.flinch = this.flinch > 0 ? this.flinch / 0.3 : 0;
     s.flip = this.flipT;
     s.corkscrew = this.bulletJumpT > 0 && st === 'move' ? 1 - this.bulletJumpT / 0.45 : 0;

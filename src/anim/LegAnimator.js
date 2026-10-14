@@ -11,7 +11,7 @@
 // Owners fill a state like makeLegState() each frame and call update().
 import * as THREE from 'three';
 import { solveTwoBone, Spring } from './IK.js';
-import { resolveRagdollMeshContacts } from './RagdollContacts.js';
+import { Ragdoll, severRagdoll, deathKick } from './Ragdoll.js';
 
 const TAU = Math.PI * 2;
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
@@ -58,7 +58,6 @@ export class LegAnimator {
     this.feet = rig.legs.map(() => new THREE.Vector3());
     this.dir = new THREE.Vector2(0, 1);
     this.ragdoll = null;
-    this.ragdollPose = null;
   }
 
   update(dt, s) {
@@ -221,96 +220,14 @@ export class LegAnimator {
       if (leg.foot) leg.foot.quaternion.copy(_q).multiply(m.getWorldQuaternion(_q2));
     });
     if (s.mode === 'dead') this.updateRagdoll(dt, s);
-    else {
-      this.ragdoll = null;
-      const bones = this.ragdollBones();
-      if (!this.ragdollPose) this.ragdollPose = bones.map((bone) => ({
-        bone, position: bone.position.clone(), quaternion: bone.quaternion.clone(),
-      }));
-      else for (const p of this.ragdollPose) {
-        p.position.copy(p.bone.position);
-        p.quaternion.copy(p.bone.quaternion);
-      }
-    }
+    else this.ragdoll = null;
   }
 
-  ragdollBones() {
-    const r = this.rig;
-    return [r.body, r.chest, r.neck, r.head, ...(r.tail ?? []), ...r.legs.flatMap((leg) => [leg.upper, leg.lower, leg.foot])].filter(Boolean);
-  }
-
+  // Dead: a ragdoll of its own skeleton (anim/Ragdoll.js), from the pose it fell in.
   updateRagdoll(dt, s) {
-    const r = this.rig;
-    const bones = this.ragdollBones();
-    if (!this.ragdoll) {
-      const pose = this.ragdollPose ?? bones.map((bone) => ({
-        bone, position: bone.position.clone(), quaternion: bone.quaternion.clone(),
-      }));
-      const saved = new Map(pose.map((p) => [p.bone, p]));
-      const seed = Math.random() * Math.PI * 2;
-      this.ragdoll = {
-        pose, time: 0, bodyY: saved.get(r.body).position.y, bodyV: 0,
-        joints: bones.map((bone, i) => {
-          const core = i < 4 + (r.tail?.length ?? 0);
-          const p = saved.get(bone);
-          _e.setFromQuaternion(p.quaternion, 'XYZ');
-          return {
-            bone, base: _q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), _e.y).clone(),
-            x: _e.x, z: _e.z,
-            tx: i === 0 ? (Math.sin(seed) < 0 ? -1 : 1) * (1.25 + Math.abs(Math.sin(seed * 2)) * 0.2)
-              : core ? Math.sin(seed + i) * 0.28 : 0,
-            tz: i === 0 ? Math.cos(seed) * 0.48 : core ? Math.cos(seed + i) * 0.18 : 0,
-            limitX: i === 0 ? 1.65 : core ? 0.8 : 1.35,
-            limitZ: i === 0 ? 0.85 : core ? 0.65 : 0.75,
-            vx: Math.sin(seed + i * 2.7) * (core ? 0.25 : 0.12),
-            vz: Math.cos(seed + i * 1.9) * (core ? 0.2 : 0.12),
-            core,
-          };
-        }),
-        contacts: [...r.legs.map((leg) => leg.foot), r.head].filter(Boolean),
-      };
-    }
-    const sim = this.ragdoll;
-    sim.time += dt;
-    dt = Math.min(dt, 1 / 30);
-    for (const p of sim.pose) if (p.bone !== r.body) p.bone.position.copy(p.position);
-    const floorY = Math.max(0.08, this.cfg.bodyY * 0.16);
-    sim.bodyV -= 9.8 * dt;
-    sim.bodyY = Math.max(floorY, sim.bodyY + sim.bodyV * dt);
-    if (sim.bodyY <= floorY) sim.bodyV = 0;
-    r.body.position.y = sim.bodyY;
-    for (const j of sim.joints) {
-      if (j.core) {
-        const k = j.bone === r.body ? 13 : 10;
-        const damp = j.bone === r.body ? 5.8 : 5.0;
-        j.vx += ((j.tx - j.x) * k - j.vx * damp) * dt;
-        j.vz += ((j.tz - j.z) * k - j.vz * damp) * dt;
-      } else {
-        j.bone.getWorldQuaternion(_q).invert();
-        _v.set(0, -9.8, 0).applyQuaternion(_q);
-        j.vx += (-_v.z * 0.48 - j.vx * 5.2) * dt;
-        j.vz += (_v.x * 0.48 - j.vz * 5.2) * dt;
-      }
-      j.x += j.vx * dt;
-      j.z += j.vz * dt;
-      j.x = clamp(j.x, -j.limitX, j.limitX);
-      j.z = clamp(j.z, -j.limitZ, j.limitZ);
-      _e.set(j.x, 0, j.z, 'XYZ');
-      j.bone.quaternion.copy(j.base).multiply(_q.setFromEuler(_e));
-      r.model.updateWorldMatrix(true, false);
-    }
-    if (s.ground) {
-      r.model.updateWorldMatrix(true, true);
-      for (const bone of sim.contacts) {
-        bone.getWorldPosition(_p);
-        const floor = s.ground(_p.x, _p.z) + 0.025;
-        if (_p.y >= floor) continue;
-        _p.y = floor;
-        bone.parent.worldToLocal(_p);
-        bone.position.copy(_p);
-      }
-    }
-    resolveRagdollMeshContacts(r, s);
+    if (!this.ragdoll) this.ragdoll = legRagdoll(this.rig, s);
+    severRagdoll(this.ragdoll, s.brokenLegs, (id) => (id === 'head' ? this.rig.head : this.rig.legs[Number(id.slice(3))]?.upper));
+    this.ragdoll.update(dt, s.world ?? null, s.ground ?? null);
   }
 
   // How far the creature rears up onto its hind legs (rear pose, and the swipe's half-rear).
@@ -339,7 +256,6 @@ export class HoverAnimator {
     this.time = Math.random() * 10;
     this.sp = { pitch: new Spring(3), roll: new Spring(3), dead: new Spring(2), cast: new Spring(6), recoil: new Spring(8) };
     this.ragdoll = null;
-    this.ragdollPose = null;
   }
 
   update(dt, s) {
@@ -371,89 +287,127 @@ export class HoverAnimator {
     }
     if (r.robe) r.robe.rotation.set(clamp(lz * 0.08, -0.4, 0.5) + Math.sin(this.time * 2.6) * 0.06, Math.sin(this.time * 1.9) * 0.1, 0, 'YXZ');
     if (s.mode === 'dead') this.updateRagdoll(dt, s);
-    else {
-      this.ragdoll = null;
-      const bones = this.ragdollBones();
-      if (!this.ragdollPose) this.ragdollPose = bones.map((bone) => ({
-        bone, position: bone.position.clone(), quaternion: bone.quaternion.clone(),
-      }));
-      else for (const p of this.ragdollPose) {
-        p.position.copy(p.bone.position);
-        p.quaternion.copy(p.bone.quaternion);
-      }
-    }
-  }
-
-  ragdollBones() {
-    const r = this.rig;
-    return [r.body, ...(r.arms ?? []).flatMap((arm) => [arm.upper, arm.fore, arm.hand]), r.robe].filter(Boolean);
+    else this.ragdoll = null;
   }
 
   updateRagdoll(dt, s) {
-    const r = this.rig;
-    const bones = this.ragdollBones();
-    if (!this.ragdoll) {
-      const pose = this.ragdollPose ?? bones.map((bone) => ({
-        bone, position: bone.position.clone(), quaternion: bone.quaternion.clone(),
-      }));
-      const saved = new Map(pose.map((p) => [p.bone, p]));
-      const seed = Math.random() * Math.PI * 2;
-      this.ragdoll = {
-        pose, time: 0, bodyY: saved.get(r.body).position.y, bodyV: 0,
-        joints: bones.map((bone, i) => {
-          const p = saved.get(bone);
-          _e.setFromQuaternion(p.quaternion, 'XYZ');
-          return {
-            bone, base: _q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), _e.y).clone(),
-            x: _e.x, z: _e.z,
-            tx: i === 0 ? (Math.sin(seed) < 0 ? -1 : 1) * 1.35 : Math.sin(seed + i) * 0.3,
-            tz: i === 0 ? Math.cos(seed) * 0.55 : Math.cos(seed + i) * 0.22,
-            limitX: i === 0 ? 1.65 : 1.15, limitZ: i === 0 ? 0.85 : 0.75,
-            vx: Math.sin(seed + i * 2.3) * (i === 0 ? 0.35 : 0.18),
-            vz: Math.cos(seed + i * 1.7) * (i === 0 ? 0.3 : 0.16),
-          };
-        }),
-        contacts: (r.arms ?? []).map((arm) => arm.hand),
-      };
-    }
-    const sim = this.ragdoll;
-    sim.time += dt;
-    dt = Math.min(dt, 1 / 30);
-    for (const p of sim.pose) if (p.bone !== r.body) p.bone.position.copy(p.position);
-    const floorY = Math.max(0.08, this.rig.cfg.bodyY * 0.12);
-    sim.bodyV -= 9.8 * dt;
-    sim.bodyY = Math.max(floorY, sim.bodyY + sim.bodyV * dt);
-    if (sim.bodyY <= floorY) sim.bodyV = 0;
-    r.body.position.y = sim.bodyY;
-    for (let i = 0; i < sim.joints.length; i++) {
-      const j = sim.joints[i];
-      if (i === 0 || j.bone === r.robe) {
-        const k = i === 0 ? 12 : 7;
-        const d = i === 0 ? 5.5 : 4.5;
-        j.vx += ((j.tx - j.x) * k - j.vx * d) * dt;
-        j.vz += ((j.tz - j.z) * k - j.vz * d) * dt;
-      } else {
-        j.bone.getWorldQuaternion(_q).invert();
-        _v.set(0, -9.8, 0).applyQuaternion(_q);
-        j.vx += (-_v.z * 0.5 - j.vx * 5.4) * dt;
-        j.vz += (_v.x * 0.5 - j.vz * 5.4) * dt;
-      }
-      j.x = clamp(j.x + j.vx * dt, -j.limitX, j.limitX);
-      j.z = clamp(j.z + j.vz * dt, -j.limitZ, j.limitZ);
-      _e.set(j.x, 0, j.z, 'XYZ');
-      j.bone.quaternion.copy(j.base).multiply(_q.setFromEuler(_e));
-      r.model.updateWorldMatrix(true, false);
-    }
-    if (s.ground) {
-      r.model.updateWorldMatrix(true, true);
-      for (const bone of sim.contacts) {
-        bone.getWorldPosition(_p);
-        if (_p.y >= s.ground(_p.x, _p.z) + 0.025) continue;
-        _p.y = s.ground(_p.x, _p.z) + 0.025;
-        bone.parent.worldToLocal(_p);
-        bone.position.copy(_p);
-      }
-    }
-    resolveRagdollMeshContacts(r, s);
+    if (!this.ragdoll) this.ragdoll = hoverRagdoll(this.rig, s);
+    this.ragdoll.update(dt, s.world ?? null, s.ground ?? null);
   }
+}
+
+// ---------------------------------------------------------------- ragdolls
+// A many-legged body's ragdoll: its torso a braced block (middle, front, back, sides, back-ridge),
+// the neck and head and tail chains hanging off it, each leg two rods from its hip; knees fold
+// only so far, and the head and tail bend only so far.
+function legRagdoll(r, s) {
+  const c = r.cfg;
+  const rd = new Ragdoll(r.model, Math.max(0.5, (c.height ?? 1) / 1.1));
+  const V = (x, y, z) => new THREE.Vector3(x, y, z);
+  const len = c.bodyLen ?? 1;
+  const wide = c.bodyWidth ?? 0.5;
+  const core = Math.max(0.08, Math.min(wide, len) * 0.4) / rd.size;
+  const mid = rd.point(r.body, null, core);
+  const front = rd.point(r.body, V(0, 0, len * 0.45), core * 0.85);
+  const back = rd.point(r.body, V(0, 0, -len * 0.45), core * 0.85);
+  const left = rd.point(r.body, V(wide * 0.45, 0, 0), core * 0.6);
+  const right = rd.point(r.body, V(-wide * 0.45, 0, 0), core * 0.6);
+  const top = rd.point(r.body, V(0, core, 0), core * 0.5);
+  // The torso and everything fixed on it (hips, the root of the neck and of the tail) are one
+  // rigid piece.
+  const block = [mid, front, back, left, right, top];
+  const fix = (p) => { block.push(p); };
+  // Neck and head: the neck's root is fixed on the torso; the head nods only so far.
+  let headFrom = -1;
+  if (r.neck) {
+    headFrom = rd.point(r.neck, null, core * 0.45);
+    fix(headFrom);
+  }
+  const headAt = r.head ? rd.point(r.head, null, core * 0.55) : -1;
+  const tip = r.head ? rd.point(r.head, V(0, 0, len * 0.3), core * 0.4) : -1;
+  if (headAt >= 0) {
+    if (headFrom >= 0) {
+      rd.link(headFrom, headAt);
+      rd.range(front, headAt, 0.75, 1.1);
+      rd.range(top, headAt, 0.75, 1.1);
+    } else fix(headAt);
+    rd.link(headAt, tip);
+    rd.range(headFrom >= 0 ? headFrom : front, tip, 0.8, 1.02);
+  }
+  // Tail: a chain from its root on the torso, stiff enough to curve rather than fold.
+  const tail = (r.tail ?? []).map((b) => rd.point(b, null, core * 0.3));
+  if (tail.length) {
+    const seg = c.tail?.seg ?? 0.15;
+    tail.push(rd.point(r.tail[r.tail.length - 1], V(0, 0, -seg), core * 0.25));
+    fix(tail[0]);
+    for (let i = 0; i + 1 < tail.length; i++) rd.link(tail[i], tail[i + 1], 1, true);
+    for (let i = 0; i + 2 < tail.length; i++) rd.range(tail[i], tail[i + 2], 0.8, 1.01);
+    rd.range(mid, tail[1], 0.85, 1.05);
+  }
+  const legs = r.legs.map((leg) => {
+    const hip = rd.point(leg.upper, null, core * 0.35);
+    const knee = rd.point(leg.lower, null, core * 0.25);
+    const ankle = rd.point(leg.foot, null, core * 0.22);
+    fix(hip);
+    rd.link(hip, knee, 1, true);
+    rd.link(knee, ankle, 1, true);
+    rd.apart(hip, ankle, 0.3);
+    rd.apart(knee, mid, 0, core * 1.1);
+    rd.apart(ankle, mid, 0, core * 1.1);
+    return { leg, hip, knee, ankle };
+  });
+  rd.group(block);
+  rd.drive(r.body, 'root', mid, top, { side: [right, left] });
+  if (r.neck && headAt >= 0) rd.drive(r.neck, 'aim', headFrom, headAt, { cone: 1.7 });
+  if (r.head) rd.drive(r.head, 'aim', headAt, tip, { cone: 1.7 });
+  for (let i = 0; i + 1 < tail.length; i++) rd.drive(r.tail[i], 'aim', tail[i], tail[i + 1], { cone: 1.7 });
+  for (const { leg, hip, knee, ankle } of legs) {
+    rd.drive(leg.upper, 'aim', hip, knee);
+    rd.drive(leg.lower, 'aim', knee, ankle);
+  }
+  const { velocity, kick } = deathKick(s);
+  rd.start(velocity, kick.multiplyScalar(0.8), [top, front, headAt, tip]);
+  return rd;
+}
+
+// A floating body's ragdoll: what kept it up is gone, so the body (a braced block round its
+// middle) drops and rolls, its arms and its robe or tendrils swinging loose.
+function hoverRagdoll(r, s) {
+  const c = r.cfg;
+  const rd = new Ragdoll(r.model, Math.max(0.5, (c.height ?? 1) / 1.5));
+  const V = (x, y, z) => new THREE.Vector3(x, y, z);
+  const size = Math.max(0.12, (c.height ?? 1) * 0.16);
+  const ball = size / rd.size;
+  const mid = rd.point(r.body, null, ball);
+  const top = rd.point(r.body, V(0, size * 1.2, 0), ball * 0.6);
+  const front = rd.point(r.body, V(0, 0, size), ball * 0.6);
+  const back = rd.point(r.body, V(0, 0, -size), ball * 0.6);
+  const left = rd.point(r.body, V(size, 0, 0), ball * 0.6);
+  const right = rd.point(r.body, V(-size, 0, 0), ball * 0.6);
+  const block = [mid, top, front, back, left, right];
+  const fix = (p) => { block.push(p); };
+  rd.drive(r.body, 'root', mid, top, { side: [right, left] });
+  for (const arm of r.arms ?? []) {
+    const sh = rd.point(arm.upper, null, ball * 0.35);
+    const el = rd.point(arm.fore, null, ball * 0.3);
+    const wr = rd.point(arm.hand, null, ball * 0.28);
+    fix(sh);
+    rd.link(sh, el, 1, true);
+    rd.link(el, wr, 1, true);
+    rd.apart(sh, wr, 0.3);
+    rd.drive(arm.upper, 'aim', sh, el);
+    rd.drive(arm.fore, 'aim', el, wr);
+  }
+  if (r.robe) {
+    const hang = rd.point(r.robe, null, ball * 0.4);
+    const hem = rd.point(r.robe, V(0, -(c.height ?? 1) * 0.3, 0), ball * 0.5);
+    fix(hang);
+    rd.link(hang, hem, 1, true);
+    rd.range(mid, hem, 0.8, 1.02);
+    rd.drive(r.robe, 'aim', hang, hem, { cone: 1.8 });
+  }
+  rd.group(block);
+  const { velocity, kick } = deathKick(s);
+  rd.start(velocity, kick.multiplyScalar(0.6), [top, front]);
+  return rd;
 }

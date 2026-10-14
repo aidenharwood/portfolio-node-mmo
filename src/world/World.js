@@ -496,9 +496,10 @@ export class World {
   // Highest standable surface at (x, z) not above maxY (terrain, collider tops, the floors of
   // props' meshes). `ceilFrom` is the mover's step height: anything whose underside is above it is
   // overhead, and its top can't be stepped (or jumped) up onto through it.
-  supportHeight(x, z, maxY = Infinity, ceilFrom = Infinity) {
+  // (`near`: the colliders to ask, when the caller has them already.)
+  supportHeight(x, z, maxY = Infinity, ceilFrom = Infinity, near = this.collidersNear(x, z)) {
     let h = this.groundHeight(x, z);
-    for (const c of this.collidersNear(x, z)) {
+    for (const c of near) {
       const top = c.tris ? c.tris.y1 : c.y + c.h;
       if (top <= h) continue;
       if (c.tris) {
@@ -531,15 +532,15 @@ export class World {
   // colliders whose top is within that height of its feet; `height` is how tall it is. `from`,
   // where it stood before this move, keeps it on the side of a mesh's wall it came from. Props
   // with meshes push with their walls only (see world/MeshCollision.js), so a mover can stand
-  // inside a ring or a hut as well as outside it. Corners take a few passes to settle.
-  resolve(pos, radius, stepUp = 0, height = 1.8, from = null) {
-    const near = this.collidersNear(pos.x, pos.z, radius + 0.5);
+  // inside a ring or a hut as well as outside it. Corners take a few passes to settle. A walker
+  // steps over a mesh's few centimetres (`minStep`: a rug's edge, a sill, a root); a ragdoll's
+  // joint, asking with none, doesn't.
+  resolve(pos, radius, stepUp = 0, height = 1.8, from = null, minStep = 0.15, near = this.collidersNear(pos.x, pos.z, radius + 0.5)) {
     for (let pass = 0; pass < 3; pass++) {
       let moved = false;
       for (const c of near) {
         if (c.tris) {
-          // (Anyone steps over a mesh's few centimetres: a rug's edge, a sill, a root.)
-          const over = Math.max(stepUp, 0.15);
+          const over = Math.max(stepUp, minStep);
           if (pos.y + over >= c.tris.y1 || pos.y + height <= c.tris.y0) continue;
           if (pushOutOfMeshWalls(c, pos, radius, pos.y + over, pos.y + height, from)) moved = true;
           continue;
