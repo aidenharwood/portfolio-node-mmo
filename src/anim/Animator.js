@@ -823,6 +823,7 @@ const BIPED_PARTS = {
 const KNEE = new THREE.Vector3(0, 0, -1);   // a shin folds back from its thigh (KNEE_BEND), and of the pelvis
 const ELBOW = new THREE.Vector3(0, 0, 1);   // a forearm forward from its upper arm (ELBOW_BEND)
 const FORWARD = new THREE.Vector3(0, 0, 1);
+const DOWN = new THREE.Vector3(0, -1, 0);
 const V3 = (x, y, z) => new THREE.Vector3(x, y, z);
 // Which ways the torso's outline is found (model frame): front, back, sides and between.
 const LOWER_SHELL = [V3(0, 0, 1), V3(0, 0, -1), V3(1, 0, 0), V3(-1, 0, 0), V3(1, 0, 1), V3(-1, 0, 1), V3(1, 0, -1), V3(-1, 0, -1),
@@ -876,7 +877,8 @@ export function humanoidRagdoll(r, s) {
   // The head (and whatever it wears: a helmet, a crest) one stiff piece on its neck.
   const skull = rd.piece(r.head, [r.head, r.skull].filter(Boolean), neck, V(0, 1, 0), V(1, 0, 0), 0.06, 8, 0.12);
   const head = skull.end;
-  rd.twist(upper, skull.group, [neck, head], [R.sh, L.sh], [skull.right, skull.left], 1.1);
+  // It turns and tips only so far: each side of it stays about as far from its shoulder.
+  rd.range(L.sh, skull.left, 0.8, 1.25); rd.range(R.sh, skull.right, 0.8, 1.25);
   rd.link(spine, chest);
   rd.range(spine, L.sh, 0.93, 1.03); rd.range(spine, R.sh, 0.93, 1.03);
   rd.range(pelvis, chest, 0.88, 1.01);
@@ -895,18 +897,22 @@ export function humanoidRagdoll(r, s) {
   }
   // The pelvis's frame (side, up, forward), for the hips' and knees' limits.
   const hips = [pelvis, spine, RL.hip, LL.hip];
-  for (const { hip, knee, ankle, toe, heel } of legs) {
-    rd.link(hip, knee, 1, true); rd.link(knee, ankle, 1, true);
-    // The foot one stiff piece: ankle, toe and heel.
-    if (heel >= 0) rd.group([ankle, toe, heel]);
-    else rd.link(ankle, toe);
-    rd.range(knee, toe, 0.9, 1.2);
+  for (const { l, hip, knee, ankle, toe, heel } of legs) {
+    rd.link(hip, knee, 1, true);
+    // Shin and foot one stiff piece: knee, ankle, toe and heel (a dead body's ankles don't
+    // flex to speak of).
+    rd.group([knee, ankle, toe, heel]);
     rd.apart(hip, ankle, 0.35);
     rd.apart(knee, chest, 0.5);
     rd.hinge(hip, knee, ankle, hips, FORWARD, 0.9, null, true);
-    // The foot points the way the knee does, give or take; the ankle stretches it out a long way.
-    rd.hinge(knee, toe, ankle, hips, FORWARD, 0.6, [hip, knee, ankle]);
     rd.reach(hip, knee, hips, FORWARD, -0.22 * rd.size);
+    // …and only so far up: a thigh rises to about level, curled or flung out sideways; it swings
+    // out to the side about 50°, and in across the other a little.
+    rd.reach(hip, knee, hips, DOWN, -0.25 * rd.size);
+    const thigh = rd.points[hip].p.distanceTo(rd.points[knee].p) / rd.scale;
+    const out = l === r.legs[0] ? V3(1, 0, 0) : V3(-1, 0, 0);
+    rd.reach(hip, knee, hips, out.clone().negate(), -0.78 * thigh);
+    rd.reach(hip, knee, hips, out, -0.42 * thigh);
   }
   rd.apart(LL.knee, RL.knee, 0, 0.14 * rd.size); rd.apart(LL.ankle, RL.ankle, 0, 0.12 * rd.size);
   // How the bones follow, root first.
@@ -922,7 +928,8 @@ export function humanoidRagdoll(r, s) {
   }
   for (const { l, hip, knee, ankle, toe, heel } of legs) {
     rd.drive(l.thigh, 'limb', hip, knee, { next: ankle, bend: KNEE, ref: hips, refDir: KNEE, refSwing: true, cone: 2.8 });
-    rd.drive(l.shin, 'hinge', knee, ankle, { bend: KNEE, lo: 0, hi: 2.7 });
+    // The shin turned with its foot (one piece), so the foot sits on it as it did.
+    rd.drive(l.shin, 'frame', knee, ankle, { side: [ankle, toe], cone: 2.8 });
     if (heel >= 0) rd.drive(l.foot, 'frame', ankle, toe, { side: [ankle, heel], cone: 2.4 });
     else rd.drive(l.foot, 'aim', ankle, toe, { cone: 2.4 });
   }

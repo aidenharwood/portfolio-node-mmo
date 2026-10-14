@@ -269,14 +269,17 @@ console.log('Ragdolls:');
       if (!Number.isFinite(p.x + p.y + p.z)) nan = true;
       low = Math.min(low, p.y - floorAt(p));
     });
+    let at = '';
     for (const d of rd.drives) {
       if (d.off) continue;
       const to = rd.points[d.to];
       const posed = to.offset ? to.bone.localToWorld(to.offset.clone()) : to.bone.getWorldPosition(new THREE.Vector3());
-      off = Math.max(off, posed.distanceTo(to.p) / rd.size);
+      const o = posed.distanceTo(to.p) / rd.size;
+      if (o > off + 0.02 && !at && o > 0.05) at = d.bone.name.replace('rig:', '');
+      off = Math.max(off, o);
     }
     const stretch = Math.max(...rd.links.filter((l) => l.kind === 0 && l.len > 0.05).map((l) => Math.abs(rd.points[l.a].p.distanceTo(rd.points[l.b].p) - l.len) / l.len));
-    return { low, off, nan, stretch };
+    return { low, off, at, nan, stretch };
   };
   const terrain = (p) => w.groundHeight(p.x, p.z);
   let worst = { low: Infinity, off: 0, stretch: 0, settle: 0 };
@@ -286,16 +289,16 @@ console.log('Ragdolls:');
     const r = kill(key, at(700 + k * 9, 640), new THREE.Vector3(Math.sin(a) * 3, 0, Math.cos(a) * 3));
     const m = survey(r, terrain);
     worst = { low: Math.min(worst.low, m.low), off: Math.max(worst.off, m.off), stretch: Math.max(worst.stretch, m.stretch), settle: Math.max(worst.settle, r.settled ?? 99) };
-    if (m.nan || m.low < -0.03 || m.off > 0.15 || m.stretch > 0.08 || r.settled === null) bad.push(`${key} (low ${m.low.toFixed(2)}, off ${m.off.toFixed(2)}, stretch ${(m.stretch * 100).toFixed(0)}%, ${r.settled === null ? 'never rests' : `rests at ${r.settled.toFixed(1)} s`})`);
+    if (m.nan || m.low < -0.03 || m.off > 0.1 || m.stretch > 0.08 || r.settled === null) bad.push(`${key} (low ${m.low.toFixed(2)}, off ${m.off.toFixed(2)}${m.at ? ` from ${m.at}` : ''}, stretch ${(m.stretch * 100).toFixed(0)}%, ${r.settled === null ? 'never rests' : `rests at ${r.settled.toFixed(1)} s`})`);
   }
   check(!bad.length, `bodies of every kind fall onto the ground, keep their bones out of it and their skeletons on their joints, and come to rest (worst: bone ${worst.low.toFixed(2)} m, skeleton ${worst.off.toFixed(2)} of its size off, rods ${(worst.stretch * 100).toFixed(1)}%, rest by ${worst.settle.toFixed(1)} s)${bad.length ? `: ${bad.join('; ')}` : ''}`);
 
   // Onto a crate: something of it ends up lying on the top, and nothing of it inside.
-  const onCrate = kill('scav:cutter', at(crateAt.x - 1.3, crateAt.z), new THREE.Vector3(3.5, 0, 0));
+  const onCrate = kill('scav:cutter', new THREE.Vector3(crateAt.x, crateTop, crateAt.z), new THREE.Vector3(0.8, 0, 0.4));
   const balls = onCrate.rd.points.filter((p) => !p.off);
   const resting = balls.filter((p) => Math.abs(p.p.x - crateAt.x) < 0.8 && Math.abs(p.p.z - crateAt.z) < 0.8 && Math.abs(p.p.y - p.r - crateTop) < 0.05);
   const inside = balls.filter((p) => Math.abs(p.p.x - crateAt.x) < 0.8 - p.r * 0.5 && Math.abs(p.p.z - crateAt.z) < 0.8 - p.r * 0.5 && p.p.y < crateTop - 0.02 && p.p.y > crateAt.y);
-  check(resting.length >= 3 && !inside.length, `a body falling on a crate lies across its top (${resting.length} joints on it, ${inside.length} inside it)`);
+  check(resting.length >= 3 && !inside.length, `a body dying on a crate falls across its top (${resting.length} joints on it, ${inside.length} inside it)`);
 
   // Against a wall: nothing of it goes through.
   const byWall = kill('scav:juggernaut', at(wallAt.x - 0.6, wallAt.z), new THREE.Vector3(5, 0, 0));

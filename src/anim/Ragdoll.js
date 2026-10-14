@@ -19,7 +19,7 @@ const DRAG = 0.003;
 const STICK = 0.25;          // m/s: a joint sliding slower than this on the ground stops
 const SLEEP_MOVE = 0.025;  // m: moved less than this in SLEEP_TIME and it lies still
 const SLEEP_TIME = 0.5;
-const SETTLE_FROM = 1.5;   // s after death the motion starts dying away…
+const SETTLE_FROM = 1.2;   // s after death the motion starts dying away…
 const SETTLE_DRAG = 0.12;  // …to this much lost each step, two seconds on
 const REST_BY = 6;         // s: lying still by now, whatever (corpses fade from 8 s)
 
@@ -44,13 +44,17 @@ const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const smoothstep = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
 
 // An orthonormal frame (columns: side, up, forward) from an up direction and a rough side one.
+// (Its own scratch: callers hand it the shared ones.)
+const _fu = new THREE.Vector3();
+const _fs = new THREE.Vector3();
+const _ff = new THREE.Vector3();
 function frame(up, side, out) {
-  _a.copy(up).normalize();
-  _b.copy(side).addScaledVector(_a, -side.dot(_a));
-  if (_b.lengthSq() < 1e-10) _b.set(1, 0, 0).addScaledVector(_a, -_a.x);
-  _b.normalize();
-  _c.crossVectors(_b, _a);
-  return out.makeBasis(_b, _a, _c);
+  _fu.copy(up).normalize();
+  _fs.copy(side).addScaledVector(_fu, -side.dot(_fu));
+  if (_fs.lengthSq() < 1e-10) _fs.set(1, 0, 0).addScaledVector(_fu, -_fu.x);
+  _fs.normalize();
+  _ff.crossVectors(_fs, _fu);
+  return out.makeBasis(_fs, _fu, _ff);
 }
 
 // What's left of rotation `q` once its angle from `rest` is capped at `max`.

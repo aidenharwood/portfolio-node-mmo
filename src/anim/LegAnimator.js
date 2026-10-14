@@ -367,8 +367,8 @@ function legRagdoll(r, s) {
     rd.thick(knee, leg.lower, ankle, core * 0.6);
     rd.link(hip, knee, 1, true);
     rd.link(knee, ankle, 1, true);
-    rd.group([ankle, paw, toe, heel]);
-    rd.range(knee, paw, 0.9, 1.05);
+    // Shin and paw one stiff piece (no ankle to speak of on a dead beast).
+    rd.group([knee, ankle, paw, toe, heel]);
     rd.apart(hip, ankle, 0.3);
     rd.apart(knee, mid, 0, core * 1.1);
     rd.apart(ankle, mid, 0, core * 1.1);
@@ -376,8 +376,9 @@ function legRagdoll(r, s) {
   });
   // The body's outline (its bulk, hide, shell) is balls too.
   const torso = [r.body, r.chest].filter(Boolean);
-  const trunk = rd.group([...block, ...rd.shell(torso, SHELL, core * 0.3, r.body, 16)]);
-  if (skull?.ok) rd.twist(trunk, skull.group, [skull.pivot, skull.end], [right, left], [skull.right, skull.left], 1.0);
+  rd.group([...block, ...rd.shell(torso, SHELL, core * 0.3, r.body, 16)]);
+  // The head turns and tips only so far: each side of it stays about as far from the body's.
+  if (skull?.ok) { rd.range(left, skull.left, 0.8, 1.25); rd.range(right, skull.right, 0.8, 1.25); }
   rd.drive(r.body, 'root', mid, top, { side: [right, left] });
   if (r.neck && skull) rd.drive(r.neck, 'aim', headFrom, skull.pivot, { cone: 2.4 });
   if (skull?.ok) rd.drive(r.head, 'frame', skull.pivot, skull.end, { side: [skull.right, skull.left], cone: 2.4 });
@@ -385,7 +386,10 @@ function legRagdoll(r, s) {
   for (let i = 0; i + 1 < tail.length; i++) rd.drive(r.tail[i], 'aim', tail[i], tail[i + 1], { cone: 2.4 });
   for (const { leg, hip, knee, ankle, paw, toe } of legs) {
     rd.drive(leg.upper, 'aim', hip, knee);
-    rd.drive(leg.lower, 'aim', knee, ankle);
+    // The shin turned with its paw (one piece), so the paw sits on it as it was.
+    const sidePt = toe >= 0 ? toe : paw;
+    if (sidePt >= 0) rd.drive(leg.lower, 'frame', knee, ankle, { side: [ankle, sidePt] });
+    else rd.drive(leg.lower, 'aim', knee, ankle);
     if (paw >= 0 && toe >= 0) rd.drive(leg.foot, 'frame', ankle, paw, { side: [ankle, toe], cone: 2.4 });
     else if (paw >= 0) rd.drive(leg.foot, 'aim', ankle, paw, { cone: 2.4 });
   }
