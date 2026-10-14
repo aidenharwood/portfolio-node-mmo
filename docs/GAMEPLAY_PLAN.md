@@ -24,6 +24,21 @@ Anything marked *(default)* below is my assumption. Change it when you review.
 
 ## 1. Where we are
 
+### Status, 2026-10-14
+- **Built:** phases 1–5 and 7 (balance and hordes, talents and achievements, settlements, the
+  quest system and Act I, dungeons, the Brood Mother raid). Each has its Node check in `npm test`.
+- **Not built:** phase 6 (public world events). Phase 8 (Acts II–IV and the endgame) waits on
+  it, because Act II's Hive surges and the endgame's event schedule both need the event director.
+- **The test suite was red** after the "Current progress" commit: its mesh colliders read the
+  scenery meshes, and the server's headless world (`server/world.js`) has none, so every check
+  that builds the world crashed. The collision work since then (`53e24d6`) keeps plain colliders
+  there, and `npm test` passes again, with `tools/physicscheck.mjs` added. See 11 for what that
+  leaves open.
+- **Next:** phase 6, split into 6a (the director, three event types, failure and retaking) and 6b
+  (the two events that move: the war-walker and the stampede). Then phase 8 in the order in 10.
+
+The sections below this one are the plan as first written, kept for reference.
+
 ### The power curve is the main problem
 A melee player at each level, all attribute points in Might, gear of their level at a typical
 rarity, against a same-level Scav Cutter (measured with the game's own formulas):
@@ -52,16 +67,16 @@ By level 8 everything dies in one hit, and you can stand in a camp for a minute.
 
 ## 2. Phases at a glance
 
-| # | Phase | What you get | Size |
-|---|---|---|---|
-| 1 | Rebalance, hordes and tiers | Combat stays dangerous at every level; bigger fights; elite affixes; difficulty tiers | M |
-| 2 | Abilities, talents and achievements | Something new to unlock every level; titles and a codex | L |
-| 3 | Settlements of every size | Hamlets to cities with services, quest boards and side quests | M |
-| 4 | Quest system v2 and Story Act I | Story-led play from level 1 to about 8 | L |
-| 5 | Dungeons | Interiors, a generator, open-world and instanced dungeons with tiers | XL |
-| 6 | Public world events | Faction offensives everyone nearby joins | L |
-| 7 | Raids | 8–16 player instances with scripted multi-phase bosses | L |
-| 8 | Story Acts II–IV and the endgame loop | The rest of the story, more dungeons and raids, and the tiered endgame | XL |
+| # | Phase | What you get | Size | Status |
+|---|---|---|---|---|
+| 1 | Rebalance, hordes and tiers | Combat stays dangerous at every level; bigger fights; elite affixes; difficulty tiers | M | built |
+| 2 | Abilities, talents and achievements | Something new to unlock every level; titles and a codex | L | built |
+| 3 | Settlements of every size | Hamlets to cities with services, quest boards and side quests | M | built |
+| 4 | Quest system v2 and Story Act I | Story-led play from level 1 to about 8 | L | built |
+| 5 | Dungeons | Interiors, a generator, open-world and instanced dungeons with tiers | XL | built |
+| 6 | Public world events | Faction offensives everyone nearby joins | L | 6a in progress |
+| 7 | Raids | 8–16 player instances with scripted multi-phase bosses | L | built |
+| 8 | Story Acts II–IV and the endgame loop | The rest of the story, more dungeons and raids, and the tiered endgame | XL | waits on 6 |
 
 **Why this order:**
 - Balance comes first: it fixes "overpowered" straight away, and everything after it is tuned on its numbers.
@@ -457,6 +472,123 @@ server. Where it differs from the plan below:
 
 ## 8. Phase 6 — Public world events
 
+**Status: 6a in progress** (2026-10-14). The detailed design is in 8.1–8.6 below; the original
+outline follows it, for reference.
+
+### 8.1 Split
+- **6a (now):**
+  - the director;
+  - the framework every event uses: things to defend, participants and contribution, scaling,
+    the tier vote, the event chest;
+  - three event types that hold a place: Hive Surge, Scav Siege and Maker Anomaly;
+  - failure: an overrun settlement and the Retake event;
+  - two new enemies, the Spore Pod and the Siege Engine;
+  - achievements, the codex, the dev panel, `tools/eventcheck.mjs`, and the docs.
+- **6b (next):** the two events that move.
+  - Synth War-walker: a walker that follows a path, with weak points.
+  - Wild Stampede: caravans as moving things to defend.
+  - Both need path-following, which 6a doesn't.
+
+### 8.2 The director (`sim/WorldEvents.js`, inside the world sim)
+- **One per layer, and one offline.** It's the same code online and offline, like camps.
+- **When:** checked every 10 seconds.
+  - A player is due an event 2½ minutes after arriving, then 5 minutes after the last event
+    near them ended *(default)*.
+  - At most `1 + players ÷ 8` events run on a layer at once, up to 6.
+  - Events stand at least 600 m apart.
+  - A site rests for 20 minutes after its last event.
+- **Where:** 120–320 m from a player who's due one, in a region of level 3 or more. Nothing in
+  the hub, a city or a dungeon.
+- **What:** chosen by the site and the region's faction.
+  - A hamlet, village or town in Hive land gets a Hive Surge.
+  - In Scav land it gets a Scav Siege.
+  - From level 8, any settlement has a quarter chance of a Hive Surge, as Act II's Hive spreads.
+  - A landmark or ruin of level 5 or more gets a Maker Anomaly.
+  - Synth and Wild settlements wait for 6b's events.
+- **Announced** to everyone within 450 m with a banner, a chat line, and a marker on the map,
+  minimap and compass.
+
+### 8.3 How every event runs
+- **Stages:**
+  1. *Gathering:* 40 seconds. The beacon is lit; whoever stands at it can vote the tier.
+  2. *Under way:* the event's own objectives (8.4).
+  3. *Won or lost:* rewards or consequences. The marker stays 15 seconds.
+- **Abandoned:** if nobody is within 200 m for 45 seconds, a settlement event is lost and the
+  settlement falls; an anomaly fades away.
+- **Things to defend:** pylons, a beacon. Each has health, which the event's enemies wear down.
+  - Enemies choose them over players, unless a player is hurting them enough to draw them off.
+  - The damage is counted in the sim, since no player's screen takes it.
+  - Health is measured in an on-level enemy's hits, so an unguarded pylon falls in under a minute.
+- **Participants:** anyone within the event's area plus 35 m while it's under way.
+  - *Contribution:* one point a second present, plus 100 points for each enemy's worth of
+    damage dealt to the event's enemies. It's measured against the enemy's health, so level
+    doesn't matter.
+  - *Reward:* everyone with 60 points or more (about a minute there) gets the event chest.
+    Anyone with at least half the top score gets one extra item.
+- **Scaling:** to the number of participants (`n`).
+  - Wave size: ×(1 + 0.4 × (n − 1)), at most ×4.
+  - Pods and engines: one more per three extra players.
+  - Things to defend: ×(1 + 0.3 × (n − 1)) health.
+  - Enemy health already grows with the crowd.
+- **Tier:** voted at the beacon while gathering.
+  - Press E there to choose Normal, Veteran or Elite.
+  - The most votes win; ties and no votes go to the lower tier.
+  - Inside the event's area the tier is everyone's Threat, as a private run's is.
+  - Elites get its extra affixes.
+  - The chest gets its luck, rarity floor and XP.
+- **The event chest:** handed out by the server, like a warband's bonus.
+  - XP: half of what the event's enemies were worth.
+  - Gold.
+  - Two items, rare or better, plus one for a top contributor.
+  - It lands at the beacon.
+
+### 8.4 The three event types of 6a
+| Event | Where | Objectives | Lost when |
+|---|---|---|---|
+| **Hive Surge** | a settlement | 3 Warden pylons round its heart. Spore pods (2, plus one per three extra players) root outside and hatch drones every 14 s; 4 waves march in. Win: every wave down and every pod burst. | every pylon falls |
+| **Scav Siege** | a settlement | Siege engines (2, plus scaling) set up outside with juggernaut crews and shell the pylons from 40 m. Break the engines, then hold off 2 waves, the last led by a Siege Captain (an elite). | every pylon falls |
+| **Maker Anomaly** | a landmark or ruin | A Maker beacon charges while someone stands within 12 m of it, and stalls while an enemy does. A rift beside it pours out Synth waves every 18 s, with a named Maker Warden at half charge. Win at full charge. | the beacon is destroyed (no lasting harm) |
+
+### 8.5 Failure: overrun, and the Retake
+- **When a Surge or Siege is lost,** the settlement is overrun for 15 minutes:
+  - its folk are gone, and so are its services (traders, the inn, the board, its quest givers);
+  - the server refuses them as it refuses anyone out of reach.
+- **The Retake** starts at once. A garrison of the attackers holds the settlement: a camp of
+  its level, with one more elite. Kill them all to retake it and earn the event chest.
+- **Left alone,** the garrison leaves after the 15 minutes and the folk drift back.
+- **Not saved:** overrun is held per layer (and offline per session), not in saves *(default)*.
+
+### 8.6 Everything else
+- **New enemies:** the Spore Pod (Hive) and the Siege Engine (Scav). Both are rooted in place,
+  have their own models, and get codex entries.
+- **Records and achievements:** records keep event wins by type and tier, retakes, and how often
+  you were top contributor. A new Events category:
+  - First Responder: complete an event;
+  - Steadfast: complete 25, with the title *the Steadfast*;
+  - Hold the Line: repel a Hive Surge;
+  - Raise the Siege: break a Scav Siege;
+  - Signal in the Noise: stabilise a Maker anomaly;
+  - Not On My Watch: complete an event on Elite;
+  - Reclaimer: retake an overrun settlement;
+  - Leading from the Front: be top contributor in an event with three or more players.
+- **Network** (`docs/MULTIPLAYER.md`):
+  - `wev`: the events near you, sent twice a second when something changed, with your own
+    contribution;
+  - `ovr`: a settlement overrun or freed (the list comes with `welcome`);
+  - `evote`: a vote.
+- **Dev panel:** start any event at the reticle, win or lose the current one.
+- **Check:** `tools/eventcheck.mjs` covers:
+  - the director's choices on a real world;
+  - each event played headlessly through the world sim, with stand-in players:
+    - won and lost;
+    - scaling;
+    - the vote;
+    - contribution;
+    - chests through the character's rules;
+    - an overrun closing services, and the Retake reopening them;
+  - the achievements.
+
+### 8.7 The original outline
 - **Director:**
   - per layer on the server (and offline), it picks events in regions near players;
   - cooldowns stop the same event repeating or two events stacking;
@@ -558,7 +690,8 @@ and talks in raid chat. Where it differs from the plan below:
 
 **Status: not started.** It depends on phase 6, which hasn't been built: Act II's Hive surges on
 settlements and the endgame's rotating event schedule both need the event director. Proposed order:
-1. **Phase 6 first**, so Act II's surges are public events rather than one-off quest waves.
+1. **Phase 6 first**, so Act II's surges are public events rather than one-off quest waves (6a's
+   Hive Surge is the one Act II will call on; 6b's war-walker is Act III's).
 2. **8a: Act II, *The Brood*** (levels 8–16). Farcall as its hub, the Farcall Array as a new story
    place, the Brood Pits story (the dungeon already exists), about 12 quests and Ysolde's
    confession. It ends at the Brood Mother's raid gate: the story then opens the gate, replacing
@@ -599,6 +732,14 @@ settlements and the endgame's rotating event schedule both need the event direct
   - bot load tests for hordes and events;
   - scripted in-game captures (`tools/enemyshots.js` and new dungeon and event tours).
 - **Docs:** README sections per system; `docs/MULTIPLAYER.md` covers instances and raid groups.
+- **Known issue: scenery colliders differ on the server.**
+  - The graphics work gave the client's trees, rocks and cacti mesh-shaped colliders, with wider
+    round ones as a fallback.
+  - The server builds no meshes, so it uses the wider circles: up to 1.65 m for a cactus where
+    the old circle was 0.45 m.
+  - Enemies are pushed off scenery a little further than players see. Worth matching (the server
+    can build the same hulls from the geometry without drawing it) before hordes fight in
+    forests.
 
 ## 12. Open questions *(my defaults in brackets; change any when you review)*
 - **Level cap:** 30, with the regions past 30 kept as cap-level zones that tiers make harder [yes].
