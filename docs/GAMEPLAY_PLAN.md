@@ -763,14 +763,12 @@ surges on settlements and the endgame's rotating schedule. Proposed order:
   - bot load tests for hordes and events;
   - scripted in-game captures (`tools/enemyshots.js` and new dungeon and event tours).
 - **Docs:** README sections per system; `docs/MULTIPLAYER.md` covers instances and raid groups.
-- **Known issue: scenery colliders differ on the server.**
+- **Scenery colliders match on the server** (fixed 2026-10-14, WORK_PLAN S-1).
   - The graphics work gave the client's trees, rocks and cacti mesh-shaped colliders, with wider
     round ones as a fallback.
-  - The server builds no meshes, so it uses the wider circles: up to 1.65 m for a cactus where
-    the old circle was 0.45 m.
-  - Enemies are pushed off scenery a little further than players see. Worth matching (the server
-    can build the same hulls from the geometry without drawing it) before hordes fight in
-    forests.
+  - The server's headless world now builds the scenery geometry (without drawing it), so its
+    colliders get the same triangles. `tools/physicscheck.mjs` compares the two collider by
+    collider, so the server can't drift back to the wider circles unnoticed.
 
 ## 12. Open questions *(my defaults in brackets; change any when you review)*
 - **Level cap:** 30, with the regions past 30 kept as cap-level zones that tiers make harder [yes].

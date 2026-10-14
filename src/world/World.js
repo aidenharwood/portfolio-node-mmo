@@ -191,6 +191,11 @@ function sceneryTypes() {
     puff: [new THREE.IcosahedronGeometry(0.6, 1), 0xd8b8e8, 0.03, 2500, false],
   };
 }
+// Each scenery type's geometry alone, which its collision triangles come from: for the server's
+// world, which draws nothing but must collide with what the screens draw.
+export function sceneryGeometries() {
+  return Object.fromEntries(Object.entries(sceneryTypes()).map(([k, [geo]]) => [k, geo]));
+}
 const FLORA_TYPES = {
   shard: [new THREE.OctahedronGeometry(0.25).scale(0.6, 2.2, 0.6).translate(0, 0.5, 0), 3000],
   cap: [new THREE.SphereGeometry(0.2, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2).scale(1, 0.6, 1).translate(0, 0.38, 0), 2500],
@@ -956,12 +961,8 @@ export class World {
       ch.detail = ch.wantDetail;
       this.sceneryDirty = true;
     }
-    if (ch.wantColliders && !ch.collided) {
-      this.own = ch;
-      for (const c of ch.sceneryColliders) this.addCollider(c.x, c.z, c.r, c.h, c.y, c.surface, c);
-      this.own = null;
-      ch.collided = true;
-    } else if (!ch.wantColliders && ch.collided) {
+    if (ch.wantColliders && !ch.collided) this.addSceneryColliders(ch);
+    else if (!ch.wantColliders && ch.collided) {
       for (const c of ch.colliders) this.removeCollider(c);
       ch.colliders.length = 0;
       ch.collided = false;
@@ -1042,7 +1043,7 @@ export class World {
       (lists[k] ??= []).push(..._m.elements);
       if (color !== null) (colors[k] ??= []).push(color.r, color.g, color.b);
       if (collision) {
-        // (The server has no scenery sets: its colliders are the plain shapes.)
+        // (The server's sets are geometry only, the same as a screen's: see server/world.js.)
         const set = this.sets[k];
         return set ? { meshGeometry: set.colors ? set.mesh.geometry : set.body.geometry, meshMatrix: _m.clone() } : {};
       }
@@ -1166,6 +1167,15 @@ export class World {
     ch.scenery = {};
     for (const [k, list] of Object.entries(lists)) ch.scenery[k] = { m: new Float32Array(list), c: colors[k] ? new Float32Array(colors[k]) : null, detail: DETAIL.has(k) };
     ch.sceneryColliders = colliders;
+  }
+
+  // A scattered chunk's trees and rocks as colliders, each with its mesh's triangles where the
+  // scenery sets have one (a screen's and the server's alike), owned by the chunk.
+  addSceneryColliders(ch) {
+    this.own = ch;
+    for (const c of ch.sceneryColliders) this.addCollider(c.x, c.z, c.r, c.h, c.y, c.surface, c);
+    this.own = null;
+    ch.collided = true;
   }
 
   slopeFast(x, z) {
