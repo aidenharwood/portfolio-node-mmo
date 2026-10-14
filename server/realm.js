@@ -238,9 +238,12 @@ export class Realm {
     bus.on((to, msg) => { if (to === 'all' || to === `layer:${layer}`) this.onBus(msg); });
   }
 
-  // Up: whoever this layer held before a crash is let go, then it says it's open.
+  // Up: whoever this layer held before a crash is let go, Brightwater's surroundings are built
+  // (where new characters start; after a restart everyone comes back at once), then it says it's
+  // open.
   async start() {
     await this.store.clearLayer(this.layer);
+    this.simhost.primeHub();
     await this.announce();
     this.announceTimer = setInterval(() => this.announce().catch((err) => log.warn('realm', `announce failed: ${err.message}`)), ANNOUNCE_EVERY);
     this.presenceTimer = setInterval(() => this.store.refreshLayer(this.layer).catch(() => {}), PRESENCE_EVERY);

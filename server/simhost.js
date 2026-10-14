@@ -31,9 +31,13 @@ import { rewardRoll, bonusRoll, visitRoll } from '../src/rpg/CharacterCore.js';
 import { reachedPlaces, defenceAt, heldObjectives, questDrops } from '../src/rpg/questWatch.js';
 import { maxHit } from './characters.js';
 import { PARTY_RANGE } from './parties.js';
-import { Grid, metrics } from './ops.js';
+import { Grid, metrics, log } from './ops.js';
 import { Dungeons } from '../src/sim/Dungeons.js';
 import { inPocket } from '../src/world/dungeons.js';
+import { HUB } from '../src/world/Gen.js';
+
+const HUB_FOCUS = { x: HUB.x, z: HUB.z };
+const TICK_TARGET_MS = 40; // building for arrivals keeps ticks under this when it can (they're 50 ms apart)
 
 const EAOI = 110;          // metres: enemies further than this from a player aren't sent to them
 const EVENT_RANGE = 130;
@@ -201,6 +205,13 @@ export class SimHost {
     this.sim.addDecoy({ id: `d${session.id}:${session.decoys}`, owner: session.id, position: new THREE.Vector3().fromArray(p), duration });
   }
 
+  // Builds the world round Brightwater now (it stays built: see tick).
+  primeHub() {
+    const t0 = performance.now();
+    this.world.prime([HUB_FOCUS]);
+    log.info('sim', `built Brightwater's surroundings in ${Math.round(performance.now() - t0)} ms`);
+  }
+
   // ---------------------------------------------------------------- players
   // In a fight: an enemy is after them, or one they've hurt is still fighting.
   inCombat(session) {
@@ -282,10 +293,11 @@ export class SimHost {
         if (d) this.sim.encounters.defend(d);
       }
     }
-    // The world round everyone, those who just arrived first; then whoever's surroundings are
-    // built joins the simulation.
-    const foci = [...this.realm.sessions.values()].filter((s) => s.proxy?.placed).map((s) => s.proxy.position);
-    if (foci.length) this.world.track(foci, this.arriving.map((p) => p.position));
+    // The world round everyone, those who just arrived first (in what the last tick left spare);
+    // then whoever's surroundings are built joins the simulation. Brightwater's stays built, empty
+    // or not: it's where new characters start and everyone comes back to, and the biggest build.
+    const foci = [HUB_FOCUS, ...[...this.realm.sessions.values()].filter((s) => s.proxy?.placed).map((s) => s.proxy.position)];
+    this.world.track(foci, this.arriving.map((p) => p.position), TICK_TARGET_MS - (metrics.tickMs.at(-1) ?? 0));
     if (this.arriving.length) {
       const ready = this.arriving.filter((p) => this.world.ready(p.position));
       if (ready.length) {

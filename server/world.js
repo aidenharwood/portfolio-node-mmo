@@ -92,8 +92,9 @@ export class HeadlessWorld extends World {
 
   // Keeps colliders loaded around `foci` (player positions); builds new ones within a time budget.
   // `waiting`: those of `foci` whose surroundings must be built before they count (players just
-  // arrived); theirs is built first, in the order given, with a bigger budget.
-  track(foci, waiting = []) {
+  // arrived); theirs is built first, in the order given, with a bigger budget: `spare` ms, between
+  // the usual budget and ARRIVAL_BUDGET_MS.
+  track(foci, waiting = [], spare = ARRIVAL_BUDGET_MS) {
     foci = foci.filter((f) => !inPocket(f.x));
     const want = new Set();
     const jobs = [];
@@ -113,7 +114,7 @@ export class HeadlessWorld extends World {
     }
     const seen = new Set();
     this.queue = jobs.sort((a, b) => a.rank - b.rank || a.d - b.d).filter((j) => !seen.has(j.k) && seen.add(j.k));
-    this.work(this.queue[0]?.rank < Infinity ? ARRIVAL_BUDGET_MS : BUDGET_MS);
+    this.work(this.queue[0]?.rank < Infinity ? Math.max(BUDGET_MS, Math.min(ARRIVAL_BUDGET_MS, spare)) : BUDGET_MS);
   }
 
   // Everything near `foci` at once (startup, tools): nothing may spawn inside a wall. What's
