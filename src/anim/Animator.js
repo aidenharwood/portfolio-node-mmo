@@ -23,7 +23,6 @@ const AXIS = new THREE.Vector3(0, -1, 0);
 const KNEE_BEND = new THREE.Vector3(0, 0, -1);
 const ELBOW_BEND = new THREE.Vector3(0, 0, 1);
 const X_AXIS = new THREE.Vector3(1, 0, 0);
-const Y_AXIS = new THREE.Vector3(0, 1, 0);
 const Z_AXIS = new THREE.Vector3(0, 0, 1);
 const ARM_TO_POSE = new THREE.Quaternion().setFromAxisAngle(X_AXIS, -Math.PI / 2); // bone -Y → pose +Z
 const MOUNT_INV = new THREE.Quaternion().setFromAxisAngle(X_AXIS, -Math.PI / 2);   // weapon → hand frame
@@ -840,10 +839,17 @@ export function humanoidRagdoll(r, s) {
   const spine = rd.point(r.spine, null, 0.13);
   const chest = rd.point(r.chest, null, 0.15);
   const neck = rd.point(r.head, null, 0.07);
-  const arms = [r.armL, r.armR].map((a) => ({
-    a, sh: rd.point(a.upper, null, 0.07), el: rd.point(a.fore, null, 0.055), wr: rd.point(a.hand, null, 0.05),
-    fist: rd.tip(a.hand, V(0, -1, 0), 0.045, 0.04),
-  }));
+  const arms = [r.armL, r.armR].map((a) => {
+    const wr = rd.point(a.hand, null, 0.05);
+    // Something big in the hand (a shield, a maul) is a stiff piece of its own, as wide as it
+    // is; a bare or lightly armed fist is a ball at the knuckles.
+    const reach = Math.max(0, ...rd.outline([a.hand]).map((p) => p.distanceTo(rd.points[wr].p))) / (rd.scale * rd.size);
+    const held = reach > 0.32 ? rd.piece(a.hand, [a.hand], wr, V(0, -1, 0), V(1, 0, 0), 0.05, 10, 0.18) : null;
+    return {
+      a, sh: rd.point(a.upper, null, 0.07), el: rd.point(a.fore, null, 0.055), wr,
+      fist: held?.end >= 0 ? held.end : rd.tip(a.hand, V(0, -1, 0), 0.045, 0.04), held,
+    };
+  });
   const legs = r.legs.map((l) => {
     const toe = rd.tip(l.foot, V(0, -0.35, 1), 0.05, 0.06);
     return {
@@ -856,7 +862,7 @@ export function humanoidRagdoll(r, s) {
     rd.thick(sh, a.upper, el, 0.2);
     rd.thick(el, a.fore, wr, 0.16);
     rd.thick(wr, a.fore, el, 0.16);
-    // (What's in the fist, when it's part of the body: a maul's head, a blade.)
+    // (What's in the fist, when it's part of the body: a blade.)
     rd.thick(fist, a.hand, wr, 0.3);
   }
   for (const { l, hip, knee, ankle } of legs) {
@@ -878,7 +884,8 @@ export function humanoidRagdoll(r, s) {
   const skull = rd.piece(r.head, [r.head, r.skull].filter(Boolean), neck, V(0, 1, 0), V(1, 0, 0), 0.06, 8, 0.12);
   const head = skull.end;
   // It turns and tips only so far: each side of it stays about as far from its shoulder.
-  rd.range(L.sh, skull.left, 0.8, 1.25); rd.range(R.sh, skull.right, 0.8, 1.25);
+  rd.range(L.sh, skull.left, 0.85, 1.18); rd.range(R.sh, skull.right, 0.85, 1.18);
+  rd.range(L.sh, skull.right, 0.85, 1.18); rd.range(R.sh, skull.left, 0.85, 1.18);
   rd.link(spine, chest);
   rd.range(spine, L.sh, 0.93, 1.03); rd.range(spine, R.sh, 0.93, 1.03);
   rd.range(pelvis, chest, 0.88, 1.01);
@@ -886,25 +893,27 @@ export function humanoidRagdoll(r, s) {
   // The head nods and turns only so far.
   rd.range(chest, head, 0.86, 1.01);
   rd.range(L.sh, head, 0.8, 1.15); rd.range(R.sh, head, 0.8, 1.15);
-  for (const { sh, el, wr, fist } of arms) {
+  for (const { sh, el, wr, fist, held } of arms) {
     rd.link(sh, el, 1, true); rd.link(el, wr, 1, true);
     // The hand bends at the wrist only so far.
-    rd.link(wr, fist); rd.bend(el, wr, fist, 0.9);
+    if (!held) rd.link(wr, fist);
+    rd.bend(el, wr, fist, 0.9);
     rd.apart(sh, wr, 0.3);
     // Arms stay out of the body.
     const body = 0.15 * rd.size;
     rd.apart(el, spine, 0, body + 0.01); rd.apart(wr, spine, 0, body); rd.apart(wr, pelvis, 0, body); rd.apart(wr, chest, 0, body);
   }
+  const shanks = new Map();
   // The pelvis's frame (side, up, forward), for the hips' and knees' limits.
   const hips = [pelvis, spine, RL.hip, LL.hip];
   for (const { l, hip, knee, ankle, toe, heel } of legs) {
     rd.link(hip, knee, 1, true);
     // Shin and foot one stiff piece: knee, ankle, toe and heel (a dead body's ankles don't
     // flex to speak of).
-    rd.group([knee, ankle, toe, heel]);
+    shanks.set(l, rd.group([knee, ankle, toe, heel]));
     rd.apart(hip, ankle, 0.35);
     rd.apart(knee, chest, 0.5);
-    rd.hinge(hip, knee, ankle, hips, FORWARD, 0.9, null, true);
+    rd.hinge(hip, knee, ankle, hips, FORWARD, 0.9, true);
     rd.reach(hip, knee, hips, FORWARD, -0.22 * rd.size);
     // …and only so far up: a thigh rises to about level, curled or flung out sideways; it swings
     // out to the side about 50°, and in across the other a little.
@@ -916,21 +925,22 @@ export function humanoidRagdoll(r, s) {
   }
   rd.apart(LL.knee, RL.knee, 0, 0.14 * rd.size); rd.apart(LL.ankle, RL.ankle, 0, 0.12 * rd.size);
   // How the bones follow, root first.
-  rd.drive(r.hips, 'root', pelvis, spine, { side: [RL.hip, LL.hip] });
+  rd.drive(r.hips, 'root', pelvis, spine, { side: [RL.hip, LL.hip], group: lower });
   rd.drive(r.spine, 'frame', spine, chest, { side: [RL.hip, LL.hip], cone: 1.8 });
-  rd.drive(r.chest, 'frame', chest, neck, { side: [R.sh, L.sh], cone: 1.8 });
-  if (skull.ok) rd.drive(r.head, 'frame', skull.pivot, skull.end, { side: [skull.right, skull.left], cone: 2.2 });
+  rd.drive(r.chest, 'frame', chest, neck, { side: [R.sh, L.sh], group: upper, cone: 1.8 });
+  if (skull.ok) rd.drive(r.head, 'frame', skull.pivot, skull.end, { side: [skull.right, skull.left], group: skull.group, cone: 2.2 });
   else rd.drive(r.head, 'frame', neck, head, { side: [R.sh, L.sh], cone: 2.2 });
-  for (const { a, sh, el, wr, fist } of arms) {
+  for (const { a, sh, el, wr, fist, held } of arms) {
     rd.drive(a.upper, 'limb', sh, el, { next: wr, bend: ELBOW });
     rd.drive(a.fore, 'hinge', el, wr, { bend: ELBOW, lo: 0, hi: 2.8 });
-    rd.drive(a.hand, 'aim', wr, fist, { cone: 2.4 });
+    if (held?.ok) rd.drive(a.hand, 'frame', held.pivot, held.end, { side: [held.right, held.left], group: held.group, cone: 2.4 });
+    else rd.drive(a.hand, 'aim', wr, fist, { cone: 2.4 });
   }
   for (const { l, hip, knee, ankle, toe, heel } of legs) {
     rd.drive(l.thigh, 'limb', hip, knee, { next: ankle, bend: KNEE, ref: hips, refDir: KNEE, refSwing: true, cone: 2.8 });
     // The shin turned with its foot (one piece), so the foot sits on it as it did.
-    rd.drive(l.shin, 'frame', knee, ankle, { side: [ankle, toe], cone: 2.8 });
-    if (heel >= 0) rd.drive(l.foot, 'frame', ankle, toe, { side: [ankle, heel], cone: 2.4 });
+    rd.drive(l.shin, 'frame', knee, ankle, { side: [ankle, toe], group: shanks.get(l), cone: 2.8 });
+    if (heel >= 0) rd.drive(l.foot, 'frame', ankle, toe, { side: [ankle, heel], group: shanks.get(l), cone: 2.4 });
     else rd.drive(l.foot, 'aim', ankle, toe, { cone: 2.4 });
   }
   const { velocity, kick } = deathKick(s);

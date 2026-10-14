@@ -1,12 +1,13 @@
-// A ragdoll built from a rig's own skeleton, at the moment it dies: a ball at each joint (and at
-// the ends that touch things — the top of the head, the toes), joined by rods the length of its
-// bones, braced across the torso so that stays one piece, and kept from folding past what joints
-// do. The balls fall under gravity (Verlet), are kicked by the killing blow, roll against the
-// ground and the world's colliders with friction, and come to rest. Joints are limited among the
-// balls themselves (a knee only folds one way of the pelvis, a hip only reaches so far back, a
-// spine and a neck bend only so far), so the physics never asks for a pose the skeleton can't
-// take. The bones then take only rotations from them — the pelvis's frame, each limb aimed at the
-// next joint, knees and elbows as hinges, twists limited — so nothing stretches.
+// A ragdoll built from a rig's own skeleton, at the moment it dies: a ball at each joint, joined
+// by rods the length of its bones; the torso, the head, the shins with their feet (and anything
+// big in a fist) stiff pieces kept in shape by shape matching, with more balls on their real
+// outline so armour, bellies and crests lie on the ground instead of sinking into it. Joints are
+// limited among the balls themselves — a knee folds one way and splays only so far, a hip swings
+// only so far up, out and back, a spine bends and twists a little, a head turns and tips only so
+// far — so the physics never asks for a pose the skeleton can't take. The balls fall (Verlet),
+// are kicked the way the blow came, collide with the ground and the world's colliders and props
+// with friction, and settle. The bones take only rotations from them — stiff pieces turned as
+// their balls have turned, limbs aimed at the next joint, elbows as hinges — so nothing stretches.
 //   anim/Animator.js humanoidRagdoll, anim/LegAnimator.js legRagdoll / hoverRagdoll build one.
 import * as THREE from 'three';
 
@@ -16,7 +17,7 @@ const MAX_STEPS = 6;       // per frame (far-off bodies are animated rarely, wit
 const ITERATIONS = 8;
 const FRICTION = 0.3;      // share of its sliding speed a joint on the ground loses each step
 const DRAG = 0.003;
-const STICK = 0.25;          // m/s: a joint sliding slower than this on the ground stops
+const STICK = 0.25;        // m/s: a joint sliding slower than this on the ground stops
 const SLEEP_MOVE = 0.025;  // m: moved less than this in SLEEP_TIME and it lies still
 const SLEEP_TIME = 0.5;
 const SETTLE_FROM = 1.2;   // s after death the motion starts dying away…
@@ -30,7 +31,6 @@ const _b = new THREE.Vector3();
 const _c = new THREE.Vector3();
 const _q = new THREE.Quaternion();
 const _q2 = new THREE.Quaternion();
-const _q3 = new THREE.Quaternion();
 const _q4 = new THREE.Quaternion();
 const _qp = new THREE.Quaternion();
 const _pv = new THREE.Vector3();
@@ -64,22 +64,6 @@ function capAngle(q, rest, max) {
     _q4.copy(q);
     q.copy(rest).slerp(_q4, max / angle);
   }
-  return q;
-}
-
-// Limits the twist of local rotation `q` about bone-local axis `axis`, measured from `rest`.
-function capTwist(q, rest, axis, max) {
-  _q.copy(rest).invert().multiply(q);              // delta from rest
-  const d = _q.x * axis.x + _q.y * axis.y + _q.z * axis.z;
-  _q2.set(axis.x * d, axis.y * d, axis.z * d, _q.w);
-  const len = Math.hypot(_q2.x, _q2.y, _q2.z, _q2.w);
-  if (len < 1e-9) return q;
-  _q2.x /= len; _q2.y /= len; _q2.z /= len; _q2.w /= len;  // the twist part of the delta
-  const angle = 2 * Math.acos(clamp(Math.abs(_q2.w), 0, 1));
-  if (angle <= max) return q;
-  const swing = _q3.copy(_q).multiply(_q4.copy(_q2).invert());
-  _q2.slerp(_q4.identity(), 1 - max / angle);
-  q.copy(rest).multiply(swing).multiply(_q2);
   return q;
 }
 
@@ -204,6 +188,7 @@ export class Ragdoll {
     this.links = [];
     this.drives = [];
     this.groups = [];
+    this.joints = [];
     this.asleep = false;
     this.still = 0;
     this.time = 0;
@@ -342,6 +327,7 @@ export class Ragdoll {
   piece(bone, of, from, axis, side, r, extra = 8, gap = 0.15) {
     const pivot = this.point(bone, null, r);
     this.link(from, pivot);
+    this.joints.push(this.links.at(-1));
     const end = this.tip(bone, axis, r, 0, of);
     const left = this.tip(bone, side, r, 0, of);
     const right = this.tip(bone, side.clone().negate(), r, 0, of);
@@ -370,17 +356,6 @@ export class Ragdoll {
     }
   }
 
-  // Grows ball i to reach the outline of what moves with `bones` (a helmeted head), up to `max`.
-  fit(i, bones, max) {
-    const pt = this.points[i];
-    let far = 0;
-    for (const p of this.outline(bones)) far = Math.max(far, p.distanceTo(pt.p));
-    if (far > pt.r) {
-      pt.r = Math.min(far * 0.85, max * this.scale * this.size);
-      pt.w = 1 / (pt.r * pt.r * 100);
-    }
-  }
-
   // A rod between two balls at their distance now (`stiff` < 1 gives a little).
   link(a, b, stiff = 1, limb = false) {
     if (a < 0 || b < 0) return;
@@ -397,13 +372,11 @@ export class Ragdoll {
   // Keeps ball b bent out from the line a→c within `spread` radians of `dir` (a direction in the
   // frame of balls `fr`: [up from, up to, side from, side to] — side, up, forward): a knee in
   // front of its hip and ankle, so the leg folds the way a knee does and splays only so far.
-  // `like` ([a, b, c] of another joint) takes the way that joint bends instead, wherever it bends
-  // enough to say: a foot points the way its knee does.
   // `swing`: the way it folds turns with the limb as it swings about the frame's side (a knee
   // faces forward standing, up with the thigh raised).
-  hinge(a, b, c, fr, dir, spread = 1.0, like = null, swing = false) {
+  hinge(a, b, c, fr, dir, spread = 1.0, swing = false) {
     if (a < 0 || b < 0 || c < 0) return;
-    this.links.push({ kind: 3, a, b, c, fr, dir: dir.clone(), cos: Math.cos(spread), sin: Math.sin(spread), like, swing, limb: false });
+    this.links.push({ kind: 3, a, b, c, fr, dir: dir.clone(), cos: Math.cos(spread), sin: Math.sin(spread), swing, limb: false });
   }
 
   // Keeps ball b no further than `min` (model units, negative: behind) along `dir` (in the frame
@@ -432,11 +405,12 @@ export class Ragdoll {
   }
 
   // How a bone takes its rotation from the balls (in parent-before-child order):
-  //   root   a frame from up = from→to and side = side[0]→side[1]; also placed at `from`
-  //   frame  the same, for a bone further in (the chest from its shoulders), capped at `cone`
+  //   root   a frame from up = from→to and side = side[0]→side[1] — or, given `group`, turned as
+  //          that stiff piece has turned; also placed at `from`
+  //   frame  the same, for a bone further in (the chest with its block), capped at `cone`
   //   aim    turned the least way to point from→to, capped at `cone` from how it stood
   //   limb   aimed, and turned about itself so it bends toward `bend` (its frame) where the next
-  //          bone (to→next) goes; its twist capped at `twist`
+  //          bone (to→next) goes
   //   hinge  a rotation about one axis only (rest × `bend`, in its parent's frame), lo…hi radians
   drive(bone, type, from, to, o = {}) {
     if (!bone || from < 0 || to < 0) return null;
@@ -608,8 +582,14 @@ export class Ragdoll {
   }
 
   solveLinks() {
+    this.solve(this.links);
+    // Ball joints last, so a piece stays on its socket whatever else tugs at it.
+    this.solve(this.joints);
+  }
+
+  solve(links) {
     const P = this.points;
-    for (const l of this.links) {
+    for (const l of links) {
       const a = P[l.a];
       const b = P[l.b];
       if (a.off || b.off) continue;
@@ -667,18 +647,6 @@ export class Ragdoll {
       const c = P[l.c];
       if (c.off) return;
       if (l.swing) swungWay(_c, _m, _v.subVectors(c.p, a.p));
-      if (l.like) {
-        // The other joint's bend: its middle's offset from the line through its ends.
-        const [ka, kb, kc] = l.like.map((i) => P[i].p);
-        _v.subVectors(kc, ka);
-        const n2 = _v.lengthSq();
-        if (n2 > 1e-10) {
-          _w.subVectors(kb, ka);
-          _w.addScaledVector(_v, -_w.dot(_v) / n2);
-          const k = smoothstep(0.03, 0.1, _w.length() / Math.sqrt(n2));
-          if (k > 0) _c.multiplyScalar(1 - k).addScaledVector(_w.normalize(), k).normalize();
-        }
-      }
       // b's offset from the line a→c, and the allowed way across that line.
       _v.subVectors(c.p, a.p);
       const len2 = _v.lengthSq();
@@ -698,13 +666,11 @@ export class Ragdoll {
       if (lat > 1e-6) _a.divideScalar(lat);
       else _a.set(0, 0, 0);
       _b.copy(_c).multiplyScalar(off * l.cos).addScaledVector(_a, off * (lat > 1e-6 ? l.sin : 0)).sub(_w);
-      // Mostly the middle joint moves; the ends give a little (not when the way is taken from
-      // another joint, which the ends would turn: a foot following its knee moves alone).
-      const give = l.like ? 0 : 0.25;
-      const k = 1 / (b.w + (a.w + c.w) * give);
+      // Mostly the middle joint moves; the ends give a little.
+      const k = 1 / (b.w + (a.w + c.w) * 0.25);
       b.p.addScaledVector(_b, k * b.w);
-      a.p.addScaledVector(_b, -k * a.w * give);
-      c.p.addScaledVector(_b, -k * c.w * give);
+      a.p.addScaledVector(_b, -k * a.w * 0.25);
+      c.p.addScaledVector(_b, -k * c.w * 0.25);
       return;
     }
     short = l.len - _w.subVectors(b.p, a.p).dot(_c);
@@ -762,7 +728,7 @@ export class Ragdoll {
     return ground ? ground(x, z) : -Infinity;
   }
 
-  // The bones from the balls, then the balls from the bones (so limits hold and nothing drifts).
+  // The bones from the balls: rotations only (the root bone also placed), parents first.
   pose() {
     const P = this.points;
     this.model.updateWorldMatrix(true, false);
@@ -776,10 +742,15 @@ export class Ragdoll {
       _v.subVectors(P[d.to].p, P[d.from].p);
       if (_v.lengthSq() < 1e-12) continue;
       if (d.type === 'root' || d.type === 'frame') {
-        frame(_v, _w.subVectors(P[d.side[1]].p, P[d.side[0]].p), _m);
-        _m2.copy(d.M0).transpose();
-        _m.multiply(_m2);
-        _q.setFromRotationMatrix(_m).multiply(d.Q0);
+        if (d.group && !d.group.off) {
+          // A stiff piece: turned just as its balls have turned since (the shape match's own).
+          _q.copy(d.group.q).multiply(d.Q0);
+        } else {
+          frame(_v, _w.subVectors(P[d.side[1]].p, P[d.side[0]].p), _m);
+          _m2.copy(d.M0).transpose();
+          _m.multiply(_m2);
+          _q.setFromRotationMatrix(_m).multiply(d.Q0);
+        }
         d.L.copy(_qp).multiply(_q);
         if (d.type === 'frame' && d.cone) capAngle(d.L, d.L0, d.cone);
         if (d.type === 'root') parent.worldToLocal(bone.position.copy(P[d.from].p));
@@ -823,7 +794,6 @@ export class Ragdoll {
               _q2.setFromRotationMatrix(_m2);
               d.L.slerp(_q2, k);
             }
-            if (d.twist !== undefined) capTwist(d.L, d.L0, d.rest, d.twist);
           }
           if (d.cone) capAngle(d.L, d.L0, d.cone);
         }

@@ -368,29 +368,32 @@ function legRagdoll(r, s) {
     rd.link(hip, knee, 1, true);
     rd.link(knee, ankle, 1, true);
     // Shin and paw one stiff piece (no ankle to speak of on a dead beast).
-    rd.group([knee, ankle, paw, toe, heel]);
+    const shank = rd.group([knee, ankle, paw, toe, heel]);
     rd.apart(hip, ankle, 0.3);
     rd.apart(knee, mid, 0, core * 1.1);
     rd.apart(ankle, mid, 0, core * 1.1);
-    return { leg, hip, knee, ankle, paw, toe };
+    return { leg, hip, knee, ankle, paw, toe, shank };
   });
   // The body's outline (its bulk, hide, shell) is balls too.
   const torso = [r.body, r.chest].filter(Boolean);
-  rd.group([...block, ...rd.shell(torso, SHELL, core * 0.3, r.body, 16)]);
+  const trunk = rd.group([...block, ...rd.shell(torso, SHELL, core * 0.3, r.body, 16)]);
   // The head turns and tips only so far: each side of it stays about as far from the body's.
-  if (skull?.ok) { rd.range(left, skull.left, 0.8, 1.25); rd.range(right, skull.right, 0.8, 1.25); }
-  rd.drive(r.body, 'root', mid, top, { side: [right, left] });
+  if (skull?.ok) {
+    rd.range(left, skull.left, 0.85, 1.18); rd.range(right, skull.right, 0.85, 1.18);
+    rd.range(left, skull.right, 0.85, 1.18); rd.range(right, skull.left, 0.85, 1.18);
+  }
+  rd.drive(r.body, 'root', mid, top, { side: [right, left], group: trunk });
   if (r.neck && skull) rd.drive(r.neck, 'aim', headFrom, skull.pivot, { cone: 2.4 });
-  if (skull?.ok) rd.drive(r.head, 'frame', skull.pivot, skull.end, { side: [skull.right, skull.left], cone: 2.4 });
+  if (skull?.ok) rd.drive(r.head, 'frame', skull.pivot, skull.end, { side: [skull.right, skull.left], group: skull.group, cone: 2.4 });
   else if (skull?.end >= 0) rd.drive(r.head, 'aim', skull.pivot, skull.end, { cone: 2.4 });
   for (let i = 0; i + 1 < tail.length; i++) rd.drive(r.tail[i], 'aim', tail[i], tail[i + 1], { cone: 2.4 });
-  for (const { leg, hip, knee, ankle, paw, toe } of legs) {
+  for (const { leg, hip, knee, ankle, paw, toe, shank } of legs) {
     rd.drive(leg.upper, 'aim', hip, knee);
     // The shin turned with its paw (one piece), so the paw sits on it as it was.
     const sidePt = toe >= 0 ? toe : paw;
-    if (sidePt >= 0) rd.drive(leg.lower, 'frame', knee, ankle, { side: [ankle, sidePt] });
+    if (sidePt >= 0) rd.drive(leg.lower, 'frame', knee, ankle, { side: [ankle, sidePt], group: shank });
     else rd.drive(leg.lower, 'aim', knee, ankle);
-    if (paw >= 0 && toe >= 0) rd.drive(leg.foot, 'frame', ankle, paw, { side: [ankle, toe], cone: 2.4 });
+    if (paw >= 0 && toe >= 0) rd.drive(leg.foot, 'frame', ankle, paw, { side: [ankle, toe], group: shank, cone: 2.4 });
     else if (paw >= 0) rd.drive(leg.foot, 'aim', ankle, paw, { cone: 2.4 });
   }
   const { velocity, kick } = deathKick(s);
@@ -414,7 +417,7 @@ function hoverRagdoll(r, s) {
   const right = rd.point(r.body, V(-size, 0, 0), ball * 0.6);
   const block = [mid, top, front, back, left, right];
   const fix = (p) => { block.push(p); };
-  rd.drive(r.body, 'root', mid, top, { side: [right, left] });
+  const root = rd.drive(r.body, 'root', mid, top, { side: [right, left] });
   for (const arm of r.arms ?? []) {
     const sh = rd.point(arm.upper, null, ball * 0.35);
     const el = rd.point(arm.fore, null, ball * 0.3);
@@ -432,11 +435,11 @@ function hoverRagdoll(r, s) {
     fix(hang);
     const robe = rd.piece(r.robe, [r.robe], hang, V(0, -1, 0), V(1, 0, 0), ball * 0.35, 12, 0.25);
     if (robe.end >= 0) rd.range(mid, robe.end, 0.8, 1.02);
-    if (robe.ok) rd.drive(r.robe, 'frame', robe.pivot, robe.end, { side: [robe.right, robe.left], cone: 2.4 });
+    if (robe.ok) rd.drive(r.robe, 'frame', robe.pivot, robe.end, { side: [robe.right, robe.left], group: robe.group, cone: 2.4 });
     else if (robe.end >= 0) rd.drive(r.robe, 'aim', robe.pivot, robe.end, { cone: 2.4 });
   }
   const body = [r.body, ...(r.spin ?? [])];
-  rd.group([...block, ...rd.shell(body, SHELL, ball * 0.4, r.body, 16)]);
+  root.group = rd.group([...block, ...rd.shell(body, SHELL, ball * 0.4, r.body, 16)]);
   const { velocity, kick } = deathKick(s);
   rd.start(velocity, kick.multiplyScalar(0.6), [top, front]);
   return rd;
