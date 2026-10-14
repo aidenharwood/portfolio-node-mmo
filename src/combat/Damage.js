@@ -18,6 +18,7 @@ const ZERO = new THREE.Vector3();
  * @param o.source     'melee' | 'projectile' | 'explosion' | 'status'
  * @param o.scaled     base already includes the attacker's damage multiplier
  * @param o.inflict    element whose status a weaponless (enemy) hit applies
+ * @param o.point      where on the target it landed (melee contact), for the hit's effects
  */
 export function dealDamage(game, o) {
   const { attacker, target, weapon = null, source = 'melee' } = o;
@@ -54,6 +55,7 @@ export function dealDamage(game, o) {
     damage: ctx.damage, crit, element, source, attacker,
     attack: o.attack,
     component: region?.id ?? null,
+    point: o.point ?? null,
     direction: o.direction ?? ZERO,
     knockback: o.knockback ?? 0,
     poise: o.poise ?? ctx.damage,

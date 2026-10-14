@@ -84,6 +84,14 @@ export function hitRegions(enemy) {
   return regions;
 }
 
+// Where a melee swing aims on an enemy (Player.aimSwing turns and tilts the swing through it):
+// high on a biped's torso, the middle of a beast's body or a floater's core.
+export function aimPoint(enemy, out) {
+  const main = hitRegions(enemy).find((r) => r.id === 'torso' || r.id === 'body' || r.id === 'core');
+  if (!main) return out.copy(enemy.position).setY(enemy.position.y + enemy.height * 0.6);
+  return out.copy(main.from).lerp(main.to, main.id === 'torso' ? 0.85 : 0.5);
+}
+
 // Fallback volumes for entities without a raycastable mesh. Enemies use their authored component
 // map above; the local player uses its bone chains.
 export function bodyRegions(entity) {

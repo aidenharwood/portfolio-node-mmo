@@ -118,13 +118,16 @@ export function bakeTree(root, opts = {}) {
   return root;
 }
 
+const MOUNTS = new Set(['rig:weaponMount', 'rig:offMount']);
+
 // Bakes a jointed model (a THREE.Bone hierarchy carrying pieces) into skinned meshes: every
 // piece is weighted fully to its nearest ancestor bone (or keeps its own blended weights — lofted
 // skin, cloth), and however many colours, bones and pieces there are, it all merges into three
 // SkinnedMeshes sharing one Skeleton: one lit (each piece's colour carried in its vertices), one
 // unlit for the glowing parts, and one outline shell (each piece's ink thickness carried in its
 // vertices). Three draw calls a character, so crowds stay cheap. Non-bone children (weapon
-// mounts) are kept.
+// mounts) are kept. The pieces modelled on a weapon mount (held gear, not the body) are marked
+// per vertex in each mesh's geometry.userData.held, for melee contact (combat/MeleeContact.js).
 export function bakeSkinned(root) {
   root.updateMatrixWorld(true);
   const bones = [];
@@ -137,11 +140,13 @@ export function bakeSkinned(root) {
   const lit = [];
   const glow = [];
   const hulls = [];
+  const heldGeos = new Set();
   const color = new THREE.Color();
   for (const child of pieces) {
     const p = child.userData.piece;
     let b = child.parent;
-    while (b && !b.isBone) b = b.parent;
+    let held = false;
+    while (b && !b.isBone) { held ||= MOUNTS.has(b.name); b = b.parent; }
     const bi = b ? index.get(b) : 0;
     // Kept indexed: a smooth surface shares each vertex between ~6 triangles, so the skinning
     // shader transforms a fraction of the vertices it would after toNonIndexed().
@@ -174,13 +179,25 @@ export function bakeSkinned(root) {
     const rgb = new Float32Array(n * 3);
     for (let i = 0; i < n; i++) { rgb[i * 3] = color.r; rgb[i * 3 + 1] = color.g; rgb[i * 3 + 2] = color.b; }
     g.setAttribute('color', new THREE.BufferAttribute(rgb, 3));
+    if (held) heldGeos.add(g);
     (p.glow ? glow : lit).push(g);
     child.removeFromParent();
   }
   const skeleton = new THREE.Skeleton(bones);
   const meshes = [];
   const slack = (sphere) => { sphere.radius = sphere.radius * 1.25 + 0.6; return sphere; };
-  const add = (geo, mat, solid) => {
+  const add = (parts, mat, solid) => {
+    const geo = mergeGeometries(parts);
+    if (parts.some((g) => heldGeos.has(g))) {
+      const held = new Uint8Array(geo.attributes.position.count);
+      let at = 0;
+      for (const g of parts) {
+        const n = g.attributes.position.count;
+        if (heldGeos.has(g)) held.fill(1, at, at + n);
+        at += n;
+      }
+      geo.userData.held = held;
+    }
     geo.computeBoundingSphere();
     const mesh = new THREE.SkinnedMesh(geo, mat);
     mesh.castShadow = solid;
@@ -190,8 +207,8 @@ export function bakeSkinned(root) {
     mesh.boundingSphere = slack(geo.boundingSphere.clone());
     return mesh;
   };
-  if (lit.length) meshes.push(add(mergeGeometries(lit), applyRim(toonMaterial(0xffffff, { vertexColors: true })), true));
-  if (glow.length) meshes.push(add(mergeGeometries(glow), new THREE.MeshBasicMaterial({ vertexColors: true }), false));
+  if (lit.length) meshes.push(add(lit, applyRim(toonMaterial(0xffffff, { vertexColors: true })), true));
+  if (glow.length) meshes.push(add(glow, new THREE.MeshBasicMaterial({ vertexColors: true }), false));
   if (hulls.length) {
     const shell = mergeGeometries(hulls);
     shell.computeBoundingSphere();

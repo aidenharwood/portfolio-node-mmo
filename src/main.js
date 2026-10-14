@@ -1857,8 +1857,11 @@ class Game {
 
   // ---------------------------------------------------------------- events
   onHit(attacker, target, hit) {
-    _v.copy(target.position);
-    _v.y += target.height * 0.7;
+    if (hit.point) _v.copy(hit.point);
+    else {
+      _v.copy(target.position);
+      _v.y += target.height * 0.7;
+    }
     const elColor = hit.element !== 'none' ? ELEMENTS[hit.element].css : null;
 
     if (this.prefs.gore && target !== this.player && target.type?.race && target.type.race !== 'synth' && hit.source !== 'status') {
