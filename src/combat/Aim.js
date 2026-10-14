@@ -7,6 +7,7 @@ import { rayHitColliderMesh } from '../world/MeshCollision.js';
 const _o = new THREE.Vector3();
 const _d = new THREE.Vector3();
 const MAX_RANGE = 150;
+const _order = [];
 
 // Ray vs vertical cylinder (side only). Returns distance along ray or Infinity.
 export function rayCylinder(o, d, cx, cz, r, y0, y1) {
@@ -116,8 +117,16 @@ export class Aim {
     let best = MAX_RANGE;
     let target = null;
     let hitComponent = null;
+    // Nearest along the ray first: once a body is hit, the rest are only tested up to it (and
+    // those beyond are turned away before their bones are touched).
+    _order.length = 0;
     for (const e of game.enemies) {
       if (!e.alive) continue;
+      const q = e.position;
+      _order.push({ e, t: (q.x - _o.x) * _d.x + (q.y + e.height * 0.5 - _o.y) * _d.y + (q.z - _o.z) * _d.z });
+    }
+    _order.sort((a, b) => a.t - b.t);
+    for (const { e } of _order) {
       const meshHit = rayHitModel(e, _o, _d, best);
       const t = meshHit === undefined
         ? rayCylinder(_o, _d, e.position.x, e.position.z, e.radius * 1.1, e.position.y, e.position.y + e.height)
@@ -139,6 +148,7 @@ export class Aim {
     }
     const tg = game.world.raycastGround(_o, _d, best);
     if (tg > minT && tg < best) { best = tg; target = null; hitComponent = null; }
+    _order.length = 0;
     out.copy(_o).addScaledVector(_d, best);
     return { distance: best, target, component: hitComponent };
   }
