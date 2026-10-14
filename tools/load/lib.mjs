@@ -32,10 +32,11 @@ export async function healthy(base) {
   try { return (await fetch(`${base}/healthz`, { signal: AbortSignal.timeout(2000) })).ok; } catch { return false; }
 }
 
-// The server to test: { base, spawned, stop(), errors() }. A throwaway server's errors() are the
-// errors it logged ({ count, first }); a server elsewhere keeps its logs to itself.
+// The server to test: { base, throwaway, stop(), errors() }. A throwaway server's errors() are the
+// errors it logged ({ count, first }); a server elsewhere keeps its logs to itself. (LOAD_THROWAWAY=1:
+// the url given is a throwaway server another script started.)
 export async function target(url) {
-  const elsewhere = (base) => ({ base, spawned: false, stop: async () => {}, errors: () => null });
+  const elsewhere = (base) => ({ base, throwaway: process.env.LOAD_THROWAWAY === '1', stop: async () => {}, errors: () => null });
   if (url) {
     const base = url.replace(/\/+$/, '').replace(/^ws/, 'http');
     if (!await healthy(base)) console.warn(`! ${base}/healthz isn't answering 200; carrying on anyway`);
@@ -75,7 +76,7 @@ export async function target(url) {
   }
   if (!await healthy(base)) { await stop(); throw new Error(`the throwaway server didn't start:\n${out}`); }
   console.log(`(no server on localhost:8080: started a throwaway one at ${base})`);
-  return { base, spawned: true, stop, errors: () => errors };
+  return { base, throwaway: true, stop, errors: () => errors };
 }
 
 // Resolves after `ms`, or as soon as Ctrl+C is pressed (`stopped` then reads true).

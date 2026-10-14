@@ -12,6 +12,7 @@
     "dev": "node --disable-warning=ExperimentalWarning --watch-path=server server/main.js",
     "test": "node tools/powercurve.mjs --quiet && node tools/hordecheck.mjs && node tools/progresscheck.mjs && node tools/poicheck.mjs && node tools/placecheck.mjs && node tools/questcheck.mjs && node tools/dungeoncheck.mjs && node tools/surfacecheck.mjs && node tools/buildcheck.mjs && node tools/effectcheck.mjs && node tools/raidcheck.mjs && node tools/physicscheck.mjs && node tools/smoke.mjs",
     "test:cluster": "node tools/smoke.mjs cluster",
+    "load": "node tools/load/all.mjs",
     "load:http": "node tools/load/http.mjs",
     "load:players": "node tools/load/players.mjs",
     "load:auth": "node tools/load/auth.mjs"

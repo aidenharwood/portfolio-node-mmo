@@ -26,7 +26,7 @@ const WS_URL = `${server.base.replace(/^http/, 'ws')}/ws`;
 // Passwords and session tokens, kept between runs (a throwaway server's die with it).
 const CREDS = path.join(ROOT, '.load-data', 'players.json');
 const creds = existsSync(CREDS) ? JSON.parse(readFileSync(CREDS, 'utf8')) : { secret: randomBytes(24).toString('base64url'), tokens: {} };
-const saveCreds = () => { if (!server.spawned) { mkdirSync(path.dirname(CREDS), { recursive: true }); writeFileSync(CREDS, JSON.stringify(creds, null, 1)); } };
+const saveCreds = () => { if (!server.throwaway) { mkdirSync(path.dirname(CREDS), { recursive: true }); writeFileSync(CREDS, JSON.stringify(creds, null, 1)); } };
 const password = (account) => createHmac('sha256', creds.secret).update(account).digest('base64url').slice(0, 24);
 
 const suffix = (i) => [676, 26, 1].map((d) => String.fromCharCode(97 + (Math.floor(i / d) % 26))).join('');
