@@ -14,8 +14,13 @@
 //                     reach / defended { id, i } — a quest's place reached, a place held (each
 //                     second the server checks where everyone is against their quests:
 //                     rpg/questWatch.js; a defence is the world sim's, shared by whoever's there)
-//                     dun { id, st: { open, key, nodes, mini, boss, cleared }, say? } — a dungeon copy's
-//                     state (sim/Dungeons.js), to everyone in it whenever it changes
+//                     dun { id, st: { open, key, nodes, mini, boss, cleared, lift, raid? }, say?, big? }
+//                     — a dungeon or raid copy's state (sim/Dungeons.js), to everyone in it whenever
+//                     it changes (raid: each encounter's state and its bosses' fights, sim/RaidRun.js)
+//     raid events (sim/BossScript.js): rt { id, s: shape, t, el, f?, n?, nm } a mark on the floor ·
+//                     rb { id, s, dmg, kb, el, fail? } it lands · hz { id, s, life, dps, el } a pool ·
+//                     hzx { id } it's gone · rph { id, ph, name } a phase · renr { id } enraged ·
+//                     rimm { id } a hit on an immune boss (combat/shapes.js packs the shapes)
 //   client → server:  hit { id, d, src, po, kb, dx, dz }   ·   st { id, el, po }
 //                     dun { id } — something in their dungeon used (a key, a power node, a door)
 import * as THREE from 'three';
@@ -53,7 +58,7 @@ export class SimHost {
       sim: this.sim,
       send: (id, msg) => this.realm.sessions.get(id)?.send(msg),
       positionOf: (id) => { const p = this.realm.sessions.get(id)?.proxy; return p?.placed ? p.position : null; },
-      cleared: (run) => this.dungeonCleared(run),
+      cleared: (run, enc) => (enc ? this.raidCleared(run, enc) : this.dungeonCleared(run)),
     });
     this.events = [];
     this.snaps = new Map();    // enemy → { s, json }: its state this tick (see snapOf)
@@ -132,19 +137,28 @@ export class SimHost {
       if (s?.core) this.give(s, { op: 'dclear', roll: { d: run.def.id, tier: run.tier, name: run.def.name } });
     }
   }
+  // One of a raid's encounters beaten (sim/RaidRun.js): everyone in the copy has it in their records.
+  raidCleared(run, enc) {
+    const roll = { raid: run.def.id, enc: enc.def.id, name: enc.def.name, tier: run.tier ?? 0, final: enc === run.raid.last, flawless: !enc.fell };
+    for (const id of run.players) {
+      const s = this.realm.sessions.get(id);
+      if (s?.core) this.give(s, { op: 'rclear', roll });
+    }
+  }
 
   // The instance manager as one character's operations see it (rpg/CharacterCore.js `dungeons`):
-  // going in with their party (or alone), coming out, and the chests that are theirs.
+  // going in with their party (or alone, or with their raid group), coming out, and the chests
+  // that are theirs.
   dungeonPort(s) {
     const d = this.dungeons;
     const who = () => ({
       id: s.id, position: s.proxy.position, party: this.realm.parties.partyOf(s)?.id ?? `solo:${s.charId}`,
-      level: s.core?.stats.level ?? 1, flags: s.core?.quests.flags ?? {},
+      raid: this.realm.raids?.keyOf(s) ?? null, level: s.core?.stats.level ?? 1, flags: s.core?.quests.flags ?? {},
     });
     return {
       enter: (ask) => d.enter(who(), ask),
       leave: () => d.leave(who()),
-      current: () => { const r = d.runOf(s.id); return r && { dungeon: r.def.id, tier: r.tier, shared: r.shared }; },
+      current: () => { const r = d.runOf(s.id); return r && { dungeon: r.def.id, tier: r.tier, shared: r.shared, raid: !!r.raid }; },
       claim: (id, kind) => d.claim(s.id, s.charId, id, s.proxy.position, kind),
     };
   }
@@ -340,7 +354,7 @@ export class SimHost {
     const s = e.statuses;
     const fl = (e.engaged ? FLAG.engaged : 0) | (e.hidden ? FLAG.hidden : 0) | (e.guarding ? FLAG.guarding : 0) | (e.ward ? FLAG.ward : 0)
       | (e.frenzy > 0 ? FLAG.frenzy : 0) | (s.burn ? FLAG.burn : 0) | (s.chill ? FLAG.chill : 0) | (s.corrode ? FLAG.corrode : 0)
-      | (s.shocked ? FLAG.shocked : 0) | (e.alive ? FLAG.alive : 0) | (e.rallied > 0 ? FLAG.rallied : 0);
+      | (s.shocked ? FLAG.shocked : 0) | (e.alive ? FLAG.alive : 0) | (e.rallied > 0 ? FLAG.rallied : 0) | (e.immune ? FLAG.immune : 0);
     const st = [
       e.id, r2(e.position.x), r2(e.position.y), r2(e.position.z), r2(e.facing), r2(e.velocity.x), r2(e.velocity.z),
       STATE_CODE[e.state], r2(e.stateTime), e.curIndex, e.hitIndex, Math.round(e.hp), fl, r2(e.lift), r2(e.alt),

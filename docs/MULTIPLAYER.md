@@ -243,6 +243,34 @@ Built beyond the plan:
     enemy's shots; the lift runs on each screen (enemies don't ride it).
   - Entering and leaving move the character a long way: they open the same window travel does.
     Someone who drops out down there comes back where they went in (`run.back` in the save).
+- Raids (gameplay phase 7) are copies to the same instance manager (`world/raids.js`), private only.
+  - **Who shares a copy:** a raid copy belongs to a [raid group](#raid-groups), or to the party
+    or player if they're not in one. It holds 12 at most, and is entered at a city's raid gate
+    (`via: 'gate'`), from level 14.
+  - **Encounters** (`sim/RaidRun.js`): each arena is idle until its boss is pulled. Its gate then
+    shuts, and the boss's script (`sim/BossScript.js`) runs the fight. Everyone down or out of
+    the arena for 3 s is a wipe: the boss resets and the gate opens. Its bosses down beat the
+    encounter.
+  - **Server-sent:** `rclear { raid, enc, name, tier, final, flawless }` to everyone in the copy for
+    each encounter beaten (their records and achievements).
+  - **Chests:** each arena's is a `dchest`, once a week per encounter per tier (`settings.lockouts`,
+    keyed `raid:tier:encounter`, the week starting 00:00 UTC Monday).
+  - **`dun` messages:** they also carry `raid`, each encounter's state (`idle` / `fight` / `down`)
+    and, during a fight, each boss's script, phase, seconds to enrage and whether it's immune.
+    They go out on every change and every 5 s while a fight lasts. `big: 1` marks a line to
+    show as a banner.
+  - **Boss events** (in the snapshot's `ev`, like enemy shots):
+    - `rt` marks a shape on the floor (`combat/shapes.js`: circle, ring, cone, line, cross), with
+      its warning time, element, how many it needs (a soak) and the player it follows. `mk` ties
+      it to its landing.
+    - `rb` is the landing: damage and knockback. Each screen hurts its own player if they're in
+      it, as with enemy shots; the server worked out a soak's split from where players stood.
+      `fail: 1` is a failed soak's raid-wide blast.
+    - `hz` / `hzx`: a pool or seam that burns while it lasts, again judged on each screen.
+    - `rph` (a phase), `renr` (enraged), `rimm` (a hit on an immune boss).
+  - **Health:** a raid boss's health is set for the players in the fight when it's pulled, and the
+    crowd round it adds nothing. While its adds shield it the boss ignores hits, and its state
+    carries an `immune` flag (`FLAG.immune`).
 - Both sides must run the same rules: `/api/status` names the server's build (a hash of the shared
   code it loaded — `src/world`, `rpg`, `items`, `combat`, `sim`, `core`) and whether the files have
   changed since it started (`stale`). A client won't go online against a stale or unnamed build;
@@ -315,6 +343,32 @@ Up to four players play as a party.
   loot stays instanced, so there's no need/greed. Camp objectives on quests advance for members nearby.
 - **Chat:** `/p` party chat, in its own colour.
 - **Disconnects:** a member who drops keeps their place for five minutes and shows as offline.
+
+## Raid groups
+
+Parties linked to run a raid together (gameplay phase 7, `server/raidgroups.js`): up to four
+parties (a lone player counts as a party of one), twelve players.
+
+- **Forming:**
+  - A party's leader (or a player on their own) forms one with `/raid form` or at a city's war
+    table.
+  - The raid leader invites another party with `/raid invite Name`, naming any of its members. The
+    invitation goes to that party's leader, who answers with Y / N, `/raid accept` or
+    `/raid decline`.
+  - `/raid leave` takes your party out (its leader only). The raid leader can `/raid kick Name`
+    (that player's party), `/raid promote Name` (another party's leader) and `/raid disband`.
+- **Membership follows the parties:** someone who leaves their party leaves the raid with it, and
+  a party that disbands is gone from it. A lone member who drops keeps their place for five
+  minutes.
+- **Seeing each other:** `raid` sends the roster whenever it changes. `rp` sends everyone's
+  position and health once a second, for the raid frames (the members outside your own party).
+- **Chat:** `/ra`, in its own colour.
+- **One layer:** a raid group lives on one layer, as its parties do. Invitations only reach
+  players on it.
+- **Protocol:**
+  - client → server: `raid { act: form|invite|accept|decline|leave|kick|promote|disband, name }`
+  - server → client: `raid { raid: { id, leader, units: [{ key, leader, members }] } | null }`,
+    `rinvite { from, size }` and `rp [[charId, x, z, hp, alive]]`
 
 ## Known limits
 

@@ -66,6 +66,7 @@ export class BossScript {
     this.shieldFail = null;
     this.tellT = 0;
     this.nextHaz = 1;
+    this.nextMark = 1;
   }
 
   get phaseDef() { return this.def.phases[Math.max(0, this.phase)]; }
@@ -171,6 +172,7 @@ export class BossScript {
       this.next.set(id, m.first ?? between(m.every ?? [10, 14]));
     }
     for (const id of P.now ?? []) this.fire(id);
+    this.enc.changed?.();
   }
 
   enrage() {
@@ -178,6 +180,7 @@ export class BossScript {
     this.setDamage();
     this.enc.emit({ k: 'renr', id: this.boss.id, at: this.boss.position });
     this.enc.say(`${this.boss.displayName} is enraged!`, true);
+    this.enc.changed?.();
   }
 
   // Another of the encounter's bosses fell: those left fight harder.
@@ -347,11 +350,15 @@ export class BossScript {
     const b = this.boss;
     const warn = m.warn ?? 1.5;
     const need = m.soak ? amount(m.soak.need, Math.max(1, this.enc.players().length)) : undefined;
-    this.enc.emit({ k: 'rt', id: b.id, s: packShape(s), t: warn, el: m.el, f: follow?.id, n: need, nm: m.name, at: { x: s.p[0], z: s.p[2] } });
-    this.after(warn, () => this.land(m, s, follow, need));
+    const mk = this.markId();
+    this.enc.emit({ k: 'rt', id: b.id, mk, s: packShape(s), t: warn, el: m.el, f: follow?.id, n: need, nm: m.name, at: { x: s.p[0], z: s.p[2] } });
+    this.after(warn, () => this.land(m, s, follow, need, mk));
   }
 
-  land(m, s, follow, need) {
+  // Each mark's id, so the screens can match its landing to it.
+  markId() { return `${this.boss.id}.${this.nextMark++}`; }
+
+  land(m, s, follow, need, mk) {
     if (!this.boss.alive) return;
     if (follow?.alive) s.p = this.pos(follow.position.x, follow.position.z);
     const unit = this.unit * this.mult;
@@ -362,7 +369,7 @@ export class BossScript {
       if (inside >= need) dmg *= need / inside;
       else fail = true;
     }
-    this.enc.emit({ k: 'rb', id: this.boss.id, s: packShape(s), dmg: Math.round(dmg), kb: m.kb ?? 6, el: m.el, at: { x: s.p[0], z: s.p[2] } });
+    this.enc.emit({ k: 'rb', id: this.boss.id, mk, s: packShape(s), dmg: Math.round(dmg), kb: m.kb ?? 6, el: m.el, at: { x: s.p[0], z: s.p[2] } });
     if (fail) {
       const A = this.enc.arena;
       const all = { sh: 'circle', p: this.pos(A.cx, A.cz), r: 120 };
@@ -383,7 +390,7 @@ export class BossScript {
     for (const at of this.placements(m)) {
       const s = this.shapeAt(m.shape, at);
       const warn = m.warn ?? 1.2;
-      this.enc.emit({ k: 'rt', id: this.boss.id, s: packShape(s), t: warn, el: m.el, nm: m.name, at: { x: s.p[0], z: s.p[2] } });
+      this.enc.emit({ k: 'rt', id: this.boss.id, mk: this.markId(), s: packShape(s), t: warn, el: m.el, nm: m.name, at: { x: s.p[0], z: s.p[2] } });
       this.after(warn, () => { if (this.boss.alive) this.pool(s, m.life ?? 20, this.unit * this.mult * (m.dps ?? 0.25), m.el); });
     }
   }
@@ -401,7 +408,7 @@ export class BossScript {
     b.startAttack(a, t);
     this.lock = { attack: a, a: angle };
     const s = { sh: 'line', p: this.pos(b.position.x, b.position.z), r: a.speed * a.active + b.radius, a: angle, w: m.w ?? b.radius * 2 + 1 };
-    this.enc.emit({ k: 'rt', id: b.id, s: packShape(s), t: a.windup, el: m.el, nm: m.name, at: { x: s.p[0], z: s.p[2] } });
+    this.enc.emit({ k: 'rt', id: b.id, mk: this.markId(), s: packShape(s), t: a.windup, el: m.el, nm: m.name, at: { x: s.p[0], z: s.p[2] } });
   }
 
   spawnAdds(id, m) {
@@ -454,6 +461,7 @@ export class BossScript {
       this.immune = true;
       b.immune = true;
       this.enc.emit({ k: 'shield', id: b.id, at: b.position, up: 1 });
+      this.enc.changed?.();
     }
   }
 
@@ -462,7 +470,7 @@ export class BossScript {
     const b = this.boss;
     for (const a of this.adds) {
       const m = this.def.mechanics[a.m];
-      if (!m.hatch || !a.e.alive || a.hatched || this.t - a.at < m.hatch.after) continue;
+      if (!m?.hatch || !a.e.alive || a.hatched || this.t - a.at < m.hatch.after) continue;
       // Left too long: it bursts open.
       a.hatched = true;
       const at = a.e.position.clone();
@@ -531,11 +539,12 @@ export class BossScript {
         const len = Math.hypot(B.x - A.x, B.z - A.z);
         if (len < 2) continue;
         const s = { sh: 'line', p: this.pos(A.x, A.z), r: len, a: Math.atan2(B.x - A.x, B.z - A.z), w: m.w ?? 2.4 };
-        this.enc.emit({ k: 'rt', id: this.boss.id, s: packShape(s), t: m.warn ?? 2, el: m.el, nm: m.name, at: { x: s.p[0], z: s.p[2] } });
+        const mk = this.markId();
+        this.enc.emit({ k: 'rt', id: this.boss.id, mk, s: packShape(s), t: m.warn ?? 2, el: m.el, nm: m.name, at: { x: s.p[0], z: s.p[2] } });
         this.after(m.warn ?? 2, () => {
           if (!this.boss.alive) return;
           const unit = this.unit * this.mult;
-          this.enc.emit({ k: 'rb', id: this.boss.id, s: packShape(s), dmg: Math.round(unit * (m.dmg ?? 1)), kb: 8, el: m.el, at: { x: s.p[0], z: s.p[2] } });
+          this.enc.emit({ k: 'rb', id: this.boss.id, mk, s: packShape(s), dmg: Math.round(unit * (m.dmg ?? 1)), kb: 8, el: m.el, at: { x: s.p[0], z: s.p[2] } });
           this.pool(s, m.life ?? 8, unit * (m.dps ?? 0.3), m.el);
         });
       }

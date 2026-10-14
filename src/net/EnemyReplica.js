@@ -93,7 +93,10 @@ export class EnemyReplica {
     this.foe = s[15] >= 0 ? s[15] : null;
     this.attackSeq = s[16];
     this.maxHp = s[17] ?? this.maxHp;
-    if (this.shieldMax) this.shield = s[18] ?? 0;
+    // A shield comes with the state while there is one (an affix's, or a raid boss's own).
+    if (s[18] !== undefined) { this.shield = s[18]; this.shieldMax = Math.max(this.shieldMax, s[18]); }
+    else if (this.shieldMax) this.shield = 0;
+    this.immune = !!(fl & FLAG.immune);
     this.rallied = !!(fl & FLAG.rallied);
     this.alive = !!(fl & FLAG.alive);
     this.engaged = !!(fl & FLAG.engaged);

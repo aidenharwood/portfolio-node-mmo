@@ -121,9 +121,10 @@ export class RaidGroups {
   accept(s) {
     const key = this.unitOf(s);
     const inv = this.invites.get(key);
+    // (Only the party's leader answers for it: anyone else leaves the invitation standing.)
+    if (inv && !this.isLeaderOfUnit(s)) return this.tell(s, 'Only your party\'s leader can answer for it.');
     this.invites.delete(key);
     if (!inv || Date.now() - inv.at > INVITE_TTL) return this.tell(s, 'No raid invitation to accept.');
-    if (!this.isLeaderOfUnit(s)) return this.tell(s, 'Only your party\'s leader can answer for it.');
     const g = this.groups.get(inv.group);
     if (!g) return this.tell(s, 'That raid group is gone.');
     if (this.of.has(key)) return this.tell(s, "You're already in a raid group.");
@@ -136,8 +137,8 @@ export class RaidGroups {
   decline(s) {
     const key = this.unitOf(s);
     const inv = this.invites.get(key);
+    if (!inv || !this.isLeaderOfUnit(s)) return;
     this.invites.delete(key);
-    if (!inv) return;
     const g = this.groups.get(inv.group);
     const lead = g && this.parties.sessionOf(g.leader);
     if (lead) this.tell(lead, `${s.name} declined the raid invitation.`);

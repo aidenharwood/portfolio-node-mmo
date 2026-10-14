@@ -258,7 +258,8 @@ export class HUD {
   }
 
   renderBoss(game) {
-    const boss = game.enemies.find((en) => en.type.boss && en.alive && en.engaged);
+    // (A raid's encounter has bars of its own: ui/RaidUI.js.)
+    const boss = !game.raidUI?.active && game.enemies.find((en) => en.type.boss && en.alive && en.engaged);
     this.el.boss.style.display = boss ? '' : 'none';
     if (!boss) return;
     this.el.bossName.textContent = `${boss.displayName} · Lv ${boss.level}`;

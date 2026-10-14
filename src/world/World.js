@@ -18,7 +18,8 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { instancedToon, toonMaterial, disposeObject, noInk } from '../render/Toon.js';
-import { piece, bakeTree, G, shade } from '../render/ModelKit.js';
+import { piece, bakeTree, flatten, G, shade } from '../render/ModelKit.js';
+import { building, bodyCols } from './build/kit.js';
 import { mulberry32 } from '../core/rng.js';
 import { WorldGen, REGION, WATER_LEVEL, HUB } from './Gen.js';
 import { Chunk, CHUNK, RES0 } from './Chunks.js';
@@ -1076,8 +1077,10 @@ export class World {
     return g;
   }
 
+  // Bakes a place (its pieces drawn with procedural surfaces by their colours, render/Surfaces.js)
+  // and adds it to the world.
   finish(g) {
-    bakeTree(g);
+    bakeTree(g, { surfaces: true });
     (this.own?.group ?? this.root).add(g);
     return g;
   }
@@ -1207,18 +1210,11 @@ export class World {
       this.addCollider(x, z, r * 0.92, r * 0.9);
       return;
     }
-    // Scrap shack: mismatched plates, slanted roof, glowing junk window, smoking pipe.
-    const w = r * 1.5;
-    const d = r * 1.3;
-    const plates = [C.rust, C.metalDark, 0xb08a3e, C.rust];
-    piece(g, G.box(w, 1.8, d), C.metalDark, { pos: [0, 0.9, 0] });
-    plates.forEach((col, i) => piece(g, G.box(w * 0.48, 0.8, 0.04), col, { pos: [(i % 2 ? 0.25 : -0.25) * w, 0.5 + Math.floor(i / 2) * 0.8, d / 2 + 0.02], rot: [0, 0, (i - 1.5) * 0.04], outline: 0.012 }));
-    piece(g, G.box(w * 1.15, 0.08, d * 1.25), C.rust, { pos: [0, 1.95, 0], rot: [0.18, 0, 0], outline: 0.02 });
-    piece(g, G.box(0.6, 1.1, 0.06), 0x1a1a1e, { pos: [-w * 0.2, 0.55, d / 2 + 0.05], outline: 0 });
-    piece(g, G.box(0.35, 0.25, 0.05), FORGE, { pos: [w * 0.27, 1.2, d / 2 + 0.05], glow: true, outline: 0.006 });
-    piece(g, G.cyl(0.09, 0.09, 1.0, 8), C.metal, { pos: [w * 0.35, 2.3, -d * 0.2], outline: 0.01 });
+    // Scrap shack (world/build/kit.js, the Scav style): mismatched plates welded over a frame, a
+    // sheet roof with spikes along it, forge-lit slits, a tarp for a door, a smoking pipe.
+    const cols = building(g, { wd: r * 1.6, dp: r * 1.35, ht: 2.1, wall: C.metalDark, roof: C.rust, trim: C.rust, style: 'scav', simple: true, chimney: true, doorX: -r * 0.3, doorW: 0.8, doorH: 1.7 });
     this.finish(g);
-    this.addCollider(x, z, Math.max(w, d) * 0.62, 1.9);
+    bodyCols(this, x, z, rot, cols);
   }
 
   crate(x, z, rot = 0, s = 1, y = null) {
@@ -1501,6 +1497,15 @@ export class World {
           piece(g, G.box(sx, h + 2, sz), i % 2 ? look.wall : shade(look.wall, 0.9), { pos: [px, h / 2 - 1, pz], outline: 0.05 });
           piece(g, G.box(horizontal ? seg * 0.7 : 1.65, 0.12, horizontal ? 1.65 : seg * 0.7), look.glow, { pos: [px, h * 0.55, pz], glow: true, outline: 0 });
           if (!broken) piece(g, G.box(sx + 0.1, 0.25, sz + 0.1), look.cap, { pos: [px, h + 0.12, pz], outline: 0.03 });
+          if (camp.race === 'scav' && !broken) {
+            // Spikes along the top, and a scrap plate welded over the face.
+            for (let k = -1; k <= 1; k++) piece(g, G.cone(0.1, 0.7, 4), C.metal, { pos: [px + (horizontal ? k * 0.9 : 0), h + 0.55, pz + (horizontal ? 0 : k * 0.9)], outline: 0.006 });
+            const out = (horizontal ? Math.sign(pz) : Math.sign(px)) * 0.82;
+            piece(g, G.box(horizontal ? 1.2 : 0.04, 1.1, horizontal ? 0.04 : 1.2), i % 3 ? C.rust : 0xb08a3e, { pos: [px + (horizontal ? 0.4 : out), h * 0.3, pz + (horizontal ? out : 0.4)], rot: [0, 0, 0.05], outline: 0.006 });
+          } else if (camp.race === 'synth') {
+            // A pilaster of white panel between the light bands.
+            piece(g, G.box(horizontal ? 0.5 : 1.7, h + 0.4, horizontal ? 1.7 : 0.5), C.hab, { pos: [px + (horizontal ? seg / 2 : 0), h / 2, pz + (horizontal ? 0 : seg / 2)], outline: 0.02, pattern: 'panels' });
+          }
         }
         for (let k = -1; k <= 1; k++) {
           const o = (k * seg) / 3;
@@ -1513,11 +1518,39 @@ export class World {
       if (look.spires) {
         piece(g, G.cone(2.4, 6, 7), look.cap, { pos: [cx, 2, cz], outline: 0.06 });
         piece(g, G.cone(1.3, 6.5, 6), C.chitin, { pos: [cx, 6.5, cz], rot: [0.15 * Math.sign(cz), 0, -0.15 * Math.sign(cx)], outline: 0.05 });
+      } else if (camp.race === 'scav') {
+        // A watchtower: a plated hut on rusted stilts, braced, a ladder up one leg.
+        for (const [ox, oz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+          piece(g, G.box(0.32, 4.6, 0.32), C.rust, { pos: [cx + ox * 1.25, 2.1, cz + oz * 1.25], outline: 0.02 });
+        }
+        for (const s of [-1, 1]) {
+          piece(g, G.box(0.14, 3.6, 0.14), C.metalDark, { pos: [cx, 2.2, cz + s * 1.25], rot: [0, 0, s * 0.62], outline: 0.008 });
+          piece(g, G.box(0.14, 3.6, 0.14), C.metalDark, { pos: [cx + s * 1.25, 2.2, cz], rot: [s * 0.62, 0, 0], outline: 0.008 });
+        }
+        for (let k = 0; k < 7; k++) piece(g, G.box(0.6, 0.06, 0.08), C.metal, { pos: [cx + 1.25, 0.5 + k * 0.6, cz + 1.55], outline: 0.004 });
+        const hut = new THREE.Group();
+        hut.position.set(cx, 4.4, cz);
+        hut.rotation.y = Math.atan2(-cx, -cz);
+        g.add(hut);
+        piece(hut, G.box(3.6, 0.25, 3.6), C.metalDark, { pos: [0, -0.1, 0], outline: 0.02 });
+        building(hut, { wd: 3.1, dp: 3.1, ht: 2.0, wall: C.metalDark, roof: C.rust, trim: C.rust, style: 'scav', simple: true, doorX: 0.6, doorW: 0.8, doorH: 1.6 });
+        piece(hut, G.box(0.5, 0.3, 0.5), FORGE, { pos: [0, 3.2, 0], glow: true, outline: 0.01 });
+      } else if (camp.race === 'synth') {
+        // A pylon: six white faces narrowing upward, light in rings, a glowing cap.
+        piece(g, G.cyl(1.9, 2.4, 7.4, 6), look.wall, { pos: [cx, 2.7, cz], outline: 0.05, pattern: 'panels' });
+        piece(g, G.cyl(2.5, 2.5, 0.5, 6), look.cap, { pos: [cx, 0.25, cz], outline: 0.02 });
+        piece(g, G.cyl(1.6, 1.95, 0.9, 6), look.cap, { pos: [cx, 6.8, cz], outline: 0.03 });
+        piece(g, G.cone(1.5, 1.4, 6), C.hab, { pos: [cx, 7.95, cz], outline: 0.03, pattern: 'panels' });
+        piece(g, G.octa(0.45), look.glow, { pos: [cx, 9.1, cz], scale: [1, 1.6, 1], glow: true, outline: 0.012 });
+        for (let k = 0; k < 6; k++) {
+          const a = (k / 6) * Math.PI * 2 + Math.PI / 6;
+          piece(g, G.box(0.1, 4.6, 0.06), look.glow, { pos: [cx + Math.sin(a) * 2.06, 3.2, cz + Math.cos(a) * 2.06], rot: [0, a, 0], glow: true, outline: 0 });
+        }
       } else {
         piece(g, G.cyl(2.2, 2.5, 8, 12), look.wall, { pos: [cx, 3, cz], outline: 0.06 });
         piece(g, G.dome(2.0, 12, 6), look.cap, { pos: [cx, 7, cz], outline: 0.05 });
       }
-      piece(g, G.torus(2.25, 0.08, Math.PI * 2, 4, 24), look.glow, { pos: [cx, look.spires ? 3.6 : 6.2, cz], rot: [Math.PI / 2, 0, 0], scale: look.spires ? 0.62 : 1, glow: true, outline: 0 });
+      if (camp.race !== 'scav') piece(g, G.torus(2.25, 0.08, Math.PI * 2, 4, 24), look.glow, { pos: [cx, look.spires ? 3.6 : 6.2, cz], rot: [Math.PI / 2, 0, 0], scale: look.spires ? 0.62 : 1, glow: true, outline: 0 });
       this.addCollider(x + cx, z + cz, 2.5, 7, y0);
     }
     // Gate frame
@@ -1539,6 +1572,7 @@ export class World {
     piece(g, G.box(0.3, 3.2, 0.05), look.glow, { pos: [0, 2.6, -half + 2.52], glow: true, outline: 0 });
     for (const s of [-1, 1]) piece(g, G.cone(0.3, 1.2, 6), C.bone, { pos: [1.4 * s, 5, -half + 2.1], outline: 0.02 });
     this.addCollider(x, z - half + 2.6, 1.8, 2, y0);
+    flatten(g);
     this.finish(g);
   }
 

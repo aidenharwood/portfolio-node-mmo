@@ -480,6 +480,63 @@ server. Where it differs from the plan below:
 
 ## 9. Phase 7 — Raids
 
+**Status: built** (2026-10-14). `npm test` adds `tools/raidcheck.mjs`: the telegraph shapes, every
+boss script checked against its bestiary entry, the Brood Mother's layout across many copies, raid
+groups as the server runs them, then a raid copy played headlessly through the instance manager,
+the world sim and the characters' own rules (pulls, phases, adds, shields, soaks, a wipe and the
+reset, each kill, the chests and their lockouts). The smoke test forms a raid group on a real server
+and talks in raid chat. Where it differs from the plan below:
+- **Who can go:** a raid group, a party, or one player alone. Boss health follows how many are
+  in the fight (`raidHealth`: ×48 a solo boss for twelve, ×2.2 for one, since the plan asked for
+  60–90 s solo bosses and a raid boss lasting about four times that), and so do the mechanics that
+  count players (one acid spit per four of you, soaks needing a third of the raid) *(default)*.
+- **Raid groups** (`server/raidgroups.js`): up to four parties (a lone player counts as a party of
+  one), twelve players. Formed with `/raid form` or at a city's war table; the raid leader invites a
+  party by naming any of its members and its leader answers; `/ra` is raid chat; raid frames show
+  the members outside your party. A group lives on one layer, as parties do.
+- **Getting in:** through the raid gate in a city's gate yard (the gate is no longer sealed), from
+  level 14. When Act II arrives in phase 8 the story will open the gate instead.
+- **The copy:** the dungeon generator lays it out from a route of its own: entrance hall, then
+  three halls of trash (5–8 a hall, with elites) and three arenas (36–44 m). Each arena's gate
+  shuts behind the raid when its boss is pulled. If everyone is down or out of the arena for three
+  seconds it's a wipe: the boss resets, its adds and pools go, and the gate opens. A kill opens the
+  gate and the seal onward. After a fall you come back in the last arena you've beaten.
+- **The framework** (`sim/BossScript.js`, data in `combat/bosses.js`): the usual AI still moves the
+  boss and picks its attacks, limited to each phase's list, while the script runs mechanics on their
+  own timers.
+  - *Mechanic kinds:* marked shapes that land (circle, ring, cone, line, cross; on the boss, on
+    players, following one, or scattered round the arena; repeating), pools left burning, soaks,
+    a charge down a marked line, adds (spawning from the walls, round the boss or at set points;
+    eggs that hatch if left), a shield that bursts if it isn't broken in time, immunity while
+    "weak point" adds live, seams strung between bosses, a move to the arena's centre or back, and
+    a heal.
+  - *Enrage:* three times the damage, with mechanics half again as often.
+  - *Damage* is checked on each screen, as for enemy shots (`fx/Telegraphs.js`); the sim counts
+    who stood in a soak.
+- **The Brood Mother** (level 16; Normal, Veteran, Elite):
+  - *The Brood Warden.* Its guard blocks frontal hits. A Carapace Sweep (cone), Acid Spit (one
+    per four players, leaving pools) and a Brood Rush at whoever is furthest. At 70% and 35% the
+    brood pours out of the walls; at 35% its carapace hardens and bursts over the arena unless the
+    raid breaks it within 14 seconds. Enrages at 7 minutes.
+  - *The Psion Choir.* Vael's Dirge (a ring: stand close or well clear), Kzhar's Shriek (lines at
+    a third of the raid), Ixa's Lullaby (a soak that follows someone, needs a third of the raid,
+    or everyone takes the blast), and Resonance seams between the three. When one falls the
+    others hit 30% harder. Enrages at 7½ minutes.
+  - *The Brood Mother.* Egg clutches hatch after 14 seconds, plus Acid Rain. At 70% she withdraws
+    behind three Brood Hearts and can't be hurt until they're torn out, while the nest convulses
+    every 14 seconds. At 40% she frenzies: Spore Rain, Devour (a charge down a marked line at
+    whoever is furthest) and a Gravid Burst soak. Enrages at 9 minutes.
+- **Rewards:** each arena has its own chest, once a week per encounter per tier (the week turns at
+  00:00 UTC on Monday). Its items are rare or better, epic or better from the last chest. The
+  **Broodbane** set is heavy, legendary, and only comes from these chests: always from the last,
+  35% (plus 10% per tier) from the others. Private runs' tiers now add their extra affixes to elites
+  (dungeons too, as 3.3 planned).
+- **New enemies:** the Brood Warden, the Choir's three psions, the Brood Mother, Brood Clutches and
+  Brood Hearts (new models: `models/Brood.js`), all in the codex.
+- **Achievements:** seven, under a new Raids category: Through the Gate, Silence, Matricide
+  (*the Matricide*), Into the Deep Nest, The Brood Ends (*Queenslayer*), Untouched (a boss down
+  with nobody falling) and Broodbane (*Broodbane*). Outfitter now counts only the seven makers' sets.
+
 - **Raid groups:** two to four parties linked, so 8–16 players *(default 12)*. Formed at a city raid board, or by inviting party leaders.
 - **Boss scripting framework:**
   - phases at health thresholds;
@@ -498,6 +555,25 @@ server. Where it differs from the plan below:
 ---
 
 ## 10. Phase 8 — Story Acts II–IV and the endgame loop
+
+**Status: not started.** It depends on phase 6, which hasn't been built: Act II's Hive surges on
+settlements and the endgame's rotating event schedule both need the event director. Proposed order:
+1. **Phase 6 first**, so Act II's surges are public events rather than one-off quest waves.
+2. **8a: Act II, *The Brood*** (levels 8–16). Farcall as its hub, the Farcall Array as a new story
+   place, the Brood Pits story (the dungeon already exists), about 12 quests and Ysolde's
+   confession. It ends at the Brood Mother's raid gate: the story then opens the gate, replacing
+   phase 7's level-14 gate.
+3. **8b: Act III, *Iron Heart*** (16–24). Ironreach, the Synth war-walkers as events, a new
+   dungeon (the Foundry Below), the Fallen Titan and the Colossus foundry.
+4. **8c: Act IV, *The Tether*** (24–30). Anchorage, the Ring and the Tether, the second raid (*The
+   Tether Crown*, on the same boss framework) and the ending choice.
+5. **8d: the endgame.**
+   - A Nightmare tier for dungeons and raids at the level cap: ×4 health, ×2.2 damage, +3
+     affixes, legendary floor for bosses (3.3).
+   - The rotating event schedule.
+   - More legendary sets.
+   - Achievements and titles for all of it.
+
 - **Story:**
   - Acts II–IV with their cities, about 12 story quests each, side quests, and two more dungeons;
   - the second raid;

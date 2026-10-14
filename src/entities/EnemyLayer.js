@@ -89,7 +89,7 @@ export class EnemyLayer {
       world: g.world, sim: this.sim,
       send: (id, msg) => g.dungeonView.onState(msg),
       positionOf: () => g.player.position,
-      cleared: (run) => g.onDungeonCleared(run),
+      cleared: (run, enc) => g.onDungeonCleared(run, enc),
     });
     // Hitstop holds the enemies in the exchange (the sim runs them at a crawl for the beat).
     this.sim.slow = (e) => {
@@ -326,6 +326,24 @@ export class EnemyLayer {
         break;
       case 'poof':
         if (v) g.effects.spawnPuff(v.position, { size: 1.4, life: 0.6, color: 0x3a3440 });
+        break;
+      // A raid boss's script (sim/BossScript.js): marks on the floor, their landing, pools left
+      // burning (fx/Telegraphs.js) — and its phases, its rage, and hits it shrugged off.
+      case 'rt': case 'rb': case 'hz': case 'hzx':
+        g.telegraphs?.onEvent(ev, v);
+        break;
+      case 'rph':
+        if (v) { g.effects.spawnRing(v.position, v.radius * 4, RACE_GLOW[v.type.race] ?? 0xffffff); g.audio.roar?.(v.position, v.type.mass); }
+        break;
+      case 'renr':
+        if (v) { g.effects.spawnRing(v.position, v.radius * 5, 0xff2a1a); g.audio.roar?.(v.position, v.type.mass * 1.5); g.rig.addShake(0.5); }
+        break;
+      case 'rimm':
+        if (v) {
+          _p.copy(v.position).setY(v.position.y + v.height * 0.6);
+          g.effects.spawnSparks(_p, 0x9fe8ff, 10);
+          g.effects.damageNumber(_p, 'Immune', '', '#9fe8ff');
+        }
         break;
       case 'die':
         if (v) {

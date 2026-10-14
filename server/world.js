@@ -6,6 +6,10 @@
 import { World } from '../src/world/World.js';
 import { Chunk, CHUNK } from '../src/world/Chunks.js';
 import { inPocket } from '../src/world/dungeons.js';
+import { KIT } from '../src/world/build/kit.js';
+
+// The building kit only plans here: colliders, no pieces (world/build/kit.js).
+KIT.draw = false;
 
 const CHUNK_LOAD = 150;    // scenery colliders within this of any player
 const CHUNK_UNLOAD = 200;
@@ -30,6 +34,11 @@ export class HeadlessWorld extends World {
   buildWater() { this.water = { position: { set() {} } }; }
   buildScenerySets() { this.sets = {}; }
   packScenery() { this.sceneryDirty = false; }
+  // A place's pieces aren't merged into meshes here (only its colliders matter to the server).
+  finish(g) {
+    (this.own?.group ?? this.root).add(g);
+    return g;
+  }
 
   // Heights straight from the generator, on the same triangles the clients' terrain uses (in a
   // pocket, a dungeon's floors).

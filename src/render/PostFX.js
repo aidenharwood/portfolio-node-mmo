@@ -22,6 +22,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { Pass, FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 import { GLOW, INK, INK_MARK } from './Toon.js';
+import { SURFACES } from './Surfaces.js';
 
 const BLOOM = { strength: 0.22, radius: 0.15, threshold: 1.0 };
 const GLOW_LIFT = 1.5;      // how far past white glowing things go (when bloom is on)
@@ -331,6 +332,7 @@ export class PostFX {
     this.ink.ink = q.ink && outlines;
     this.ink.ao = q.ao;
     GLOW.value = q.bloom ? GLOW_LIFT : 1;
+    SURFACES.value = q.surfaces ? 1 : 0;
   }
 
   resize() {

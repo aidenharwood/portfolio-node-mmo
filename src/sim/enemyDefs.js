@@ -84,4 +84,5 @@ export function sweepReaches(pos, facing, height, arc, range, t) {
 // State and flag codes for the network (and anything else that wants them compact).
 export const STATES = ['spawn', 'idle', 'chase', 'windup', 'attack', 'recover', 'stagger', 'return', 'dead'];
 export const STATE_CODE = Object.fromEntries(STATES.map((s, i) => [s, i]));
-export const FLAG = { engaged: 1, hidden: 2, guarding: 4, ward: 8, frenzy: 16, burn: 32, chill: 64, corrode: 128, shocked: 256, alive: 512, rallied: 1024 };
+// (immune: a raid boss its adds are shielding — sim/BossScript.js.)
+export const FLAG = { engaged: 1, hidden: 2, guarding: 4, ward: 8, frenzy: 16, burn: 32, chill: 64, corrode: 128, shocked: 256, alive: 512, rallied: 1024, immune: 2048 };

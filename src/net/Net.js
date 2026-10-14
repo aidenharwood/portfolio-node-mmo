@@ -183,6 +183,9 @@ export class Net {
       case 'party': g.partyUI.set(msg.party); break;
       case 'invite': g.partyUI.invited(msg); break;
       case 'pp': g.partyUI.positions(msg.pp); break;
+      case 'raid': g.raidUI.set(msg.raid); break;
+      case 'rinvite': g.raidUI.invited(msg); break;
+      case 'rp': g.raidUI.positions(msg.rp); break;
       case 'tradeReq': g.tradeUI.requested(msg.from); break;
       case 'trade': g.tradeUI.set(msg.state, msg.reason); break;
       case 'social': g.socialUI.set(msg); break;

@@ -6,8 +6,13 @@
 // state as it changes (the key found, power restored, doors opening, the bosses down), the things to
 // use, the lift, the traps (each screen's own danger, like an enemy's shot: vents that burst, turrets
 // that track you, spore pods), and the rooms seen so far for the minimap and the map.
+// A raid's copy (world/raids.js, gameplay phase 7) is one of these too: its arenas' gates shut while
+// their fights go on and open again after, each arena's chest is there once its encounter falls
+// (once a week per tier), and the copy's state carries its encounters' fights for the HUD
+// (ui/RaidUI.js).
 import * as THREE from 'three';
-import { DUNGEONS, THEMES, LIFT_SPEED, lockDay, lockKey } from './dungeons.js';
+import { THEMES, LIFT_SPEED, lockDay, lockKey } from './dungeons.js';
+import { instanceDef, raidLockKey, lockWeek } from './raids.js';
 import { generateDungeon } from './DungeonGen.js';
 import { Interior } from './Interior.js';
 import { buildInterior } from './InteriorKit.js';
@@ -43,7 +48,8 @@ export class DungeonView {
   }
 
   get active() { return !!this.run; }
-  get def() { return this.run ? DUNGEONS[this.run.d] : null; }
+  get def() { return this.run ? instanceDef(this.run.d) : null; }
+  get raid() { return !!this.def?.raid; }
   get theme() { return this.run ? THEMES[this.def.theme] : null; }
 
   // ---------------------------------------------------------------- in and out
@@ -52,7 +58,7 @@ export class DungeonView {
   enter(info, at, facing = 0) {
     const g = this.game;
     if (this.run) this.teardown();
-    const def = DUNGEONS[info.d];
+    const def = instanceDef(info.d);
     if (!def) return;
     this.run = info;
     const veil = this.veil(`Entering ${def.name}…`);
@@ -61,7 +67,7 @@ export class DungeonView {
       try {
         this.build(info);
         this.arrive(at, facing);
-        g.hud.banner(def.name, info.shared ? `Open world · Level ${info.lv}` : `${TIERS[info.tier ?? 0].name} run · Level ${info.lv}`);
+        g.hud.banner(def.name, info.shared ? `Open world · Level ${info.lv}` : `${TIERS[info.tier ?? 0].name} ${def.raid ? 'raid' : 'run'} · Level ${info.lv}`);
         g.hud.setZone(def.name);
       } catch (err) {
         g.reportError(err);
@@ -72,7 +78,7 @@ export class DungeonView {
 
   build(info) {
     const g = this.game;
-    const def = DUNGEONS[info.d];
+    const def = instanceDef(info.d);
     const origin = { x: info.o[0], y: info.o[1], z: info.o[2] };
     // Offline the local instance manager has built it already; online this screen builds its own.
     let it = g.world.interiors.get(info.id);
@@ -151,6 +157,7 @@ export class DungeonView {
     this.mesh = null;
     this.interior = null;
     this.run = null;
+    g.telegraphs?.clear();
     this.indoors(false);
   }
 
@@ -232,14 +239,19 @@ export class DungeonView {
       return;
     }
     this.apply(msg.st, false);
-    if (msg.say) this.game.hud.toast(msg.say);
+    // (A raid's bigger moments — a pull, a phase, a boss down — as banners.)
+    if (msg.say && msg.big) {
+      const [title, ...rest] = msg.say.split(/ — |\. /);
+      this.game.hud.banner(title, rest.join('. '));
+      this.game.chat?.add({ ch: 'raid', text: msg.say });
+    } else if (msg.say) this.game.hud.toast(msg.say);
   }
 
   apply(st, instant) {
     if (!st) return;
     const it = this.interior;
     const before = this.state;
-    this.state = { open: st.open ?? [], key: !!st.key, nodes: st.nodes ?? [], mini: !!st.mini, boss: !!st.boss, cleared: st.cleared ?? [], lift: st.lift ?? null };
+    this.state = { open: st.open ?? [], key: !!st.key, nodes: st.nodes ?? [], mini: !!st.mini, boss: !!st.boss, cleared: st.cleared ?? [], lift: st.lift ?? null, raid: st.raid ?? null };
     // This screen's own copy of the lift (online) settles where the keeper says it rests.
     const L = this.state.lift;
     if (L && this.owned && it.lift && L.y === L.to && Math.abs(it.lift.y - L.y) > 0.05) it.setLift(L.y);
@@ -247,6 +259,13 @@ export class DungeonView {
       it.setDoor(id, true);
       const m = this.mesh?.doors.get(id);
       if (m && !m.open) { m.open = true; if (instant) m.t = 1; }
+    }
+    // A raid arena's gate shuts behind a fight (and opens after it).
+    for (const d of it.layout.doors) {
+      if (d.kind === 'open' || this.state.open.includes(d.id)) continue;
+      if (it.isOpen(d.id)) it.setDoor(d.id, false);
+      const m = this.mesh?.doors.get(d.id);
+      if (m?.open) { m.open = false; if (instant) m.t = 0; }
     }
     if (!instant && this.state.boss && !before.boss) this.game.audio.rune?.(this.game.player.position, 0.8);
   }
@@ -256,9 +275,18 @@ export class DungeonView {
     this.looted.add(id);
   }
 
-  lockedOut() {
+  // Has this character opened this chest's reward this period? (A raid's are weekly, each arena's
+  // its own.)
+  lockedOut(t = null) {
     const r = this.run;
-    return !r || r.shared ? true : this.game.settings.lockouts?.[lockKey(r.d, r.tier ?? 0)] === lockDay();
+    if (!r || r.shared) return true;
+    if (this.raid && t?.enc !== undefined) return this.game.settings.lockouts?.[raidLockKey(r.d, this.def.encounters[t.enc].id, r.tier ?? 0)] === lockWeek();
+    return this.game.settings.lockouts?.[lockKey(r.d, r.tier ?? 0)] === lockDay();
+  }
+  // Is the boss guarding a reward chest down? (A raid's: that arena's encounter.)
+  rewardReady(t) {
+    if (this.raid && t.enc !== undefined) return this.state.raid?.find((e) => e.i === t.enc)?.st === 'down';
+    return this.state.boss;
   }
 
   // ---------------------------------------------------------------- things to use
@@ -270,7 +298,7 @@ export class DungeonView {
     for (const t of L.things) {
       if ((t.kind === 'key' && s.key) || (t.kind === 'node' && s.nodes.includes(t.id))) continue;
       if (t.kind === 'exit' && !s.boss) continue;
-      if (t.kind === 'reward' && (this.run.shared || !s.boss || this.looted.has(t.id) || this.lockedOut())) continue;
+      if (t.kind === 'reward' && (this.run.shared || !this.rewardReady(t) || this.looted.has(t.id) || this.lockedOut(t))) continue;
       if (t.kind === 'chest' && this.looted.has(t.id)) continue;
       out.push({ kind: 'dthing', id: t.id, t, name: t.kind, position: this.points.get(t.id) });
     }
@@ -300,7 +328,11 @@ export class DungeonView {
       const d = it.door;
       if (d.kind === 'locked') return s.key ? 'Unlock the door' : `Locked — the ${T.key} is somewhere down here`;
       if (d.kind === 'power') return `Sealed — power ${s.nodes.length} / ${d.needs}: switch the power nodes on`;
-      return `Sealed — ${this.def.mini.name} holds the way on`;
+      // A raid's: the gate shut while the fight in the arena goes on; the seal till it's won.
+      const enc = this.raid ? this.def.encounters[this.interior.layout.rooms[d.room]?.enc] : null;
+      if (d.kind === 'gate') return `Sealed — the fight with ${enc?.name ?? 'the boss'} is on`;
+      if (enc) return `Sealed — ${enc.name} holds the way on`;
+      return `Sealed — ${this.def.mini?.name ?? 'the guardian'} holds the way on`;
     }
     switch (it.t.kind) {
       case 'portal': return `Leave ${this.def.name}`;
@@ -308,7 +340,9 @@ export class DungeonView {
       case 'key': return `Take the ${T.key}`;
       case 'node': return 'Switch the power node on';
       case 'chest': return 'Open the chest';
-      case 'reward': return `Open the reward chest (${TIERS[this.run.tier ?? 0].name})`;
+      case 'reward': return this.raid && it.t.enc !== undefined
+        ? `Open ${this.def.encounters[it.t.enc].name}'s chest (${TIERS[this.run.tier ?? 0].name} · once a week)`
+        : `Open the reward chest (${TIERS[this.run.tier ?? 0].name})`;
       default: return 'Use';
     }
   }
@@ -343,10 +377,10 @@ export class DungeonView {
     const p = g.player.position;
     // The light over us.
     g.world.hubLight.position.set(p.x, p.y + 3.4, p.z);
-    // Doors slide open into the walls.
+    // Doors slide open into the walls (a raid arena's gate slides shut again).
     for (const m of this.mesh.doors.values()) {
-      if (!m.open || m.t >= 1) continue;
-      m.t = Math.min(1, m.t + dt / 0.9);
+      if (m.open ? m.t >= 1 : m.t <= 0) continue;
+      m.t = m.open ? Math.min(1, m.t + dt / 0.9) : Math.max(0, m.t - dt / 0.5);
       const k = m.t * m.t * (3 - 2 * m.t);
       for (const h of m.halves) h.g.position.x = h.s * (m.span / 4 + k * (m.span / 2 - 0.1));
       m.sign.visible = m.t < 0.5;
@@ -364,7 +398,7 @@ export class DungeonView {
       if (kind === 'key') { m.parts.off.visible = !this.state.key; if (m.parts.spin) m.parts.spin.position.y = 1.75 + Math.sin(time * 2) * 0.12; }
       if (kind === 'node') { const on = this.state.nodes.includes(id); m.parts.on.visible = on; m.parts.off.visible = !on; }
       if (kind === 'exit') m.group.visible = this.state.boss;
-      if (kind === 'reward') { m.group.visible = !this.run.shared; m.parts.on.visible = this.state.boss && !this.looted.has(id) && !this.lockedOut(); }
+      if (kind === 'reward') { m.group.visible = !this.run.shared; m.parts.on.visible = this.rewardReady(m.t) && !this.looted.has(id) && !this.lockedOut(m.t); }
       if ((kind === 'chest' || kind === 'reward') && m.parts.lid) m.parts.lid.rotation.x += ((this.looted.has(id) ? -1.4 : 0) - m.parts.lid.rotation.x) * Math.min(1, dt * 6);
     }
     this.updateLift(dt);
@@ -505,6 +539,12 @@ export class DungeonView {
     if (locked && s.key) return at(locked.axis === 'x' ? locked.line : (locked.s0 + locked.s1) / 2, locked.axis === 'x' ? (locked.s0 + locked.s1) / 2 : locked.line);
     const power = L.doors.find((d) => d.kind === 'power' && !s.open.includes(d.id));
     if (power) { const n = nearest(L.things.filter((t) => t.kind === 'node' && !s.nodes.includes(t.id))); if (n) return at(n.x, n.z); }
+    // A raid: the next arena whose encounter stands.
+    if (this.raid && !s.boss) {
+      const next = (L.arenas ?? []).find((A) => s.raid?.find((e) => e.i === A.enc)?.st !== 'down');
+      const r = next && L.rooms[next.room];
+      if (r) return at((r.x + r.w / 2) * L.cell, (r.z + r.h / 2) * L.cell, Math.min(r.w, r.h) * L.cell * 0.4);
+    }
     if (!s.boss) {
       const r = L.rooms[s.mini ? L.boss : L.mini];
       return at((r.x + r.w / 2) * L.cell, (r.z + r.h / 2) * L.cell, Math.min(r.w, r.h) * L.cell * 0.4);
@@ -526,7 +566,7 @@ export class DungeonView {
     areas.forEach((a, k) => {
       if (!this.seen.has(k)) return;
       const here = k < nR && this.state.cleared.includes(k);
-      ctx.fillStyle = k < nR ? (a.kind === 'boss' ? 'rgba(200,70,60,0.55)' : here ? 'rgba(120,130,150,0.5)' : 'rgba(150,170,200,0.55)') : 'rgba(130,150,180,0.45)';
+      ctx.fillStyle = k < nR ? ((a.kind === 'boss' || a.kind === 'arena') && !here ? 'rgba(200,70,60,0.55)' : here ? 'rgba(120,130,150,0.5)' : 'rgba(150,170,200,0.55)') : 'rgba(130,150,180,0.45)';
       ctx.fillRect(it.x0 + a.x * c, it.z0 + a.z * c, a.w * c, a.h * c);
       ctx.strokeStyle = 'rgba(220,235,255,0.8)';
       ctx.strokeRect(it.x0 + a.x * c, it.z0 + a.z * c, a.w * c, a.h * c);
@@ -542,7 +582,7 @@ export class DungeonView {
     }
     for (const t of L.things) {
       if (!this.seen.has(t.room)) continue;
-      if ((t.kind === 'key' && this.state.key) || (t.kind === 'exit' && !this.state.boss) || (t.kind === 'reward' && (this.run.shared || !this.state.boss))) continue;
+      if ((t.kind === 'key' && this.state.key) || (t.kind === 'exit' && !this.state.boss) || (t.kind === 'reward' && (this.run.shared || !this.rewardReady(t)))) continue;
       const color = { portal: '#5ee6ff', exit: '#5ee6ff', key: '#ffb030', node: this.state.nodes.includes(t.id) ? '#5ee6ff' : '#ff5a5a', chest: this.looted.has(t.id) ? '#777' : '#f0c674', reward: '#f0c674' }[t.kind];
       ctx.fillStyle = color;
       ctx.beginPath();

@@ -235,6 +235,7 @@ export class Enemy extends Character {
     this.engaged = s.engaged;
     this.statuses = s.statuses;
     this.foe = this.layer.playerFor(s.foe);
+    this.immune = !!s.immune; // a raid boss its adds are shielding (sim/BossScript.js)
   }
 
   update(dt) {
@@ -348,7 +349,7 @@ export class Enemy extends Character {
       const k = this.stateTime / T;
       this.tint.copy(TELEGRAPH).multiplyScalar(0.15 + 0.55 * k * (0.6 + 0.4 * Math.sin(this.stateTime * 40)));
     }
-    if (this.ward || this.shield > 0 || this.wardMesh) this.updateWard();
+    if (this.ward || this.shield > 0 || this.immune || this.wardMesh) this.updateWard();
     void dt;
   }
 
@@ -373,6 +374,13 @@ export class Enemy extends Character {
   // reported to the sim (which owns health, kills and rewards).
   takeHit(hit) {
     if (!this.alive) return false;
+    // Shielded by its adds: the hit glances off (the sim ignores it too).
+    if (this.immune && hit.source !== 'status') {
+      _p.copy(this.position).addScaledVector(this.forward(_fwd), this.radius).setY(this.position.y + this.height * 0.55);
+      this.game.effects.spawnSparks(_p, 0x9fe8ff, 6);
+      this.layer.reportHit(this, { ...hit, damage: 1 });
+      return false;
+    }
     // A guard blocks most of a frontal hit (melee and shots); explosions and flanks get through.
     if (this.guarding && this.type.block && hit.source !== 'status' && hit.source !== 'explosion') {
       const fx = Math.sin(this.facing);
@@ -402,7 +410,7 @@ export class Enemy extends Character {
 
   // The bubble of a tech's ward, or of a Shielded elite's shield.
   updateWard() {
-    const up = this.ward || this.shield > 0;
+    const up = this.ward || this.shield > 0 || this.immune;
     if (up && !this.wardMesh) {
       const mat = new THREE.MeshBasicMaterial({ color: WARD, transparent: true, opacity: 0.22, depthWrite: false, blending: THREE.AdditiveBlending });
       this.wardMesh = new THREE.Mesh(WARD_GEO, mat);

@@ -19,6 +19,7 @@ import { setHatchScale } from '../render/Toon.js';
 import { clearSave } from '../core/Save.js';
 import { typing } from '../core/Input.js';
 import { DUNGEONS } from '../world/dungeons.js';
+import { RAIDS, instanceDef } from '../world/raids.js';
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 const TABS = ['Player', 'World', 'Spawn', 'Loot', 'Render', 'Audio', 'Save', 'Console', 'Errors'];
@@ -378,7 +379,7 @@ export class DevTools {
     } else if (this.tab === 'World') {
       body = `
         <div class="row"><select id="dev-loc">${this.locations().map((l, i) => `<option value="${i}">${esc(l.label)}</option>`).join('')}</select><button data-act="tp">Teleport</button></div>
-        <div class="row"><select id="dev-dun">${Object.values(DUNGEONS).map((d) => `<option value="${d.id}">${esc(d.name)} (${esc(d.theme)}, Lv ${d.level})</option>`).join('')}</select><select id="dev-dun-mode"><option value="open">Open world</option><option value="run:0">Run · Normal</option><option value="run:1">Run · Veteran</option><option value="run:2">Run · Elite</option></select><button data-act="dungeon">Go down</button></div>
+        <div class="row"><select id="dev-dun">${Object.values(DUNGEONS).map((d) => `<option value="${d.id}">${esc(d.name)} (${esc(d.theme)}, Lv ${d.level})</option>`).join('')}${Object.values(RAIDS).map((d) => `<option value="${d.id}">Raid: ${esc(d.name)} (Lv ${d.level})</option>`).join('')}</select><select id="dev-dun-mode"><option value="open">Open world</option><option value="run:0">Run · Normal</option><option value="run:1">Run · Veteran</option><option value="run:2">Run · Elite</option></select><button data-act="dungeon">Go down</button></div>
         <div class="row"><button data-act="tp-reticle">Teleport to reticle</button><button data-act="reveal">Reveal map</button><button data-act="attune">Attune all waystones</button></div>
         <div class="row"><button data-act="kill-all">Kill all enemies</button><button data-act="respawn">Respawn camps</button><button data-act="clear-loot">Clear ground loot</button></div>
         <div class="grid2">${chk('freezeAI', 'Freeze enemy AI', f.freezeAI)}<label class="chk"><input type="checkbox" data-act="pause" ${this.paused ? 'checked' : ''}> Pause simulation</label></div>
@@ -485,7 +486,7 @@ export class DevTools {
       case 'tp': { const l = this.locations()[+$('#dev-loc').value]; this.teleport(l.x, l.z); break; }
       // Straight down into any dungeon (offline: the way in needn't be near, nor the story there).
       case 'dungeon': {
-        const def = DUNGEONS[$('#dev-dun').value];
+        const def = instanceDef($('#dev-dun').value);
         const [mode, tier] = $('#dev-dun-mode').value.split(':');
         this.dungeons = true;
         this.hide();

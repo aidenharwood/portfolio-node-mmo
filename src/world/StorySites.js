@@ -29,7 +29,7 @@ function parts(w, id, build) {
   const off = new THREE.Group();
   build(on, off);
   for (const g of [on, off]) {
-    bakeTree(g);
+    bakeTree(g, { surfaces: true });
     g.visible = false;
     (w.own?.group ?? w.root).add(g);
   }

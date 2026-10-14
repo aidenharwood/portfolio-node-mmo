@@ -8,6 +8,7 @@ import * as THREE from 'three';
 import { piece, flatten, G, shade } from '../render/ModelKit.js';
 import { C, HEARTH, FORGE, LAMP, CARGO, RUNE } from './palette.js';
 import { TOWN, CITY, HUB_RING, SIZES } from './places.js';
+import { building, bodyCols } from './build/kit.js';
 
 const TAU = Math.PI * 2;
 const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
@@ -18,12 +19,13 @@ const CLOTH = [0xc0583a, 0xd9a227, 0x3a7ab0, 0x5a8a4a, 0x9a4a7a];
 
 // Building colours by climate: plaster and red roofs in green country, sandstone and flat roofs in
 // the dry lands, timber and thatch in the wet, steel against the cold and in the strange lands.
+// `kit`: the building kit's style for them (world/build/styles.js).
 const STYLES = {
-  temperate: { walls: [C.hab, 0xe8dcc0, 0xd8c8a8], roofs: [0x9a3a2a, 0x4a5560], trim: C.metalDark, flat: 0.15, wall: C.stone },
-  dry: { walls: [C.sandstone, 0xe0cfa8, 0xd8b890], roofs: [0xb08a5a, 0xb0583a], trim: C.woodDark, flat: 0.8, wall: shade(C.sandstone, 0.9) },
-  wet: { walls: [C.wood, 0x8a6a48, 0xa08a68], roofs: [C.thatch, 0x7a6a40], trim: C.woodDark, flat: 0, wall: C.woodDark },
-  cold: { walls: [C.steel, 0x8a7a68, C.hab], roofs: [C.metalDark, 0x3a4450], trim: C.metal, flat: 0.1, wall: C.stoneDark },
-  tech: { walls: [C.steel, C.hab, 0x9aa4b4], roofs: [C.metalDark, 0x3a3f4a], trim: C.metalDark, flat: 0.6, wall: C.steel },
+  temperate: { kit: 'temperate', walls: [C.hab, 0xe8dcc0, 0xd8c8a8], roofs: [0x9a3a2a, 0x4a5560], trim: C.metalDark, flat: 0.15, wall: C.stone },
+  dry: { kit: 'dry', walls: [C.sandstone, 0xe0cfa8, 0xd8b890], roofs: [0xb08a5a, 0xb0583a], trim: C.woodDark, flat: 0.8, wall: shade(C.sandstone, 0.9) },
+  wet: { kit: 'wet', walls: [C.wood, 0x8a6a48, 0xa08a68], roofs: [C.thatch, 0x7a6a40], trim: C.woodDark, flat: 0, wall: C.woodDark },
+  cold: { kit: 'cold', walls: [C.steel, 0x8a7a68, C.hab], roofs: [C.metalDark, 0x3a4450], trim: C.metal, flat: 0.1, wall: C.stoneDark },
+  tech: { kit: 'tech', walls: [C.steel, C.hab, 0x9aa4b4], roofs: [C.metalDark, 0x3a3f4a], trim: C.metalDark, flat: 0.6, wall: C.steel },
 };
 const STYLE_OF = {
   meadow: 'temperate', forest: 'temperate', highland: 'temperate', jungle: 'wet', fungal: 'wet', marsh: 'wet',
@@ -57,6 +59,8 @@ function site(w, p, reach) {
   }
   return {
     w, p, g, y0, rnd: w.rnd, lines,
+    // Where the place's doors open (world points): nothing else is built on them.
+    doorsteps: [],
     at: (a, d) => [p.x + Math.sin(a) * d, p.z + Math.cos(a) * d],
     gy: (x, z) => w.groundHeight(x, z) - y0,
     // A sub-group standing on the ground at a world point, its front (+z) facing bearing `ry`.
@@ -91,105 +95,6 @@ function hframe(w, p) {
     col: (lx, lz, r, h) => { const [x, z] = toW(lx, lz); w.addCollider(x, z, r, h); },
     colBox: (lx, lz, hx, hz, ry, h) => { const [x, z] = toW(lx, lz); w.addOrientedBox(x, z, hx, hz, p.rot + ry, h); },
   };
-}
-
-// Colliders over a building's footprint (world point, facing ry): circles as wide as its short
-// side, in a row along its long one — so none stands out past its faces.
-function bodyCol(w, x, z, ry, wd, dp, ht) {
-  w.addOrientedBox(x, z, wd / 2, dp / 2, ry, ht);
-}
-
-// ---------------------------------------------------------------- kit
-// A building, local to group h with its front on +z: walls on a plinth, a pitched roof (gables
-// filled) or a flat one, a door, lit windows on every storey, and whatever extras it's given — a
-// chimney, an antenna, an awning over the door, a glowing sign.
-function building(h, o) {
-  const { wd, dp, ht = 3, storeys = 1, wall, roof, trim = C.metalDark, flat = false } = o;
-  const H = ht * storeys;
-  const variation = o.variant === undefined
-    ? Math.abs(Math.floor((wd * 13 + dp * 7 + ht * 3 + storeys * 11 + (wall & 255)) * 10)) % 4
-    : Math.abs(Math.floor(o.variant * 4)) % 4;
-  piece(h, G.box(wd + 0.3, 0.4, dp + 0.3), trim, { pos: [0, 0.15, 0], outline: 0.02 });
-  piece(h, G.box(wd, H, dp), wall, { pos: [0, H / 2 + 0.05, 0], outline: 0.04 });
-  for (let s = 1; s < storeys; s++) piece(h, G.box(wd + 0.2, 0.16, dp + 0.2), trim, { pos: [0, s * ht + 0.05, 0], outline: 0.012 });
-  for (const x of [-1, 1]) for (const z of [-1, 1]) {
-    piece(h, G.box(0.14, H, 0.14), trim, { pos: [x * (wd / 2 - 0.1), H / 2 + 0.05, z * (dp / 2 - 0.1)], outline: 0.012 });
-  }
-  if (flat) {
-    piece(h, G.box(wd + 0.3, 0.25, dp + 0.3), trim, { pos: [0, H + 0.15, 0], outline: 0.025 });
-    piece(h, G.box(wd * 0.4, 0.9, dp * 0.4), roof, { pos: [-wd * 0.15, H + 0.7, -dp * 0.1], outline: 0.025 });
-    for (const s of [-1, 1]) {
-      piece(h, G.box(wd + 0.2, 0.38, 0.16), trim, { pos: [0, H + 0.43, s * (dp / 2 - 0.08)], outline: 0.012 });
-      piece(h, G.box(0.16, 0.38, dp - 0.16), trim, { pos: [s * (wd / 2 - 0.08), H + 0.43, 0], outline: 0.012 });
-    }
-  } else {
-    const rise = dp * 0.36;
-    for (const s of [-1, 1]) piece(h, G.box(wd + 0.6, 0.18, dp * 0.62), roof, { pos: [0, H + dp * 0.18, s * dp * 0.26], rot: [s * 0.6, 0, 0], outline: 0.03 });
-    const roofRows = Math.max(2, Math.floor(dp / 2.2));
-    for (const s of [-1, 1]) for (let row = 1; row <= roofRows; row++) {
-      const t = row / (roofRows + 1);
-      piece(h, G.box(wd + 0.2, 0.07, 0.12), trim, { pos: [0, H + rise * (1 - t) + 0.08, s * dp * t * 0.5], rot: [s * 0.6, 0, 0], outline: 0.008 });
-    }
-    piece(h, G.box(wd + 0.65, 0.22, 0.3), trim, { pos: [0, H + rise, 0], outline: 0.02 });
-    const gable = G.extrude(G.shape([[-wd / 2, 0], [wd / 2, 0], [0, rise]]), 0.12, 0.008);
-    for (const s of [-1, 1]) piece(h, gable.clone(), wall, { pos: [0, H, s * (dp / 2 - 0.04)], outline: 0.03 });
-    for (const s of [-1, 1]) piece(h, G.box(wd + 0.5, 0.18, 0.16), trim, { pos: [0, H + 0.06, s * dp * 0.52], outline: 0.015 });
-  }
-  const doorX = o.doorX ?? (wd > 4.5 ? -wd * 0.22 : 0);
-  const doorW = o.doorW ?? 1.1;
-  const doorH = o.doorH ?? 2.0;
-  piece(h, G.box(doorW + 0.7, 0.18, 0.82), trim, { pos: [doorX, 0.09, dp / 2 + 0.34], outline: 0.012 });
-  for (const side of [-1, 1]) piece(h, G.box(0.12, doorH, 0.16), trim, { pos: [doorX + side * (doorW / 2 + 0.08), doorH / 2 + 0.15, dp / 2 + 0.04], outline: 0.01 });
-  piece(h, G.box(doorW + 0.28, 0.14, 0.18), trim, { pos: [doorX, doorH + 0.22, dp / 2 + 0.04], outline: 0.01 });
-  piece(h, G.box(doorW, doorH, 0.1), DOOR, { pos: [doorX, doorH / 2 + 0.15, dp / 2 + 0.03], outline: 0.012 });
-  piece(h, G.box(0.06, 0.58, 0.045), C.metal, { pos: [doorX + doorW * 0.31, 0.92, dp / 2 + 0.095], outline: 0.008 });
-  piece(h, G.sphere(0.07, 6, 4), HEARTH, { pos: [doorX + doorW * 0.31, 0.98, dp / 2 + 0.13], glow: true, outline: 0 });
-  for (let s = 0; s < storeys; s++) {
-    const y = s * ht + 1.9;
-    const windowW = variation === 2 ? 0.72 : 0.9;
-    const windowH = variation === 1 ? 1.05 : 0.8;
-    for (let x = -wd / 2 + 1.1; x <= wd / 2 - 0.9; x += 2.2) {
-      if (!s && Math.abs(x + 0.2 - doorX) < doorW / 2 + 0.75) continue;
-      const wx = x + 0.2;
-      piece(h, G.box(windowW + 0.22, windowH + 0.2, 0.1), trim, { pos: [wx, y, dp / 2 + 0.02], outline: 0.012 });
-      piece(h, G.box(windowW, windowH, 0.05), 0x17232d, { pos: [wx, y, dp / 2 + 0.09], outline: 0 });
-      piece(h, G.box(windowW * 0.78, windowH * 0.76, 0.035), LAMP, { pos: [wx, y, dp / 2 + 0.125], glow: true, outline: 0 });
-      piece(h, G.box(0.055, windowH * 0.9, 0.035), trim, { pos: [wx, y, dp / 2 + 0.15], outline: 0 });
-      piece(h, G.box(windowW * 0.94, 0.055, 0.035), trim, { pos: [wx, y, dp / 2 + 0.15], outline: 0 });
-      if (variation === 2) for (const side of [-1, 1]) piece(h, G.box(0.16, windowH + 0.16, 0.12), roof, { pos: [wx + side * (windowW / 2 + 0.12), y, dp / 2 + 0.08], outline: 0.008 });
-    }
-    for (const sx of [-1, 1]) {
-      const wx = sx * (wd / 2 + 0.02);
-      piece(h, G.box(0.1, windowH + 0.2, 1.02), trim, { pos: [wx, y, 0], outline: 0.01 });
-      piece(h, G.box(0.05, windowH, 0.82), 0x17232d, { pos: [wx + sx * 0.07, y, 0], outline: 0 });
-      piece(h, G.box(0.035, windowH * 0.76, 0.64), LAMP, { pos: [wx + sx * 0.105, y, 0], glow: true, outline: 0 });
-      piece(h, G.box(0.035, windowH * 0.9, 0.055), trim, { pos: [wx + sx * 0.13, y, 0], outline: 0 });
-      piece(h, G.box(0.035, 0.055, 0.76), trim, { pos: [wx + sx * 0.13, y, 0], outline: 0 });
-    }
-  }
-  if (variation === 0) {
-    piece(h, G.box(wd * 0.58, 0.12, 0.14), trim, { pos: [0, H * 0.62, dp / 2 + 0.07], outline: 0.008 });
-    for (const x of [-1, 1]) piece(h, G.box(0.12, H * 0.62, 0.14), trim, { pos: [x * (wd * 0.29), H * 0.31, dp / 2 + 0.07], outline: 0.008 });
-  } else if (variation === 1 && !flat) {
-    piece(h, G.cyl(0.32, 0.32, 0.1, 8).rotateX(Math.PI / 2), C.metalDark, { pos: [0, H + dp * 0.17, dp / 2 + 0.09], outline: 0.012 });
-    piece(h, G.cyl(0.18, 0.18, 0.12, 8).rotateX(Math.PI / 2), LAMP, { pos: [0, H + dp * 0.17, dp / 2 + 0.16], glow: true, outline: 0 });
-  } else if (variation === 3) {
-    for (const side of [-1, 1]) {
-      piece(h, G.box(0.24, H * 0.58, 0.18), trim, { pos: [side * (wd / 2 - 0.36), H * 0.3, dp / 2 + 0.08], outline: 0.01 });
-      piece(h, G.box(0.58, 0.18, 0.18), trim, { pos: [side * (wd / 2 - 0.36), H * 0.62, dp / 2 + 0.08], outline: 0.01 });
-    }
-  }
-  if (o.chimney) piece(h, G.box(0.6, 2.2, 0.6), trim, { pos: [wd * 0.3, H + 1.1, -dp * 0.2], outline: 0.02 });
-  if (o.antenna) {
-    piece(h, G.cyl(0.04, 0.05, 2.4, 5), C.metal, { pos: [-wd * 0.32, H + 1.6, -dp * 0.25], outline: 0.008 });
-    piece(h, G.sphere(0.07, 6, 4), 0xff4a3a, { pos: [-wd * 0.32, H + 2.85, -dp * 0.25], glow: true, outline: 0 });
-  }
-  if (o.awning) {
-    piece(h, G.box(wd * 0.7, 0.08, 1.5), o.awning, { pos: [0, 2.75, dp / 2 + 0.7], rot: [0.25, 0, 0], outline: 0.02 });
-    for (const sx of [-1, 1]) piece(h, G.cyl(0.05, 0.05, 2.6, 5), C.metalDark, { pos: [sx * wd * 0.33, 1.4, dp / 2 + 1.35], outline: 0.008 });
-  }
-  if (o.sign) piece(h, G.box(Math.min(2.4, wd * 0.45), 0.6, 0.08), o.sign, { pos: [o.signX ?? wd * 0.2, Math.min(H - 0.5, 3.4), dp / 2 + 0.06], glow: true, outline: 0.012 });
-  return h;
 }
 
 // A sub-group of h offset by (x, y, z) and turned by ry: for building a part off-centre.
@@ -380,30 +285,30 @@ export function serviceProps(w, p, f = null) {
 function inn(h, st, big = false) {
   const wd = big ? 12 : 10;
   const dp = big ? 8 : 7;
-  building(h, { wd, dp, ht: 3.1, storeys: big ? 3 : 2, wall: st.walls[0], roof: st.roofs[0], trim: st.trim, chimney: true, awning: 0xb0583a, sign: LAMP, doorX: 0, doorW: 1.6 });
+  const cols = building(h, { wd, dp, ht: 3.1, storeys: big ? 3 : 2, wall: st.walls[0], roof: st.roofs[0], trim: st.trim, chimney: true, awning: 0xb0583a, sign: LAMP, doorX: 0, doorW: 1.6, style: big ? 'city' : st.kit });
   piece(h, G.box(0.08, 0.08, 1.3), C.metalDark, { pos: [wd / 2 - 0.6, 3.3, dp / 2 + 0.6], outline: 0.006 });
   piece(h, G.box(0.1, 0.8, 1.0), 0xd9a227, { pos: [wd / 2 - 0.6, 2.75, dp / 2 + 0.95], outline: 0.012 });
   for (const s of [-1, 1]) piece(h, G.box(1.8, 0.45, 0.5), C.woodDark, { pos: [s * (wd / 2 - 1.6), 0.45, dp / 2 + 0.6], outline: 0.012 });
-  return { wd, dp, ht: 3.1 * (big ? 3 : 2) + 2 };
+  return { cols };
 }
 
 // The workshop: a smithy, its doors open on the forge, a chimney glowing, an anvil to one side.
 function workshop(h, st, big = false) {
   const wd = big ? 11 : 8;
   const dp = big ? 8 : 6;
-  building(h, { wd, dp, ht: 3.4, wall: st.walls[1], roof: C.metalDark, trim: st.trim, flat: true, doorX: 0, doorW: 2.6, doorH: 2.5 });
+  const cols = building(h, { wd, dp, ht: 3.4, wall: st.walls[1], roof: C.metalDark, trim: st.trim, flat: true, doorX: 0, doorW: 2.6, doorH: 2.5, style: st.kit, simple: true });
   piece(h, G.box(2.0, 1.4, 0.12), FORGE, { pos: [0, 1.0, dp / 2 + 0.05], glow: true, outline: 0.008 });
   piece(h, G.box(1.1, 3.6, 1.1), C.stoneDark, { pos: [wd / 2 - 1.2, 3.4 + 1.6, -dp / 2 + 1.2], outline: 0.02 });
   piece(h, G.box(0.8, 0.2, 0.8), FORGE, { pos: [wd / 2 - 1.2, 3.4 + 3.45, -dp / 2 + 1.2], glow: true, outline: 0 });
   piece(h, G.box(0.5, 0.65, 0.5), C.stoneDark, { pos: [-wd / 2 + 0.8, 0.33, dp / 2 + 0.9], outline: 0.015 });
   piece(h, G.box(0.9, 0.25, 0.4), C.metalDark, { pos: [-wd / 2 + 0.8, 0.78, dp / 2 + 0.9], outline: 0.015 });
   for (let i = 0; i < 4; i++) piece(h, G.box(0.08, 0.9, 0.06), C.metal, { pos: [wd / 2 - 1.0 - i * 0.35, 1.7, dp / 2 + 0.06], outline: 0.006 });
-  return { wd, dp, ht: 5.5 };
+  return { cols: [...cols, { x: wd / 2 - 1.2, z: -dp / 2 + 1.2, hx: 0.55, hz: 0.55, h: 7 }] };
 }
 
 // The Warden post: a blockhouse with a watchtower and a beacon, the Wardens' green banners.
 function wardenPost(h) {
-  building(h, { wd: 8, dp: 6.5, ht: 3.2, wall: C.steel, roof: C.metalDark, trim: C.metalDark, flat: true, antenna: true, doorX: 0 });
+  const cols = building(h, { wd: 8, dp: 6.5, ht: 3.2, wall: C.steel, roof: C.metalDark, trim: C.metalDark, flat: true, antenna: true, doorX: 0, style: 'warden', simple: true });
   piece(h, G.box(2.6, 9, 2.6), C.steel, { pos: [-2.4, 4.5, -1.6], outline: 0.035 });
   piece(h, G.box(3.2, 0.4, 3.2), C.metalDark, { pos: [-2.4, 9.1, -1.6], outline: 0.02 });
   piece(h, G.cyl(0.35, 0.35, 0.5, 8), HEARTH, { pos: [-2.4, 9.6, -1.6], glow: true, outline: 0.01 });
@@ -411,13 +316,13 @@ function wardenPost(h) {
     piece(h, G.box(0.9, 2.2, 0.05), WARDEN, { pos: [s * 2.3, 2.3, 3.3], outline: 0.012 });
     piece(h, G.octa(0.2), 0xf0c75e, { pos: [s * 2.3, 2.6, 3.34], scale: [1, 1, 0.3], outline: 0.006 });
   }
-  return { wd: 8, dp: 6.5, ht: 9.5 };
+  return { cols: [...cols, { x: -2.4, z: -1.6, hx: 1.35, hz: 1.35, h: 9.5 }] };
 }
 
 // A city's Warden citadel: a great hall on a terrace, a keep behind it rising to a beacon.
 function citadel(h) {
   piece(h, G.box(14, 0.3, 11), C.stoneDark, { pos: [0, 0.15, 0], outline: 0.03 });
-  building(sub(h, 0, 0.3, 1), { wd: 12, dp: 7, ht: 3.6, storeys: 2, wall: C.stone, roof: C.metalDark, trim: C.stoneDark, flat: true, doorX: 0, doorW: 2.2, doorH: 3 });
+  building(sub(h, 0, 0.3, 1), { wd: 12, dp: 7, ht: 3.6, storeys: 2, wall: C.stone, roof: C.metalDark, trim: C.stoneDark, flat: true, doorX: 0, doorW: 2.2, doorH: 3, style: 'warden', simple: true });
   piece(h, G.box(5.5, 16, 5.5), C.stone, { pos: [0, 8.8, -2.6], outline: 0.04 });
   piece(h, G.box(6.4, 0.7, 6.4), C.stoneDark, { pos: [0, 16.9, -2.6], outline: 0.025 });
   piece(h, G.octa(0.9), HEARTH, { pos: [0, 18.4, -2.6], scale: [1, 1.6, 1], glow: true, outline: 0.02 });
@@ -427,7 +332,7 @@ function citadel(h) {
     piece(h, G.octa(0.3), 0xf0c75e, { pos: [s * 4.2, 4.8, 4.65], scale: [1, 1, 0.3], outline: 0.006 });
   }
   for (let k = 0; k < 4; k++) piece(h, G.box(0.9, 1.4, 0.08), LAMP, { pos: [-1.6 + (k % 2) * 3.2, 9 + Math.floor(k / 2) * 4, 0.18], glow: true, outline: 0.01 });
-  return { wd: 12, dp: 10, ht: 17 };
+  return { cols: [{ x: 0, z: 0, hx: 6, hz: 5, h: 17 }] };
 }
 
 // ---------------------------------------------------------------- hamlets
@@ -443,11 +348,11 @@ export const HAMLET_BUILDERS = {
     for (const [a, d] of [[2.15, 7.6], [-2.0, 8.0]]) {
       const [lx, lz] = lp(a, d);
       const wd = 5.2 + rnd();
-      building(f.put(lx, lz, a + Math.PI), { wd, dp: 4.4, ht: 2.8, wall: st.walls[Math.floor(rnd() * 3)], roof: st.roofs[0], trim: st.trim, chimney: rnd() < 0.6 });
-      bodyCol(w, ...f.toW(lx, lz), p.rot + a + Math.PI, wd, 4.4, 4.5);
+      const cols = building(f.put(lx, lz, a + Math.PI), { wd, dp: 4.4, ht: 2.8, wall: st.walls[Math.floor(rnd() * 3)], roof: st.roofs[0], trim: st.trim, chimney: rnd() < 0.6, style: st.kit });
+      bodyCols(w, ...f.toW(lx, lz), p.rot + a + Math.PI, cols);
     }
     const [sx, sz] = lp(Math.PI + 0.62, 8.2);
-    building(f.put(sx, sz, Math.PI + 0.62 + Math.PI), { wd: 3.4, dp: 3, ht: 2.4, wall: C.wood, roof: C.metalDark, trim: C.woodDark, flat: true });
+    building(f.put(sx, sz, Math.PI + 0.62 + Math.PI), { wd: 3.4, dp: 3, ht: 2.4, wall: C.wood, roof: C.metalDark, trim: C.woodDark, flat: true, style: 'wet', simple: true });
     f.col(sx, sz, 1.9, 3);
     const crop = st === STYLES.dry ? 0xd8b84a : 0x5aa84e;
     for (let r = 0; r < 4; r++) {
@@ -477,8 +382,8 @@ export const HAMLET_BUILDERS = {
     const ore = biome === 'crystal' ? C.crystal : biome === 'ash' ? FORGE : 0x7ab0d8;
     for (const [a, d] of [[2.1, 7.4], [-2.15, 7.6]]) {
       const [lx, lz] = lp(a, d);
-      building(f.put(lx, lz, a + Math.PI), { wd: 4.4, dp: 3.6, ht: 2.6, wall: C.steel, roof: C.metalDark, trim: 0xd9a227, flat: true, antenna: rnd() < 0.5 });
-      bodyCol(w, ...f.toW(lx, lz), p.rot + a + Math.PI, 4.4, 3.6, 3.4);
+      const cols = building(f.put(lx, lz, a + Math.PI), { wd: 4.4, dp: 3.6, ht: 2.6, wall: C.steel, roof: C.metalDark, trim: 0xd9a227, flat: true, antenna: rnd() < 0.5, style: 'cold', simple: true });
+      bodyCols(w, ...f.toW(lx, lz), p.rot + a + Math.PI, cols);
     }
     const [rx, rz] = lp(Math.PI, 8.4);
     const ry = f.gy(rx, rz);
@@ -683,7 +588,7 @@ const nearFolk = (p, x, z, r) => (p.npcs ?? []).some((n) => Math.hypot(n.x - x, 
 
 // A ring of houses at radius `d` round the place: wherever there's room off the roads, the folk
 // and the bearings in `skip` ([bearing, half-width]).
-function houseRing(f, st, d, { step = 0.36, skip = [], storeys = 0.3, flat = false, big = 1 } = {}) {
+function houseRing(f, st, d, { step = 0.36, skip = [], storeys = 0.3, flat = false, big = 1, kit = st.kit } = {}) {
   const { rnd } = f;
   const pick = (list) => list[Math.floor(rnd() * list.length)];
   let n = 0;
@@ -693,22 +598,51 @@ function houseRing(f, st, d, { step = 0.36, skip = [], storeys = 0.3, flat = fal
     const dp = (4.4 + rnd() * 1.4) * big;
     const [x, z] = f.at(a, d);
     if (!f.clear(x, z, Math.hypot(wd, dp) / 2) || nearFolk(f.p, x, z, Math.hypot(wd, dp) / 2 + 1)) continue;
+    // Not over the way into a building already standing.
+    if (f.doorsteps?.some((s) => inFootprint(s, x, z, a, wd / 2 + 0.6, dp / 2 + 0.6))) continue;
     const s = rnd() < storeys ? 2 : 1;
-    building(f.put(x, z, a + Math.PI), {
+    // Facing in — or out, where its door would open onto a house already standing (a ring of
+    // houses inside this one).
+    const ry = doorBlocked(f.w, x, z, a + Math.PI, wd, dp) && !doorBlocked(f.w, x, z, a, wd, dp) ? a : a + Math.PI;
+    const cols = building(f.put(x, z, ry), {
       wd, dp, ht: 3, storeys: s, wall: pick(st.walls), roof: pick(st.roofs), trim: st.trim, flat: flat !== (rnd() < 0.12),
-      chimney: rnd() < 0.4, antenna: rnd() < 0.2, awning: rnd() < 0.15 ? pick(CLOTH) : null,
+      chimney: rnd() < 0.4, antenna: rnd() < 0.2, awning: rnd() < 0.15 ? pick(CLOTH) : null, style: kit,
     });
-    bodyCol(f.w, x, z, a + Math.PI, wd, dp, 3 * s + 1.5);
+    bodyCols(f.w, x, z, ry, cols);
+    f.doorsteps?.push(stepAt(x, z, ry, wd > 4.5 ? -wd * 0.22 : 0, dp / 2 + 1.1));
     n++;
   }
   return n;
+}
+
+// The world point `out` metres in front of a building at world (x, z) facing bearing ry, `lx`
+// along its front.
+const stepAt = (x, z, ry, lx, out) => [x + Math.cos(ry) * lx + Math.sin(ry) * out, z - Math.sin(ry) * lx + Math.cos(ry) * out];
+// Is a world point within a building's footprint (at (x, z), turned ry, half-sizes hx, hz)?
+const inFootprint = ([px, pz], x, z, ry, hx, hz) => {
+  const dx = px - x;
+  const dz = pz - z;
+  return Math.abs(dx * Math.cos(ry) - dz * Math.sin(ry)) < hx && Math.abs(dx * Math.sin(ry) + dz * Math.cos(ry)) < hz;
+};
+
+// Is the ground before a door already taken (a door on world (x, z) facing bearing ry, `dp` deep,
+// `doorX` along its front)?
+function doorBlocked(w, x, z, ry, wd, dp) {
+  const out = dp / 2 + 1.1;
+  const lx = wd > 4.5 ? -wd * 0.22 : 0;
+  for (const [px, pz] of [[0, out], [lx, out]]) {
+    const wx = x + Math.cos(ry) * px + Math.sin(ry) * pz;
+    const wz = z - Math.sin(ry) * px + Math.cos(ry) * pz;
+    if (w.blocks({ x: wx, z: wz, y: w.groundHeight(wx, wz) + 0.9 })) return true;
+  }
+  return false;
 }
 
 // Lamps round a ring, off the roads and the folk.
 function lampRing(f, d, step = 0.62) {
   for (let a = 0.3; a < TAU; a += step) {
     const [x, z] = f.at(a, d);
-    if (f.clear(x, z, 0.4) && !nearFolk(f.p, x, z, 1.6)) lamp(f, x, z);
+    if (f.clear(x, z, 0.4) && !nearFolk(f.p, x, z, 1.6) && !f.doorsteps.some(([sx, sz]) => Math.hypot(sx - x, sz - z) < 1.4)) lamp(f, x, z);
   }
 }
 
@@ -736,7 +670,8 @@ export function buildTown(w, p) {
     const a = S[key];
     const [x, z] = f.at(a, TOWN.service);
     const b = make(f.put(x, z, a + Math.PI), st);
-    bodyCol(w, x, z, a + Math.PI, b.wd, b.dp, b.ht);
+    bodyCols(w, x, z, a + Math.PI, b.cols);
+    f.doorsteps.push(stepAt(x, z, a + Math.PI, 0, b.cols[0].hz + 1.05));
   }
   stalls(f);
   serviceProps(w, p, f);
@@ -752,7 +687,7 @@ export function buildTown(w, p) {
       piece(h, G.cone(1.7, 1.0, 12), st.roofs[0], { pos: [0, 7.2, 0], outline: 0.02 });
       f.col(x, z, 1.6, 7.5);
     } else {
-      building(h, { wd: 3.6, dp: 3, ht: 2.4, wall: st.walls[2], roof: st.roofs[1], trim: st.trim, flat: true });
+      building(h, { wd: 3.6, dp: 3, ht: 2.4, wall: st.walls[2], roof: st.roofs[1], trim: st.trim, flat: true, style: st.kit, simple: true });
       f.col(x, z, 2, 3);
     }
   }
@@ -779,7 +714,7 @@ export function buildCity(w, p) {
     const a = S[key];
     const [x, z] = f.at(a, CITY.hall);
     const b = make(f.put(x, z, a + Math.PI));
-    bodyCol(w, x, z, a + Math.PI, b.wd, b.dp, b.ht);
+    bodyCols(w, x, z, a + Math.PI, b.cols);
   }
   serviceProps(w, p, f);
   // Planters and banners round the plaza.
@@ -791,7 +726,7 @@ export function buildCity(w, p) {
     piece(h, G.ico(0.7, 0), C.bush, { pos: [0, 0.95, 0], outline: 0.015 });
     f.col(x, z, 0.8, 1.2);
   }
-  houseRing(f, st, CITY.hall, { step: 0.62, skip: [[S.citadel, 0.75], [S.inn, 0.7]], storeys: 1, big: 1.35, flat: true });
+  houseRing(f, st, CITY.hall, { step: 0.62, skip: [[S.citadel, 0.75], [S.inn, 0.7]], storeys: 1, big: 1.35, flat: true, kit: 'city' });
   lampRing(f, 26.5, 0.4);
   flatten(f.g);
   w.finish(f.g);
@@ -805,7 +740,7 @@ export function buildCityWall(w, p) {
   const st = styleAt(w, p.x, p.z);
   const half = Math.asin(SIZES.city.district / SIZES.city.ring);
   const quarters = p.quarters ?? [];
-  houseRing(f, st, p.wall - 8, { step: 0.11, skip: quarters.map((b) => [b, half + 0.1]), storeys: 0.75, flat: true });
+  houseRing(f, st, p.wall - 8, { step: 0.11, skip: quarters.map((b) => [b, half + 0.1]), storeys: 0.75, flat: true, kit: 'city' });
   for (let a = 0.05; a < TAU; a += 0.16) {
     if (quarters.some((b) => Math.abs(wrap(a - b)) < half + 0.05)) continue;
     const [x, z] = f.at(a, 38 + (Math.round(a / 0.16) % 2) * 3);
@@ -864,7 +799,7 @@ export const DISTRICT_BUILDERS = {
     const a = smith ? bearingOf(p, smith) : p.rot + Math.PI;
     const [x, z] = f.at(a, 12.5);
     const b = workshop(f.put(x, z, a + Math.PI), f.st, true);
-    bodyCol(w, x, z, a + Math.PI, b.wd, b.dp, b.ht);
+    bodyCols(w, x, z, a + Math.PI, b.cols);
     f.front.push([a, 0.55]);
     const [cx, cz] = f.at(a + 1.2, 9);
     if (!nearFolk(p, cx, cz, 2)) {
@@ -921,14 +856,14 @@ export function buildBrightwater(w, p) {
   const S = p.services;
   const [wx, wz] = f.at(S.workshop, HUB_RING.shop);
   const ws = workshop(f.put(wx, wz, S.workshop + Math.PI), st);
-  bodyCol(w, wx, wz, S.workshop + Math.PI, ws.wd, ws.dp, ws.ht);
+  bodyCols(w, wx, wz, S.workshop + Math.PI, ws.cols);
   for (const [key, sign, goods] of [['guns', FORGE, 'weapons'], ['armour', HEARTH, 'armor']]) {
     const a = S[key];
     const [x, z] = f.at(a, HUB_RING.shop);
     const h = f.put(x, z, a + Math.PI);
-    building(h, { wd: 7, dp: 5.5, ht: 3.2, wall: key === 'guns' ? C.steel : st.walls[1], roof: st.roofs[key === 'guns' ? 1 : 0], trim: st.trim, sign, awning: CLOTH[key === 'guns' ? 0 : 2], doorX: 0 });
+    const cols = building(h, { wd: 7, dp: 5.5, ht: 3.2, wall: key === 'guns' ? C.steel : st.walls[1], roof: st.roofs[key === 'guns' ? 1 : 0], trim: st.trim, sign, awning: CLOTH[key === 'guns' ? 0 : 2], doorX: 0, style: st.kit, simple: true });
     stall(sub(h, -2.4, 0, 4.4), CLOTH[key === 'guns' ? 1 : 3], goods);
-    bodyCol(w, x, z, a + Math.PI, 7, 5.5, 4.5);
+    bodyCols(w, x, z, a + Math.PI, cols);
     const ry = a + Math.PI;
     w.addCollider(x + Math.cos(ry) * -2.4 + Math.sin(ry) * 4.4, z - Math.sin(ry) * -2.4 + Math.cos(ry) * 4.4, 1.3, 1.1);
   }

@@ -1,6 +1,7 @@
 // Chat (online only). Enter opens the line, Enter sends, Esc closes it without pausing; '/' opens
-// it ready for a command. Channels: world (default), /s nearby, /p party, /w Name whisper, /who,
-// /r replies to the last whisper; party commands /invite /accept /decline /leave /kick /promote.
+// it ready for a command. Channels: world (default), /s nearby, /p party, /ra raid, /w Name whisper,
+// /who, /r replies to the last whisper; party commands /invite /accept /decline /leave /kick
+// /promote; raid groups /raid form|invite|accept|decline|leave|kick|promote|disband.
 // Recent lines fade out of the log while chat is closed.
 import { esc } from './cards.js';
 
@@ -77,7 +78,7 @@ export class ChatUI {
 
   updateChannel() {
     const v = this.input.value;
-    const [label, cls] = /^\/s\s/i.test(v) ? ['Say', 'say'] : /^\/(w|r)\s/i.test(v) ? ['Whisper', 'whisper'] : /^\/p(arty)?\s/i.test(v) ? ['Party', 'party'] : /^\/g\s/i.test(v) ? ['Guild', 'guild'] : v.startsWith('/') ? ['Command', 'system'] : ['World', 'world'];
+    const [label, cls] = /^\/s\s/i.test(v) ? ['Say', 'say'] : /^\/(w|r)\s/i.test(v) ? ['Whisper', 'whisper'] : /^\/p(arty)?\s/i.test(v) ? ['Party', 'party'] : /^\/ra\s/i.test(v) ? ['Raid', 'raid'] : /^\/g\s/i.test(v) ? ['Guild', 'guild'] : v.startsWith('/') ? ['Command', 'system'] : ['World', 'world'];
     this.chLabel.textContent = label;
     this.chLabel.className = `chat-ch ${cls}`;
   }
@@ -103,7 +104,7 @@ export class ChatUI {
     line.className = `chat-msg ${ch}`;
     let who = '';
     if (ch === 'whisper') who = from === me ? `To ${esc(to)}: ` : `${esc(from)} whispers: `;
-    else if (from) who = `${ch === 'say' ? '' : ch === 'party' ? '<i>[Party]</i> ' : ch === 'guild' ? '<i>[Guild]</i> ' : '<i>[World]</i> '}<b>${esc(from)}</b>${ti ? ` <small class="chat-title">${esc(ti)}</small>` : ''}: `;
+    else if (from) who = `${ch === 'say' ? '' : ch === 'party' ? '<i>[Party]</i> ' : ch === 'raid' ? '<i>[Raid]</i> ' : ch === 'guild' ? '<i>[Guild]</i> ' : '<i>[World]</i> '}<b>${esc(from)}</b>${ti ? ` <small class="chat-title">${esc(ti)}</small>` : ''}: `;
     line.innerHTML = `${who}${esc(text)}`;
     line.dataset.at = Date.now();
     this.log.appendChild(line);

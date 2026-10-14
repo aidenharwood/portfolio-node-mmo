@@ -152,4 +152,32 @@ A modular, procedural generator in `src/world/build/` that every builder can use
 
 ## Status
 
-- **G1:** in progress. See below.
+- **G1 Surfaces:** done.
+  - *Procedural texturing* (`render/Surfaces.js`): seventeen surface kinds drawn in the shader. A
+    world bake (`ModelKit.bake(group, { surfaces })`, which `World.finish`, story sites and
+    dungeons use) gives each piece coordinates in metres projected per triangle along its own faces,
+    offset by where it stands in its own turned frame (so a wall, its gable and a whole flattened
+    building run on), with grain along long pieces (posts, beams). Kinds come from the piece
+    (`piece(..., { pattern })`), a bake's colour table (dungeon themes) or the palette (wood →
+    planks, stone → blocks, metal → panels, thatch, canvas, sandstone, resin…). Town houses name
+    their walls (plaster, adobe, planks, panels) and roofs (tiles, slate shingles, thatch,
+    corrugated). Characters and weapons stay plain. Lines anti-alias with `fwidth` and everything
+    settles to its average as a cell nears a pixel (with an early out past that, so far walls cost
+    nothing).
+  - *Terrain*: two-tone painted patches everywhere (warmer and yellower on grass), pebbles on sand
+    and dirt, cracks across steep rock; world-space, fading with distance.
+  - *Cel shading v2* (`render/Toon.js`): four bands (N·L edges at −0.4, 0.05, 0.4) drawn in the
+    shader with edges softened on curved surfaces (flat faces stay crisp); cool, violet-leaning
+    shadows; hatching kept to the shadow band; a sunward rim light on skinned models (characters
+    and enemies) only — on flat faces seen edge-on it would flood them.
+  - *Quality*: surfaces and ground detail are off at Low (`QUALITY.low.surfaces`); the bands, cool
+    shadows and rim are at every quality.
+  - *Checks*: `tools/surfacecheck.mjs` (in `npm test`): coordinates follow turned and scaled
+    pieces at true scale, run on between pieces turned alike, grain along posts; mixed patterned
+    and plain pieces of one colour merge; every place, camp, landmark, story site and dungeon bakes
+    with surfaces on (40–90% of a settlement's triangles patterned). Build cost on a screen is
+    within noise. Frame time over a building-heavy view at 2560×1440 (Medium): within noise of
+    surfaces off (15.1 vs 15.5 ms, medians of six runs).
+  - *Not yet*: toon highlights on metal and glass, crease ink, line weight by depth — moved to G4
+    polish. Brick, cobbles and corrugated are ready for the building kit (G2) to use.
+- **G2 Building kit:** next.

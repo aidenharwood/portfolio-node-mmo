@@ -2,11 +2,14 @@
 // colour into one mesh (+ one outline). Detailed models stay cheap in draw calls.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { toonMesh, flatMesh, addOutline, toonMaterial, outlineMaterial, hullGeometry } from './Toon.js';
+import { toonMesh, flatMesh, addOutline, toonMaterial, outlineMaterial, hullGeometry, chainCompile, applyRim } from './Toon.js';
+import { SURFACE_BAKE, surfaceOf, surfaceCoords, noSurface, withSurfaces } from './Surfaces.js';
 
 /**
  * Add a bakeable piece to `parent`.
- * opts: pos [x,y,z], rot [x,y,z] (Euler XYZ), scale number | [x,y,z], outline (0 = none), glow (unlit)
+ * opts: pos [x,y,z], rot [x,y,z] (Euler XYZ), scale number | [x,y,z], outline (0 = none), glow (unlit),
+ *   pattern: what its surface is drawn as (render/Surfaces.js: 'planks', 'brick'…; false for plain;
+ *   left out, a world bake picks one by its colour)
  */
 export function piece(parent, geometry, color, opts = {}) {
   const mesh = new THREE.Mesh(geometry);
@@ -16,7 +19,7 @@ export function piece(parent, geometry, color, opts = {}) {
     if (typeof opts.scale === 'number') mesh.scale.setScalar(opts.scale);
     else mesh.scale.fromArray(opts.scale);
   }
-  mesh.userData.piece = { color, outline: opts.outline ?? 0.025, glow: !!opts.glow };
+  mesh.userData.piece = { color, outline: opts.outline ?? 0.025, glow: !!opts.glow, pattern: opts.pattern };
   parent.add(mesh);
   return mesh;
 }
@@ -29,29 +32,60 @@ export function skinPiece(parent, geometry, color, bones, opts = {}) {
   return mesh;
 }
 
-// Merges every piece directly under `group` by (colour, outline, glow). Sub-groups are untouched.
-export function bake(group) {
+// Each piece geometry unindexed and stripped to position and normal, once (pieces often share one).
+const bases = new WeakMap();
+function baseOf(geo) {
+  let b = bases.get(geo);
+  if (!b) {
+    b = geo.index ? geo.toNonIndexed() : geo.clone();
+    for (const name of Object.keys(b.attributes)) if (name !== 'position' && name !== 'normal') b.deleteAttribute(name);
+    bases.set(geo, b);
+  }
+  return b;
+}
+
+// Merges every piece directly under `group` by colour (and, for glowing ones, line weight): pieces
+// of one colour drawn with different line weights carry theirs per vertex, so their ink shell is
+// one mesh too. Sub-groups are untouched.
+// opts.surfaces (the world's builders): pieces that don't name a pattern get one by their colour
+// (render/Surfaces.js), or from opts.surfaces itself when it's a { colour: kind } table.
+export function bake(group, opts = {}) {
   const buckets = new Map();
+  const table = SURFACE_BAKE.on && opts.surfaces ? opts.surfaces : null;
   for (const child of [...group.children]) {
     const p = child.userData.piece;
     if (!p || !child.isMesh) continue;
     child.updateMatrix();
-    const g = child.geometry.index ? child.geometry.toNonIndexed() : child.geometry.clone();
-    for (const name of Object.keys(g.attributes)) if (name !== 'position' && name !== 'normal') g.deleteAttribute(name);
+    const g = baseOf(child.geometry).clone();
+    const kind = !SURFACE_BAKE.on || p.glow ? null
+      : p.pattern ?? (table ? (typeof table === 'object' ? table[p.color] : null) ?? surfaceOf(p.color) : null);
+    if (kind) surfaceCoords(g, kind, child);
     g.applyMatrix4(child.matrix);
-    const key = `${p.color}|${p.outline}|${p.glow}`;
-    if (!buckets.has(key)) buckets.set(key, { ...p, geos: [] });
-    buckets.get(key).geos.push(g);
-    group.remove(child);
+    const key = p.glow ? `${p.color}|${p.outline}|g` : `${p.color}`;
+    if (!buckets.has(key)) buckets.set(key, { ...p, geos: [], inks: [], surfaces: false });
+    const b = buckets.get(key);
+    b.geos.push(g);
+    b.inks.push(p.outline);
+    if (kind) b.surfaces = true;
+    child.parent = null;
   }
+  // (Taken out all at once: removing thousands one by one is quadratic.)
+  group.children = group.children.filter((c) => c.parent === group);
   for (const b of buckets.values()) {
+    // Patterned and plain pieces of one colour share a mesh: the plain ones get blank coordinates.
+    if (b.surfaces) for (const g of b.geos) if (!g.attributes.pat) noSurface(g);
+    const mixed = !b.glow && b.inks.some((v) => v !== b.inks[0]);
+    if (mixed) {
+      b.geos.forEach((g, i) => g.setAttribute('inkWidth', new THREE.BufferAttribute(new Float32Array(g.attributes.position.count).fill(b.inks[i]), 1)));
+    }
     const merged = mergeGeometries(b.geos);
     let mesh;
     if (b.glow) {
       mesh = flatMesh(merged, b.color);
       if (b.outline > 0) addOutline(mesh, b.outline);
     } else {
-      mesh = toonMesh(merged, b.color, { outline: b.outline });
+      mesh = toonMesh(merged, b.color, { outline: mixed ? 1 : b.inks[0] });
+      if (b.surfaces) withSurfaces(mesh.material, chainCompile);
     }
     group.add(mesh);
   }
@@ -76,11 +110,11 @@ export function flatten(group) {
   return group;
 }
 
-// Bakes `root` and every descendant group (bones keep their own transforms).
-export function bakeTree(root) {
+// Bakes `root` and every descendant group (bones keep their own transforms). opts as bake's.
+export function bakeTree(root, opts = {}) {
   const groups = [];
   root.traverse((o) => { if (!o.isMesh) groups.push(o); });
-  for (const g of groups) bake(g);
+  for (const g of groups) bake(g, opts);
   return root;
 }
 
@@ -156,7 +190,7 @@ export function bakeSkinned(root) {
     mesh.boundingSphere = slack(geo.boundingSphere.clone());
     return mesh;
   };
-  if (lit.length) meshes.push(add(mergeGeometries(lit), toonMaterial(0xffffff, { vertexColors: true }), true));
+  if (lit.length) meshes.push(add(mergeGeometries(lit), applyRim(toonMaterial(0xffffff, { vertexColors: true })), true));
   if (glow.length) meshes.push(add(mergeGeometries(glow), new THREE.MeshBasicMaterial({ vertexColors: true }), false));
   if (hulls.length) {
     const shell = mergeGeometries(hulls);

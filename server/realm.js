@@ -42,6 +42,7 @@
 import { SimHost } from './simhost.js';
 import { loadCharacter, characterData, groundList, runOp } from './characters.js';
 import { Parties } from './parties.js';
+import { RaidGroups } from './raidgroups.js';
 import { Trades } from './trade.js';
 import { Social } from './social.js';
 import { Admin } from './admin.js';
@@ -62,7 +63,7 @@ const STATES = new Set(['move', 'attack', 'dodge', 'slide', 'airdash', 'slam', '
 const FX_KINDS = new Set(['shot', 'rune', 'muzzle']);
 
 // Token bucket per message type: `rate` per second, holding up to `burst`.
-const LIMITS = { s: [30, 45], profile: [2, 6], fx: [30, 60], chat: [1.2, 5], save: [1, 4], ping: [3, 6], hit: [60, 120], st: [30, 60], op: [20, 40], resync: [0.5, 2], party: [2, 6], trade: [6, 12], mail: [2, 6], ab: [2, 6], dun: [4, 10] };
+const LIMITS = { s: [30, 45], profile: [2, 6], fx: [30, 60], chat: [1.2, 5], save: [1, 4], ping: [3, 6], hit: [60, 120], st: [30, 60], op: [20, 40], resync: [0.5, 2], party: [2, 6], raid: [2, 6], trade: [6, 12], mail: [2, 6], ab: [2, 6], dun: [4, 10] };
 const SLOW_CLIENT = 1 << 20;   // bytes queued: past this, snapshots for that player are skipped...
 const DEAD_CLIENT = 8 << 20;   // ...and past this, the connection is dropped
 const SAVE_EVERY = 30_000;  // ms: characters are written back this often (and when they leave)
@@ -220,6 +221,7 @@ export class Realm {
     this.nextId = 1;
     this.simhost = new SimHost(this, this.seed);
     this.parties = new Parties(this);
+    this.raids = new RaidGroups(this);
     this.trades = new Trades(this);
     this.social = new Social(this);
     this.admin = new Admin(this);
@@ -227,7 +229,7 @@ export class Realm {
     this.tickNo = 0;
     this.grid = new Grid(64);
     metrics.gauges = () => ({
-      layer: this.layer, players: this.sessions.size, enemies: this.simhost.enemyCount, parties: this.parties.parties.size,
+      layer: this.layer, players: this.sessions.size, enemies: this.simhost.enemyCount, parties: this.parties.parties.size, raid_groups: this.raids.groups.size,
       world_colliders: this.simhost.world.colliders.size, world_chunks: this.simhost.world.chunks.size,
       dungeon_runs: this.simhost.dungeons.runs.size,
     });
@@ -347,6 +349,7 @@ export class Realm {
       ground: groundList(core),
     });
     this.parties.online(session);
+    this.raids.online(session);
     await this.social.online(session);
     metrics.inc('logins');
     log.info('realm', `+ ${character.name}`, { account: account.name, ip: ws.ip, layer: this.layer, online: this.sessions.size });
@@ -376,6 +379,7 @@ export class Realm {
     if (!this.sessions.has(session.id)) return Promise.resolve();
     this.trades.gone(session);
     this.parties.offline(session);
+    this.raids.offline(session);
     this.sessions.delete(session.id);
     this.simhost.leave(session);
     for (const other of this.sessions.values()) {
@@ -432,6 +436,7 @@ export class Realm {
       }
       case 'resync': s.send({ t: 'char', data: characterData(s.core, s.extras), ground: groundList(s.core) }); break;
       case 'party': this.parties.handle(s, msg); break;
+      case 'raid': this.raids.handle(s, msg); break;
       case 'trade': this.trades.handle(s, msg); break;
       case 'mail': this.social.mail(s, msg); break;
       case 'hit': this.simhost.hit(s, msg); break;
@@ -484,7 +489,7 @@ export class Realm {
     const cmd0 = /^\/(\w+)(?:\s+(.*))?$/.exec(text);
     const name0 = cmd0?.[1].toLowerCase();
     // A muted player can't talk on any channel (commands still work).
-    if ((!cmd0 || ['p', 'party', 'g', 's', 'w'].includes(name0)) && s.mutedUntil > Date.now()) {
+    if ((!cmd0 || ['p', 'party', 'ra', 'g', 's', 'w'].includes(name0)) && s.mutedUntil > Date.now()) {
       s.send({ t: 'chat', ch: 'system', text: `You're muted until ${new Date(s.mutedUntil).toUTCString()}.` });
       return;
     }
@@ -499,6 +504,9 @@ export class Realm {
       const arg = (cmd[2] ?? '').trim();
       switch (cmd[1].toLowerCase()) {
         case 'p': case 'party': if (arg) this.parties.chat(s, arg); return;
+        // Raid groups (server/raidgroups.js): /raid form|invite|accept|…, /ra to talk.
+        case 'raid': return this.raids.command(s, arg);
+        case 'ra': if (arg) this.raids.chat(s, arg); return;
         case 'invite': return this.parties.invite(s, arg);
         case 'accept': return this.parties.accept(s);
         case 'decline': return this.parties.decline(s);
@@ -514,7 +522,7 @@ export class Realm {
       return;
     }
     if (text.startsWith('/')) {
-      s.send({ t: 'chat', ch: 'system', text: 'Commands: /s nearby · /w Name whisper · /p party · /g guild · /invite /accept /decline /leave /kick /promote (party) · /trade Name · /friend /unfriend /ignore /unignore Name · /guild · /report Name reason · /who' });
+      s.send({ t: 'chat', ch: 'system', text: 'Commands: /s nearby · /w Name whisper · /p party · /ra raid · /g guild · /invite /accept /decline /leave /kick /promote (party) · /raid (raid groups) · /trade Name · /friend /unfriend /ignore /unignore Name · /guild · /report Name reason · /who' });
       return;
     }
     this.bus.publish('all', { k: 'chat', from: s.name, ti: s.title ?? undefined, fromChar: s.charId, text });
@@ -609,6 +617,7 @@ export class Realm {
     grid.clear();
     for (const s of list) if (s.state) grid.add(s, s.state.p[0], s.state.p[2]);
     this.parties.tick(now);
+    this.raids.tick(now);
     this.trades.tick(now);
     this.social.tick(now);
     for (const s of list) {

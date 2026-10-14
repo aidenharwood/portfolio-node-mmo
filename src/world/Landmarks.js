@@ -5,10 +5,12 @@
 // (a landmark's cache, a settlement's folk), and gives every solid part a collider, so the
 // server's headless world (server/world.js) collides with the same shapes.
 import * as THREE from 'three';
-import { piece, bakeTree, G, shade } from '../render/ModelKit.js';
+import { piece, bakeTree, flatten, G, shade } from '../render/ModelKit.js';
 import { loftGeometry } from '../render/Loft.js';
 import { fist, sculptHead } from '../models/Human.js';
 import { C, RUNE, LAVA, LAMP, HEARTH, CARGO } from './palette.js';
+import { building } from './build/kit.js';
+import { kitStyleOf } from './build/styles.js';
 
 const TAU = Math.PI * 2;
 const _a = new THREE.Vector3();
@@ -51,6 +53,14 @@ function beam(g, a, b, r, color, { taper = 1, seg = 8, outline = 0.04, glow = fa
   _q.setFromUnitVectors(UP, _d.normalize());
   _e.setFromQuaternion(_q);
   return piece(g, G.cyl(r * taper, r, len, seg), color, { pos: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2], rot: [_e.x, _e.y, _e.z], outline, glow });
+}
+
+// A sub-group of g at (x, y, z).
+function sub(g, x, y, z) {
+  const s = new THREE.Group();
+  s.position.set(x, y, z);
+  g.add(s);
+  return s;
 }
 
 // Polar placement within a POI: angle `a` (0 = its front), distance d.
@@ -547,122 +557,14 @@ const ringSlot = (p, k, n, d) => {
   return { a, at: polar(a, d) };
 };
 
-// Procedural village house, local to group g with its entry facing +z.
-function house(g, x, y, z, ry, { wd = 6, dp = 5, ht = 3.2, wall = C.hab, roof = C.rust, trim = C.metalDark, variant = 0.5, barn = false, porch = true, chimney = false } = {}) {
+// A village house (or barn), local to group g with its entry facing +z: the building kit's
+// (world/build/kit.js), one block so it fills the box its builder collides with.
+function house(g, x, y, z, ry, { wd = 6, dp = 5, ht = 3.2, wall = C.hab, roof = C.rust, trim = C.metalDark, barn = false, porch = true, chimney = false, style = 'temperate' } = {}) {
   const h = new THREE.Group();
   h.position.set(x, y, z);
   h.rotation.y = ry;
   g.add(h);
-  const rise = dp * 0.36;
-  const base = 0.42;
-  const variationId = Math.abs(Math.floor(variant * 4)) % 4;
-  const doorW = barn ? wd * 0.44 : 1.1;
-  const doorH = barn ? ht * 0.68 : 2.05;
-  const doorX = barn ? 0 : -wd * 0.22;
-  const window = (wx, wy, frontZ) => {
-    const ww = variationId === 2 ? 0.72 : 0.9;
-    const wh = variationId === 1 ? 1.0 : 0.82;
-    piece(h, G.box(ww + 0.3, wh + 0.28, 0.14), trim, { pos: [wx, wy, frontZ], outline: 0.018 });
-    piece(h, G.box(ww, wh, 0.06), 0x182530, { pos: [wx, wy, frontZ + 0.09], outline: 0 });
-    piece(h, G.box(ww * 0.82, wh * 0.78, 0.035), LAMP, { pos: [wx, wy, frontZ + 0.14], glow: true, outline: 0 });
-    piece(h, G.box(0.06, wh * 0.92, 0.035), trim, { pos: [wx, wy, frontZ + 0.17], outline: 0 });
-    piece(h, G.box(ww * 0.94, 0.06, 0.035), trim, { pos: [wx, wy, frontZ + 0.17], outline: 0 });
-    if (variationId === 2) for (const s of [-1, 1]) piece(h, G.box(0.16, wh + 0.2, 0.12), roof, { pos: [wx + s * (ww / 2 + 0.15), wy, frontZ + 0.05], outline: 0.01 });
-  };
-
-  piece(h, G.box(wd + 0.7, 0.48, dp + 0.7), trim, { pos: [0, 0.24, 0], outline: 0.03 });
-  piece(h, G.box(wd + 0.1, 0.18, dp + 0.1), shade(trim, 0.82), { pos: [0, 0.53, 0], outline: 0.015 });
-  piece(h, G.box(wd, ht, dp), wall, { pos: [0, base + ht / 2, 0], outline: 0.045 });
-  for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
-    piece(h, G.box(0.2, ht, 0.2), trim, { pos: [sx * (wd / 2 - 0.1), base + ht / 2, sz * (dp / 2 - 0.1)], outline: 0.018 });
-  }
-  for (const sx of [-1, 1]) {
-    for (let zpos = -dp / 2 + 0.8; zpos < dp / 2; zpos += 1.15) {
-      piece(h, G.box(0.14, ht - 0.12, 0.12), trim, { pos: [sx * (wd / 2 + 0.045), base + ht / 2, zpos], outline: 0.01 });
-    }
-    for (let level = 1; level < ht; level += 0.9) piece(h, G.box(0.12, 0.08, dp - 0.2), trim, { pos: [sx * (wd / 2 + 0.06), base + level, 0], outline: 0.008 });
-  }
-  for (let level = 1; level < ht; level += 0.9) {
-    piece(h, G.box(wd * 0.94, 0.07, 0.09), trim, { pos: [0, base + level, dp / 2 + 0.04], outline: 0.008 });
-  }
-  for (const s of [-1, 1]) piece(h, G.box(wd + 0.65, 0.18, dp * 0.62), roof, { pos: [0, base + ht + dp * 0.18, s * dp * 0.26], rot: [s * 0.6, 0, 0], outline: 0.035 });
-  const gable = G.extrude(G.shape([[-wd / 2, 0], [wd / 2, 0], [0, rise]]), 0.16, 0.012);
-  for (const s of [-1, 1]) piece(h, gable.clone(), wall, { pos: [0, base + ht, s * (dp / 2 - 0.05)], outline: 0.035 });
-  piece(h, G.box(wd + 0.8, 0.24, 0.32), trim, { pos: [0, base + ht + rise, 0], outline: 0.025 });
-  for (const s of [-1, 1]) piece(h, G.box(wd + 0.5, 0.2, 0.18), trim, { pos: [0, base + ht + 0.06, s * dp * 0.52], outline: 0.018 });
-
-  const roofRows = Math.max(3, Math.floor(dp / 1.6));
-  const roofCols = Math.max(4, Math.ceil(wd / 2.4));
-  const tileW = (wd + 0.35) / roofCols;
-  const tileDepth = dp * 0.57 / roofRows;
-  for (const s of [-1, 1]) for (let row = 0; row < roofRows; row++) {
-    const t = (row + 0.5) / roofRows;
-    for (let col = 0; col < roofCols; col++) {
-      const tx = -wd / 2 - 0.1 + tileW * (col + 0.5) + (row % 2 ? tileW * 0.14 : 0);
-      const zFactor = 0.57 * t;
-      const tz = s * (dp * zFactor + 0.1 * Math.sin(0.6));
-      const ty = base + ht + dp * 0.18 - Math.sin(0.6) * dp * (zFactor - 0.26) + 0.1 * Math.cos(0.6);
-      const material = (row + col + (s > 0 ? 1 : 0)) % 3 === 0 ? shade(roof, 0.82) : roof;
-      piece(h, G.box(tileW - 0.05, 0.12, tileDepth + 0.08), material, { pos: [tx, ty, tz], rot: [s * 0.6, 0, 0], outline: 0.016 });
-    }
-    for (let rib = 0; rib <= roofCols; rib++) {
-      const rx = -wd / 2 + wd * rib / roofCols;
-      piece(h, G.box(0.09, 0.1, dp * 0.62), trim, { pos: [rx, base + ht + dp * 0.18 + 0.16, s * dp * 0.26], rot: [s * 0.6, 0, 0], outline: 0.01 });
-    }
-  }
-  for (const s of [-1, 1]) {
-    const gableZ = s * (dp / 2 + 0.06);
-    piece(h, G.box(0.16, rise * 0.82, 0.16), trim, { pos: [0, base + ht + rise * 0.43, gableZ], outline: 0.015 });
-    beam(h, [-wd * 0.44, base + ht + 0.12, gableZ], [0, base + ht + rise - 0.08, gableZ], 0.075, trim, { seg: 5, outline: 0.012 });
-    beam(h, [0, base + ht + rise - 0.08, gableZ], [wd * 0.44, base + ht + 0.12, gableZ], 0.075, trim, { seg: 5, outline: 0.012 });
-    piece(h, G.box(wd * 0.72, 0.12, 0.12), trim, { pos: [0, base + ht + 0.28, gableZ], outline: 0.012 });
-  }
-
-  piece(h, G.box(doorW + 0.3, 0.16, 0.16), trim, { pos: [doorX, base + doorH + 0.2, dp / 2 + 0.06], outline: 0.012 });
-  for (const s of [-1, 1]) piece(h, G.box(0.14, doorH, 0.18), trim, { pos: [doorX + s * (doorW / 2 + 0.08), base + doorH / 2, dp / 2 + 0.05], outline: 0.012 });
-  if (barn) {
-    for (const s of [-1, 1]) {
-      const leafX = doorX + s * doorW * 0.25;
-      piece(h, G.box(doorW / 2 - 0.04, doorH, 0.12), C.woodDark, { pos: [leafX, base + doorH / 2, dp / 2 + 0.07], outline: 0.018 });
-      for (let band = 1; band < 4; band++) piece(h, G.box(doorW / 2 - 0.12, 0.09, 0.04), trim, { pos: [leafX, base + doorH * band / 4, dp / 2 + 0.15], outline: 0.008 });
-      piece(h, G.box(0.09, doorH * 0.92, 0.04), trim, { pos: [leafX, base + doorH / 2, dp / 2 + 0.15], outline: 0.008 });
-      beam(h, [leafX - doorW * 0.18, base + 0.12, dp / 2 + 0.18], [leafX + doorW * 0.18, base + doorH - 0.12, dp / 2 + 0.18], 0.045, trim, { seg: 5, outline: 0.008 });
-    }
-    window(0, base + ht + rise * 0.45, dp / 2 + 0.08);
-  } else {
-    piece(h, G.box(doorW, doorH, 0.1), 0x3a2a20, { pos: [doorX, base + doorH / 2, dp / 2 + 0.05], outline: 0.018 });
-    for (const s of [-1, 1]) piece(h, G.box(0.07, doorH * 0.9, 0.035), shade(trim, 0.75), { pos: [doorX + s * doorW * 0.24, base + doorH / 2, dp / 2 + 0.12], outline: 0 });
-    piece(h, G.sphere(0.07, 6, 4), HEARTH, { pos: [doorX + doorW * 0.3, base + 1.0, dp / 2 + 0.14], glow: true, outline: 0 });
-    piece(h, G.box(doorW + 0.9, 0.2, 0.85), trim, { pos: [doorX, 0.1, dp / 2 + 0.46], outline: 0.018 });
-    window(wd * 0.24, base + 1.85, dp / 2 + 0.06);
-    window(-wd * 0.27, base + 1.85, dp / 2 + 0.06);
-  }
-  for (const s of [-1, 1]) {
-    const wx = s * (wd / 2 + 0.05);
-    piece(h, G.box(0.14, 0.98, 1.22), trim, { pos: [wx, base + 1.85, 0], outline: 0.015 });
-    piece(h, G.box(0.08, 0.78, 0.94), 0x182530, { pos: [wx + s * 0.08, base + 1.85, 0], outline: 0 });
-    piece(h, G.box(0.05, 0.62, 0.72), LAMP, { pos: [wx + s * 0.13, base + 1.85, 0], glow: true, outline: 0 });
-    piece(h, G.box(0.05, 0.7, 0.06), trim, { pos: [wx + s * 0.17, base + 1.85, 0], outline: 0 });
-    piece(h, G.box(0.05, 0.06, 0.9), trim, { pos: [wx + s * 0.17, base + 1.85, 0], outline: 0 });
-  }
-  if (!barn && porch) {
-    const porchW = Math.min(wd - 0.8, doorW + 2.4);
-    for (const s of [-1, 1]) piece(h, G.cyl(0.09, 0.12, 2.45, 6), trim, { pos: [doorX + s * porchW * 0.44, 1.28, dp / 2 + 1.15], outline: 0.018 });
-    piece(h, G.box(porchW, 0.16, 1.55), trim, { pos: [doorX, 2.58, dp / 2 + 0.72], outline: 0.018 });
-    piece(h, G.box(porchW + 0.3, 0.12, 1.75), roof, { pos: [doorX, 2.72, dp / 2 + 0.72], rot: [0.08, 0, 0], outline: 0.02 });
-    piece(h, G.box(porchW + 0.25, 0.2, 1.8), trim, { pos: [doorX, 0.1, dp / 2 + 1.0], outline: 0.018 });
-  }
-  if (chimney) {
-    const cx = wd * 0.3;
-    const cz = -dp * 0.18;
-    const cy = base + ht + rise * 0.56;
-    piece(h, G.box(0.82, 2.8, 0.82), trim, { pos: [cx, cy + 1.4, cz], outline: 0.025 });
-    piece(h, G.box(1.08, 0.18, 1.08), C.metalDark, { pos: [cx, cy + 2.82, cz], outline: 0.018 });
-  }
-  if (!barn) {
-    if (variationId === 0) for (const s of [-1, 1]) piece(h, G.box(0.14, ht * 0.58, 0.16), trim, { pos: [s * wd * 0.38, base + ht * 0.32, dp / 2 + 0.1], outline: 0.01 });
-    if (variationId === 1) piece(h, G.cyl(0.28, 0.28, 0.1, 8).rotateX(Math.PI / 2), C.metalDark, { pos: [0, base + ht + rise * 0.45, dp / 2 + 0.09], outline: 0.012 });
-  }
+  building(h, { wd, dp, ht, wall, roof, trim, barn, porch, chimney, style, simple: true });
   return h;
 }
 
@@ -699,9 +601,9 @@ export const SETTLEMENT_BUILDERS = {
     const crop = biome === 'highland' || biome === 'meadow' ? 0xd8b84a : 0x5aa84e;
     const slots = [0, 1, 2, 3].map((k) => ringSlot(p, k, 4, 11.5));
     const [h1, h2, h3, h4] = slots;
-    house(g, h1.at[0], gy(...h1.at), h1.at[1], h1.a + Math.PI, { wd: 7, dp: 5.5, ht: 3.4, variant: rnd(), chimney: true });
+    house(g, h1.at[0], gy(...h1.at), h1.at[1], h1.a + Math.PI, { wd: 7, dp: 5.5, ht: 3.4, variant: rnd(), chimney: true, style: kitStyleOf(biome) });
     colBox(h1.at[0], h1.at[1], 3.85, 3.1, h1.a + Math.PI, 5.9);
-    house(g, h2.at[0], gy(...h2.at), h2.at[1], h2.a + Math.PI, { wd: 8, dp: 6, ht: 4.2, wall: 0x9a3a2a, roof: C.metalDark, trim: C.metal, variant: rnd(), barn: true });
+    house(g, h2.at[0], gy(...h2.at), h2.at[1], h2.a + Math.PI, { wd: 8, dp: 6, ht: 4.2, wall: 0x9a3a2a, roof: C.metalDark, trim: C.metal, variant: rnd(), barn: true, style: kitStyleOf(biome) });
     colBox(h2.at[0], h2.at[1], 4.35, 3.35, h2.a + Math.PI, 6.9);
     // Silo
     piece(g, G.cyl(1.6, 1.6, 8, 14), C.hab, { pos: [h3.at[0], gy(...h3.at) + 4, h3.at[1]], outline: 0.04 });
@@ -739,6 +641,7 @@ export const SETTLEMENT_BUILDERS = {
     }
     for (const [x, z] of [polar(2.4, 8), polar(-2.4, 8)]) lampPost(g, x, gy(x, z), z);
     traderStall(w, p, f);
+    flatten(g);
     w.finish(g);
     w.crate(...toWorld(p, ...polar(1.3, 9.5)), rnd() * 3, 1);
     w.barrel(...toWorld(p, ...polar(-1.2, 9)));
@@ -827,11 +730,12 @@ export const SETTLEMENT_BUILDERS = {
     // Huts, either side of the rig.
     for (const a of [2.1, -2.1]) {
       const [hx, hz] = polar(a, 13);
-      house(g, hx, gy(hx, hz), hz, a + Math.PI, { wd: 5, dp: 4, ht: 2.8, wall: C.steel, roof: C.metalDark, trim: 0xd9a227, variant: rnd(), porch: false });
+      house(g, hx, gy(hx, hz), hz, a + Math.PI, { wd: 5, dp: 4, ht: 2.8, wall: C.steel, roof: C.metalDark, trim: 0xd9a227, variant: rnd(), porch: false, style: kitStyleOf(biome) });
       colBox(hx, hz, 2.9, 2.4, a + Math.PI, 4.8);
     }
     for (const [x, z] of [polar(2.3, 8), polar(-2.3, 8)]) lampPost(g, x, gy(x, z), z);
     traderStall(w, p, f);
+    flatten(g);
     w.finish(g);
   },
 
@@ -886,10 +790,7 @@ export const SETTLEMENT_BUILDERS = {
       g.add(hut);
       piece(hut, G.box(5, 0.3, 5), plank, { pos: [0, 0, 0], outline: 0.03 });
       for (const [ox, oz] of [[-2.2, -2.2], [2.2, -2.2], [-2.2, 2.2], [2.2, 2.2]]) piece(hut, G.cyl(0.14, 0.16, 2.6, 6), C.woodDark, { pos: [ox, -1.2, oz], outline: 0.01 });
-      piece(hut, G.box(3.6, 2.4, 3.6), shade(plank, 1.15), { pos: [0, 1.35, 0], outline: 0.03 });
-      piece(hut, G.cone(3.4, 2.2, 4), C.thatch, { pos: [0, 3.6, 0], rot: [0, Math.PI / 4, 0], outline: 0.04 });
-      piece(hut, G.box(1, 1.8, 0.1), 0x2a2018, { pos: [0, 1.0, 1.82], outline: 0.01 });
-      piece(hut, G.sphere(0.18, 8, 6), LAMP, { pos: [1.2, 2.1, 1.95], glow: true, outline: 0.01 });
+      building(sub(hut, 0, 0.15, 0), { wd: 3.6, dp: 3.6, ht: 2.4, wall: shade(plank, 1.15), wallSurf: 'planks', roof: C.thatch, trim: C.woodDark, style: 'wet', simple: true, porch: false, doorX: 0 });
       col(...s.at, 2.8, 6.2);
       // Boardwalk back to the plaza.
       const [bx, bz] = polar(s.a, 6.5);
@@ -905,6 +806,7 @@ export const SETTLEMENT_BUILDERS = {
     }
     for (const [x, z] of [polar(1.9, 7.5), polar(-1.9, 7.5), polar(Math.PI, 8.5)]) lampPost(g, x, gy(x, z), z);
     traderStall(w, p, f);
+    flatten(g);
     w.finish(g);
   },
 };

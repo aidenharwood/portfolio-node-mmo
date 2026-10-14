@@ -9,7 +9,8 @@
 //   tiles    each chunk paints a small top-down tile for the map and minimap.
 import * as THREE from 'three';
 import { smoothstep } from '../core/noise.js';
-import { toonMaterial } from '../render/Toon.js';
+import { toonMaterial, chainCompile } from '../render/Toon.js';
+import { withTerrain } from '../render/Surfaces.js';
 import { WATER_LEVEL } from './Gen.js';
 
 export const CHUNK = 64;
@@ -46,7 +47,7 @@ const _c = new THREE.Color();
 
 let sharedMaterial = null;
 export function terrainMaterial() {
-  sharedMaterial ??= toonMaterial(0xffffff, { vertexColors: true });
+  sharedMaterial ??= withTerrain(toonMaterial(0xffffff, { vertexColors: true }), chainCompile);
   return sharedMaterial;
 }
 

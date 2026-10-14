@@ -55,6 +55,8 @@ import { Net } from './net/Net.js';
 import { Remotes } from './net/Remotes.js';
 import { ChatUI } from './ui/ChatUI.js';
 import { PartyUI } from './ui/PartyUI.js';
+import { RaidUI } from './ui/RaidUI.js';
+import { Telegraphs } from './fx/Telegraphs.js';
 import { TradeUI } from './ui/TradeUI.js';
 import { SocialUI } from './ui/SocialUI.js';
 import { TouchControls } from './ui/TouchControls.js';
@@ -183,6 +185,10 @@ class Game {
     this.remotes = new Remotes(this);
     this.chat = new ChatUI(this);
     this.partyUI = new PartyUI(this);
+    // Raids (gameplay phase 7): the raid group, the gate, the encounter on the HUD — and the
+    // marks a raid boss puts on the floor.
+    this.raidUI = new RaidUI(this);
+    this.telegraphs = new Telegraphs(this);
     this.tradeUI = new TradeUI(this);
     this.socialUI = new SocialUI(this);
     // Every change to the character goes through the shared rules (rpg/CharacterCore.js).
@@ -678,6 +684,12 @@ class Game {
         this.partyUI.respond(e.code === 'KeyY');
         return;
       }
+      // …a raid group's.
+      if (this.raidUI.invite && (e.code === 'KeyY' || e.code === 'KeyN') && inGame) {
+        e.preventDefault();
+        this.raidUI.respond(e.code === 'KeyY');
+        return;
+      }
       // …then a trade request.
       if (this.tradeUI.request && (e.code === 'KeyY' || e.code === 'KeyN') && inGame) {
         e.preventDefault();
@@ -884,6 +896,7 @@ class Game {
     this.touch.update();
     this.adaptResolution();
     this.partyUI.update(realDt);
+    this.raidUI.update(realDt);
     this.tradeUI.update(realDt);
     this.menu.update(realDt);
     document.body.classList.toggle('mouse-free', this.state === 'playing' && this.input.lockSupported && !this.input.locked);
@@ -918,6 +931,7 @@ class Game {
     if (!this.net.inWorld) this.char.expire(this.time);
     this.enemyLayer.update(dt, held);
     this.dungeonView.update(dt);
+    this.telegraphs.update(dt);
     this.projectiles.update(dt);
     this.pickups.update(dt);
     this.resolveSeparation();
@@ -1145,14 +1159,16 @@ class Game {
     return {
       enter: (ask) => d()?.enter(who(), ask) ?? null,
       leave: () => d()?.leave(who()) ?? null,
-      current: () => { const r = d()?.runOf(0); return r && { dungeon: r.def.id, tier: r.tier, shared: r.shared }; },
+      current: () => { const r = d()?.runOf(0); return r && { dungeon: r.def.id, tier: r.tier, shared: r.shared, raid: !!r.raid }; },
       claim: (id, kind) => d()?.claim(0, 'me', id, this.player.position, kind) ?? null,
     };
   }
 
-  // A dungeon beaten offline: into the records, as the server would send it.
-  onDungeonCleared(run) {
-    this.charLink.do({ op: 'dclear', roll: { d: run.def.id, tier: run.tier, name: run.def.name } });
+  // A dungeon (or one of a raid's encounters) beaten offline: into the records, as the server
+  // would send it.
+  onDungeonCleared(run, enc = null) {
+    if (enc) this.charLink.do({ op: 'rclear', roll: { raid: run.def.id, enc: enc.def.id, name: enc.def.name, tier: run.tier ?? 0, final: enc === run.raid.last, flawless: !enc.fell } });
+    else this.charLink.do({ op: 'dclear', roll: { d: run.def.id, tier: run.tier, name: run.def.name } });
   }
 
   // Quests that finish where they're done, waiting to be handed in (after a load).
@@ -1299,6 +1315,7 @@ class Game {
   interactPrompt(it) {
     if (it.kind === 'dthing') return this.dungeonView.prompt(it);
     if (it.kind === 'gate' && it.n.gate === 'dungeon') return PROPS.waygate.prompt;
+    if (it.kind === 'gate' && it.n.gate === 'raid') return 'Use the raid gate';
     if (it.kind === 'object' && this.dungeonAt(it)) return `Go down into ${this.dungeonAt(it).name}`;
     if (it.kind === 'campfire') return 'Rest at the hearth reactor';
     if (it.kind === 'waystone') return this.attuned.has(it.id) ? `${it.name} — open map to travel` : `Attune ${it.name} waystone`;
@@ -1480,15 +1497,16 @@ class Game {
       });
       return;
     }
+    // A raid gate: into the raids (ui/RaidUI.js).
+    if (gate.n.gate === 'raid') { this.raidUI.gateDialog(gate); return; }
     this.dialogue.open({
       name: gate.name, title: gate.title, options: [],
-      text: gate.n.gate === 'raid'
-        ? 'An arch big enough to march an army through, sealed in ember light. Every plan on the war table ends here: the Wardens will open it when they can muster a force to send.'
-        : 'The seal hums under your hand, violet and cold. Somewhere below lies the way down — the Wardens will open it once they know what waits there.',
+      text: 'The seal hums under your hand, violet and cold. Somewhere below lies the way down — the Wardens will open it once they know what waits there.',
     });
   }
 
-  // A city's war table: the strongholds the scouts have marked round the city.
+  // A city's war table: the strongholds the scouts have marked round the city — and the raid
+  // board: the raids through the gate yard's raid gate, and your raid group (ui/RaidUI.js).
   warTable(t) {
     const p = t.position;
     const forts = this.world.poisNear(p.x, p.z, 720, ['camp']).filter((c) => c.stronghold)
@@ -1497,9 +1515,11 @@ class Game {
       title: c.name, tag: `Lv ${c.level}${this.encounters.isCleared(c.id) ? ' · broken' : ''}`,
       text: `${RACE[c.race].name.replace(/^the /, 'The ')}: about ${Math.round(Math.hypot(c.x - p.x, c.z - p.z) / 10) * 10} metres ${compass(c.x - p.x, c.z - p.z)}.`,
     }));
+    const raid = this.raidUI;
+    const group = !this.net.inWorld ? ' Offline, you go into a raid alone.' : raid.raid ? ` Your raid group: ${raid.size} strong.` : ' Form a raid group here to take other parties with you.';
     this.dialogue.open({
-      name: t.name, title: t.title, notes, options: [],
-      text: notes.length ? 'Every stronghold the scouts have found, marked on the holo-map. The Wardens are mustering; when they march, it starts here.' : 'The holo-map is quiet: no strongholds marked near the city yet.',
+      name: t.name, title: t.title, notes: [...notes, ...raid.warNotes()], options: raid.warOptions(),
+      text: `${notes.length ? 'Every stronghold the scouts have found, marked on the holo-map.' : 'The holo-map is quiet: no strongholds marked near the city yet.'} Beside it, the raid board: the forces the Wardens send through the raid gate in the gate yard.${group}`,
     });
   }
 

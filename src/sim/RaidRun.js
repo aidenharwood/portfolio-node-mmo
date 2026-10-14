@@ -37,6 +37,8 @@ export class RaidRun {
         bosses: () => [...enc.scripts.values()].map((s) => s.boss).filter((b) => b.alive),
         emit: (ev) => this.sim.emit(ev),
         say: (text, big = false) => this.dungeons.tell(run, { say: text, big: big ? 1 : undefined }),
+        // (A phase, a rage, a shield up or down: everyone's HUD hears at once.)
+        changed: () => { enc.told = 0; this.dungeons.tell(run); },
       };
       return enc;
     });
@@ -81,6 +83,8 @@ export class RaidRun {
       // In the fight (anyone in the copy falling spoils a flawless kill).
       for (const s of scripts) s.update(dt);
       if (!enc.fell && this.sim.players.some((p) => !p.alive && this.run.players.has(p.id))) enc.fell = true;
+      // Every few seconds the fight's state goes out again (the enrage clocks stay true).
+      if ((enc.told = (enc.told ?? 0) + dt) > 5) { enc.told = 0; this.dungeons.tell(this.run); }
       // One of several bosses down: the rest rally.
       for (const s of scripts) {
         if (s.boss.alive || s.fallen) continue;

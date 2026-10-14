@@ -12,6 +12,19 @@ import { THEMES } from './dungeons.js';
 
 const TAU = Math.PI * 2;
 const GOLD = 0xf0c674;
+// What each theme's walls, floors and trim are drawn as (render/Surfaces.js).
+const SURFACES = {
+  scav: { wall: 'concrete', wallDark: 'concrete', floor: 'concrete', floorEdge: 'panels', trim: 'rust', ceiling: 'concrete', metal: 'panels' },
+  hive: { wall: 'resin', wallDark: 'resin', floor: 'resin', floorEdge: 'resin', trim: 'resin', ceiling: 'resin' },
+  synth: { wall: 'panels', wallDark: 'panels', floor: 'panels', floorEdge: 'panels', ceiling: 'panels', metal: 'panels' },
+  maker: { wall: 'carved', wallDark: 'carved', floor: 'blocks', floorEdge: 'blocks', trim: 'carved', ceiling: 'carved' },
+  fauna: { wall: 'rock', wallDark: 'rock', floor: 'rock', floorEdge: 'rock', ceiling: 'rock' },
+};
+// The same, by colour, for a bake.
+const surfacesOf = (theme) => {
+  const T = THEMES[theme];
+  return Object.fromEntries(Object.entries(SURFACES[theme] ?? {}).map(([k, kind]) => [T[k], kind]));
+};
 const VOID = 0x07080c;
 
 // A group at local (x, y, z), turned to `ry`.
@@ -105,7 +118,7 @@ export function buildInterior(it) {
     const cz = (r.z + r.h / 2) * cell;
     piece(shell, G.box(w, 1, h), T.floorEdge, { pos: [cx, r.floor - 0.5, cz], outline: 0 });
     if (w > 6 && h > 6) piece(shell, G.box(w - 3.2, 0.06, h - 3.2), T.floor, { pos: [cx, r.floor + 0.01, cz], outline: 0 });
-    if (r.kind === 'boss' || r.kind === 'mini') {
+    if (r.kind === 'boss' || r.kind === 'mini' || r.kind === 'arena') {
       piece(shell, G.cyl(Math.min(w, h) * 0.22, Math.min(w, h) * 0.22, 0.05, 32), T.trim, { pos: [cx, r.floor + 0.04, cz], outline: 0 });
       piece(shell, G.torus(Math.min(w, h) * 0.22, 0.07, TAU, 4, 40), T.accent, { pos: [cx, r.floor + 0.07, cz], rot: [Math.PI / 2, 0, 0], glow: true, outline: 0 });
     }
@@ -237,11 +250,12 @@ export function buildInterior(it) {
     piece(frame, G.box(span + 1, 0.55, 0.9), T.trim, { pos: [0, 4.55, 0], outline: 0.025 });
     if (d.kind === 'open') continue;
     const g = group(root, fx, d.floor, fz, ry);
-    const color = d.kind === 'seal' ? T.accent : d.kind === 'locked' ? 0xffb030 : 0x5ee6ff;
+    // (A raid arena's gate: bars of ember light, shut while its fight is on.)
+    const color = d.kind === 'seal' ? T.accent : d.kind === 'gate' ? 0xff7a3a : d.kind === 'locked' ? 0xffb030 : 0x5ee6ff;
     const halves = [];
     for (const s of [-1, 1]) {
       const h = group(g, s * span / 4, 0, 0);
-      if (d.kind === 'seal') {
+      if (d.kind === 'seal' || d.kind === 'gate') {
         for (let k = 0; k < 3; k++) piece(h, G.box(0.16, 4.2, 0.16), color, { pos: [(k - 1) * 0.6, 2.1, 0], glow: true, outline: 0.01 });
         piece(h, G.box(span / 2 - 0.05, 0.2, 0.3), T.wallDark, { pos: [0, 0.1, 0], outline: 0.012 });
         piece(h, G.box(span / 2 - 0.05, 0.2, 0.3), T.wallDark, { pos: [0, 4.2, 0], outline: 0.012 });
@@ -351,7 +365,7 @@ export function buildInterior(it) {
   // Everything that never moves merges by colour: a whole dungeon in a few dozen draw calls.
   flatten(shell);
   flatten(lid);
-  bakeTree(root);
+  bakeTree(root, { surfaces: surfacesOf(L.theme) });
   // Ceilings light nothing from above and must not darken the rooms with their shadows.
   lid.traverse((o) => { if (o.isMesh) { o.castShadow = false; o.receiveShadow = false; } });
   shell.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });

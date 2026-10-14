@@ -3,7 +3,8 @@
 // in and play back on the client's replicas, that Threat can't change mid-fight, that a new
 // character has no talent points, and that the server notes where they've been (for
 // achievements); and walks the other round Brightwater's services (a quest board's postings
-// taken, a rest that restocks the fine stock, nothing done for someone out of reach).
+// taken, a rest that restocks the fine stock, nothing done for someone out of reach); and forms a
+// raid group between two players, with raid chat.
 //   node tools/smoke.mjs            one process on a throwaway SQLite database (ROLE=all)
 //   node tools/smoke.mjs cluster    a gateway and two realm layers on DATABASE_URL (Postgres);
 //                                   two players land on different layers, and world chat and a
@@ -213,6 +214,21 @@ async function run() {
   a.say(`/w ${b.name} psst`);
   await b.until((m) => m.t === 'chat' && m.ch === 'whisper' && m.text === 'psst', 'a whisper');
   check(true, 'a whisper arrives');
+  // A raid group (gameplay phase 7; one layer's, so not across the cluster's two): formed, the
+  // other player invited and in, and raid chat between them.
+  if (!cluster) {
+    a.ws.send(JSON.stringify({ t: 'raid', act: 'form' }));
+    await a.until((m) => m.t === 'raid' && m.raid?.units.length === 1, 'a raid group');
+    a.say(`/raid invite ${b.name}`);
+    await b.until((m) => m.t === 'rinvite' && m.from === a.name, 'a raid invitation');
+    b.ws.send(JSON.stringify({ t: 'raid', act: 'accept' }));
+    const both = await a.until((m) => m.t === 'raid' && m.raid?.units.length === 2, 'the raid with both in it');
+    b.say('/ra ready when you are');
+    await a.until((m) => m.t === 'chat' && m.ch === 'raid' && m.text === 'ready when you are', 'raid chat');
+    check(!!both, 'a raid group formed, the other player invited and in, and /ra between them');
+    a.say('/raid disband');
+    await b.until((m) => m.t === 'raid' && m.raid === null, 'the raid disbanding');
+  }
   // Standing near each other at Brightwater, each is told the other is there and sees them move.
   // (A third player, so the first can still jump straight to a far camp below.)
   if (!cluster) {

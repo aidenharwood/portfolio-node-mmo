@@ -1062,3 +1062,45 @@ body.touch #abilities { display: none !important; }
 .cx.locked small { opacity: 0.45; }
 .player-label .np-title, .chat-title { font-family: var(--display); font-weight: 600; font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--accent-2); text-shadow: var(--outline); text-align: center; }
 .chat-title { font-size: 10px; }
+
+/* ---------- raids (gameplay phase 7: ui/RaidUI.js) ---------- */
+:root { --raid: #ff9a5a; }
+#raid { position: absolute; left: 24px; top: 380px; display: grid; grid-template-columns: repeat(2, 120px); gap: 4px 6px; }
+#raid:empty { display: none; }
+.rd-head { grid-column: 1 / -1; font-family: var(--display); font-weight: 600; font-size: 12px; letter-spacing: 3px; text-transform: uppercase; color: var(--raid); text-shadow: var(--outline); }
+.rd-member { padding: 3px 7px 5px; background: var(--glass); clip-path: var(--cut-s); box-shadow: inset 2px 0 0 var(--raid), inset 0 0 0 1px var(--line); }
+.rd-member b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--display); font-weight: 600; font-size: 12.5px; letter-spacing: 1px; color: #fff1e6; text-shadow: var(--outline); }
+.rd-member.leader b::after { content: ' ◆'; font-size: 8px; vertical-align: 2px; color: var(--accent-2); }
+.rd-hp { display: block; height: 3px; margin-top: 2px; background: rgba(6, 8, 14, 0.8); }
+.rd-hp em { display: block; height: 100%; width: 100%; background: linear-gradient(90deg, #ff7a3a, var(--raid)); transition: width 0.2s; }
+.rd-member.offline, .rd-member.down { opacity: 0.5; }
+.rd-member.down .rd-hp em { background: var(--hp); }
+#raid-invite {
+  position: fixed; left: 50%; top: 140px; transform: translateX(-50%); z-index: 16; display: flex; align-items: center; gap: 14px;
+  padding: 9px 12px 9px 16px; font-size: 14px; font-weight: 600; text-shadow: var(--outline);
+  background: var(--glass); clip-path: var(--cut-s); box-shadow: inset 0 0 0 1px var(--raid), 0 0 18px rgba(255, 154, 90, 0.25);
+}
+#raid-invite b { color: var(--raid); }
+#raid-invite span { display: flex; gap: 6px; }
+#raid-invite button { padding: 5px 10px; border: none; color: #e9f1ff; font-family: var(--display); font-weight: 600; font-size: 13px; letter-spacing: 1.5px; text-transform: uppercase; background: rgba(255, 255, 255, 0.06); box-shadow: inset 0 0 0 1px var(--line-hi); clip-path: var(--cut-s); }
+#raid-invite button:hover { background: rgba(255, 154, 90, 0.18); box-shadow: inset 0 0 0 1px var(--raid); }
+#raid-invite kbd { font-size: 10px; margin: 0 0 0 4px; }
+#raid-boss { position: absolute; top: 46px; left: 50%; transform: translateX(-50%); width: min(620px, 64vw); text-align: center; }
+#raid-boss.hidden { display: none; }
+.rb-title { font-family: var(--display); font-weight: 600; font-size: 13px; letter-spacing: 4px; text-transform: uppercase; color: var(--raid); text-shadow: var(--outline); margin-bottom: 4px; }
+.rb-boss { margin-bottom: 6px; }
+.rb-boss.dead { opacity: 0.35; }
+.rb-name { display: flex; justify-content: center; align-items: baseline; gap: 10px; margin-bottom: 3px; }
+.rb-name b { font-family: var(--display); font-weight: 600; font-size: 17px; letter-spacing: 4px; text-transform: uppercase; text-shadow: var(--outline-big); color: #ffc6bc; }
+.rb-name small { font-size: 11px; font-weight: 600; letter-spacing: 1.5px; text-transform: uppercase; color: #ffe0c8; opacity: 0.8; }
+.rb-boss .boss-track { position: relative; }
+.rb-fill { position: absolute; left: 0; top: 0; bottom: 0; background: linear-gradient(#ff9a8a 0 22%, #e83a2e 22% 78%, #8a1408 78%); box-shadow: 0 0 10px rgba(255, 80, 60, 0.6); }
+.rb-shield { position: absolute; left: 0; top: 0; height: 40%; background: #9fe8ff; box-shadow: 0 0 8px rgba(160, 230, 255, 0.8); }
+.rb-boss.immune .boss-track { box-shadow: inset 0 0 0 2px #9fe8ff, 0 0 14px rgba(160, 230, 255, 0.6); }
+.rb-boss.immune .rb-name small::after { content: ' · immune'; color: #9fe8ff; }
+.rb-enrage { font-size: 11px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: #ffe0c8; text-shadow: var(--outline); }
+.rb-enrage.on { color: #ff5a3a; animation: rb-pulse 0.8s ease-in-out infinite alternate; }
+@keyframes rb-pulse { from { opacity: 0.6; } to { opacity: 1; } }
+.chat-msg.raid { color: #ffe2cc; }
+.chat-msg.raid b { color: var(--raid); }
+.chat-ch.raid { color: var(--raid); }
