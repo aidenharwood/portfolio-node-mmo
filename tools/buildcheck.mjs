@@ -16,6 +16,7 @@ let failed = 0;
 const fail = (k, msg) => { failed++; console.log(`${k.padEnd(24)} FAILED: ${msg}`); };
 
 // ---------------------------------------------------------------- plans
+KIT.draw = true;
 {
   let n = 0;
   for (const style of Object.keys(KIT_STYLES)) {
@@ -35,6 +36,7 @@ const fail = (k, msg) => { failed++; console.log(`${k.padEnd(24)} FAILED: ${msg}
         const g2 = new THREE.Group();
         building(g1, o);
         building(g2, o);
+        if (!g1.children.length || !g2.children.length) fail(`build:${style}`, `seed ${seed} produced an empty building`);
         const sig = (g) => g.children.map((c) => `${c.userData.piece?.color}:${c.position.toArray().map((v) => v.toFixed(3))}`).join('|');
         if (sig(g1) !== sig(g2)) fail(`build:${style}`, `seed ${seed} built two ways`);
         n++;
@@ -42,6 +44,21 @@ const fail = (k, msg) => { failed++; console.log(`${k.padEnd(24)} FAILED: ${msg}
     }
   }
   console.log(`plans: ${failed ? 'problems' : 'ok'} (${n} plans, every style, pitched and flat, planned and built twice)`);
+}
+
+// Every explicit footprint and roof module remains inside its plan and gets a collider.
+for (const footprint of ['rect', 'L', 'T', 'U', 'court']) {
+  for (const roofForm of ['gable', 'hip', 'shed', 'parapet', 'dome', 'cone', 'sawtooth', 'crenel']) {
+    const plan = planBuilding({ wd: 14, dp: 12, ht: 3, storeys: 2, wall: C.resin, roof: C.chitin, style: 'hive', footprint, roofForm }, 771);
+    if (plan.cols.length !== plan.masses.length || !plan.cols.every((c) => c.surface === 'resin')) fail(`plan:${footprint}/${roofForm}`, 'collider surface or count differs from its mass');
+    for (const m of plan.masses) {
+      if (Math.abs(m.x) + m.wd / 2 > 7 + 1e-6 || Math.abs(m.z) + m.dp / 2 > 6 + 1e-6) fail(`plan:${footprint}/${roofForm}`, 'mass extends outside its footprint');
+      if (m.H + m.rise < m.H) fail(`plan:${footprint}/${roofForm}`, 'roof collider height is below the wall height');
+    }
+    const group = new THREE.Group();
+    building(group, { wd: 14, dp: 12, ht: 3, storeys: 2, wall: C.resin, roof: C.chitin, style: 'hive', footprint, roofForm });
+    if (!group.children.length) fail(`build:${footprint}/${roofForm}`, 'no geometry was built');
+  }
 }
 
 // ---------------------------------------------------------------- places
@@ -84,10 +101,10 @@ for (const [k, p] of want) {
   KIT.doors = null;
   if (collidersOf(server, p) !== collidersOf(screen, p)) fail(k, 'the server and a screen took different colliders');
   // Doors: open ground on the doorstep (the place's own colliders, and anything streamed in by it).
-  let blocked = 0;
+  const blockedDoors = [];
   // (Doors up on platforms and stilts open onto those.)
-  for (const d of doors) if (d.y - screen.groundHeight(d.x, d.z) < 1 && screen.blocks({ x: d.x, z: d.z, y: screen.groundHeight(d.x, d.z) + 0.9 })) blocked++;
-  if (blocked) fail(k, `${blocked} of ${doors.length} doors open onto something solid`);
+  for (const d of doors) if (d.y - screen.groundHeight(d.x, d.z) < 1 && screen.blocks({ x: d.x, z: d.z, y: screen.groundHeight(d.x, d.z) + 0.9 })) blockedDoors.push(d);
+  if (blockedDoors.length) fail(k, `${blockedDoors.length} of ${doors.length} doors blocked (${blockedDoors.map((d) => `${d.footprint}@${d.x.toFixed(1)},${d.z.toFixed(1)}`).join('; ')})`);
   let draws = 0;
   screen.pois.get(p.id).group.traverse((m) => { if (m.isMesh && !m.material.isShaderMaterial) draws++; });
   console.log(`${k.padEnd(24)} ${String(doors.length).padStart(3)} buildings  ${String(draws).padStart(3)} draws  ${String(screen.pois.get(p.id).colliders.length).padStart(4)} colliders`);

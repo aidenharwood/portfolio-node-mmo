@@ -156,11 +156,25 @@ export const ROOFS = {
     piece(g, G.sphere(0.12, 8, 6), r.glow, { pos: [0, 0.65 + R + 0.7, 0], glow: true, outline: 0.006 });
     return 0.65 + R + 0.8;
   },
+
+  // A conical cap for round towers and ancient or organic landmarks.
+  cone(g, r) {
+    const R = Math.min(r.len, r.span) * 0.44;
+    const H = R * 1.2;
+    piece(g, G.cyl(R, R, 0.16, 16), r.trim, { pos: [0, 0.08, 0], outline: 0.01 });
+    piece(g, G.cone(R, H, 16), r.roof, { pos: [0, 0.16 + H / 2, 0], outline: 0.03, pattern: r.roofSurf });
+    piece(g, G.cyl(0.06, 0.09, 0.35, 7), r.trim, { pos: [0, H + 0.28, 0], outline: 0.008 });
+    return H + 0.46;
+  },
 };
 
 // How high each form rises over a block `span` across (before its own extras), for planning.
 export function roofRise(form, span, pitch) {
   if (form === 'gable' || form === 'hip') return span * pitch;
   if (form === 'shed') return span * pitch * 0.6;
+  if (form === 'dome') return span * 0.34 + 1.45;
+  if (form === 'cone') return span * 0.53 + 0.46;
+  if (form === 'parapet') return 0.7;
+  if (form === 'crenel' || form === 'sawtooth') return 1.3;
   return 0;
 }

@@ -6,7 +6,7 @@ import { esc } from './cards.js';
 import { AFFIXES } from '../sim/affixes.js';
 
 const css = (hex) => `#${(hex ?? 0xffd23f).toString(16).padStart(6, '0')}`;
-// A marker's look: '!' (gold) a quest to take, '?' one to hand in, '…' someone a quest wants.
+// A marker's state: '!' a quest to take, '?' one to hand in, '…' someone a quest wants.
 const MARK = { '?': 'turnin', '…': 'talk' };
 
 const _v = new THREE.Vector3();
@@ -91,12 +91,15 @@ export class WorldLabels {
         const el = this.el(n, 'npc-label');
         seen.add(n);
         const marker = n.marker;
+        const markerKind = n.markerKind;
         // What they call out as you come near (main.js updateBarks), for a few seconds.
         const say = n.bark && n.bark.until > game.time ? n.bark.text : '';
-        const key = `${marker ?? ''}|${say}`;
+        const key = `${marker ?? ''}|${markerKind ?? ''}|${say}`;
         if (el._key !== key) {
           el._key = key;
-          el.innerHTML = `${say ? `<div class="np-say">${esc(say)}</div>` : ''}${marker ? `<div class="marker ${MARK[marker] ?? ''}">${marker}</div>` : ''}<div class="np-name">${esc(n.name)}</div><div class="np-title">${esc(n.title)}</div>`;
+          const typeClass = markerKind === 'story' ? 'story' : markerKind === 'side' ? 'side' : '';
+          const typeLabel = markerKind === 'story' ? 'Story quest' : markerKind === 'side' ? 'Side quest' : '';
+          el.innerHTML = `${say ? `<div class="np-say">${esc(say)}</div>` : ''}${marker ? `<div class="marker ${MARK[marker] ?? ''} ${typeClass}" aria-label="${typeLabel || 'Quest'}">${typeLabel || marker}</div>` : ''}<div class="np-name">${esc(n.name)}</div><div class="np-title">${esc(n.title)}</div>`;
         }
         this.place(el, this.project(n.position, n.height + 0.3, w, h));
       }

@@ -304,6 +304,15 @@ kbd {
 @keyframes bob { to { translate: 0 -5px; } }
 .npc-label .marker.turnin { background: #9fffc0; box-shadow: 0 0 0 2px rgba(10, 12, 19, 0.8), 0 0 12px rgba(159, 255, 192, 0.9); }
 .npc-label .marker.talk { width: 11px; height: 11px; background: var(--accent); box-shadow: 0 0 0 2px rgba(10, 12, 19, 0.8), 0 0 12px rgba(94, 230, 255, 0.9); }
+.npc-label .marker.story, .npc-label .marker.side { display: grid; width: 20px; height: 20px; transform: none; place-items: center; border: 1px solid rgba(255,255,255,.8); font-size: 0; }
+.npc-label .marker.story { color: #17130a; background: #ffcf7a; clip-path: polygon(50% 0, 62% 29%, 94% 18%, 82% 50%, 100% 70%, 67% 74%, 50% 100%, 33% 74%, 0 70%, 18% 50%, 6% 18%, 38% 29%); box-shadow: 0 0 0 2px rgba(10,12,19,.8), 0 0 12px rgba(255,207,122,.9); }
+.npc-label .marker.side { border-radius: 50%; color: #07161a; background: #5ee6ff; box-shadow: 0 0 0 2px rgba(10,12,19,.8), 0 0 12px rgba(94,230,255,.85); }
+.npc-label .marker.story::before { content: '✦'; font: 700 13px/1 var(--ui); }
+.npc-label .marker.side::before { content: '!'; font: 800 14px/1 var(--ui); }
+.npc-label .marker.story.turnin { background: #9fffc0; box-shadow: 0 0 0 2px rgba(10,12,19,.8), 0 0 12px rgba(159,255,192,.9); }
+.npc-label .marker.side.turnin { background: #9fffc0; box-shadow: 0 0 0 2px rgba(10,12,19,.8), 0 0 12px rgba(159,255,192,.9); }
+.npc-label .marker.story.talk { width: 20px; height: 20px; background: #ffcf7a; }
+.npc-label .marker.side.talk { width: 20px; height: 20px; background: #5ee6ff; }
 .npc-label .np-say {
   width: max-content; max-width: 250px; margin: 0 auto 9px; padding: 6px 11px 7px; white-space: normal; font-size: 12.5px; font-weight: 500; line-height: 1.35;
   background: var(--glass); clip-path: var(--cut-s); box-shadow: inset 0 0 0 1px var(--line), inset 2px 0 0 var(--accent-2); text-shadow: var(--outline); animation: say-in 0.25s ease-out;
@@ -320,6 +329,9 @@ kbd {
 /* ---------- damage numbers ---------- */
 .dmg { position: absolute; left: 0; top: 0; font-family: var(--display); font-weight: 800; font-size: 24px; letter-spacing: 0.5px; color: #fff; white-space: nowrap; text-shadow: var(--outline-big); }
 .dmg.crit { color: var(--accent-2); font-size: 34px; text-shadow: var(--outline-big), 0 0 12px rgba(240, 198, 116, 0.6); }
+.dmg-weakpoint-icon { position: relative; display: inline-block; width: 0.64em; height: 0.64em; margin-left: 0.28em; vertical-align: 0.04em; box-sizing: border-box; border: 2px solid #ff6df0; border-radius: 50%; color: #ff6df0; }
+.dmg-weakpoint-icon::before { position: absolute; content: ''; inset: 24%; box-sizing: border-box; border: 1px solid currentColor; border-radius: 50%; }
+.dmg-weakpoint-icon::after { position: absolute; content: ''; inset: -24%; background: linear-gradient(currentColor, currentColor) center top / 1px 24% no-repeat, linear-gradient(currentColor, currentColor) center bottom / 1px 24% no-repeat, linear-gradient(currentColor, currentColor) left center / 24% 1px no-repeat, linear-gradient(currentColor, currentColor) right center / 24% 1px no-repeat; }
 .dmg.hurt { color: #ff6a76; }
 .dmg.xp { color: var(--xp); font-size: 16px; font-weight: 600; letter-spacing: 1.5px; }
 
@@ -346,18 +358,39 @@ button:disabled { opacity: 0.35; cursor: default; }
 /* ---------- dialogue ---------- */
 #dialogue {
   position: fixed; left: 50%; bottom: 44px; transform: translateX(-50%); width: min(660px, calc(100vw - 32px));
-  background: var(--halftone), var(--glass); clip-path: var(--cut); box-shadow: inset 0 2px 0 var(--accent), inset 0 0 0 1px var(--line); padding: 14px 20px 16px;
+  background: var(--halftone), var(--glass); clip-path: var(--cut); box-shadow: inset 0 2px 0 var(--accent), inset 0 0 0 1px var(--line), 0 18px 55px rgba(0,0,0,.42); padding: 18px 22px 16px;
 }
-.dlg-name { font-family: var(--display); font-weight: 700; font-size: 22px; letter-spacing: 2.5px; text-transform: uppercase; color: var(--accent-2); text-shadow: var(--outline); }
-.dlg-name small { font-family: var(--ui); font-size: 11px; font-weight: 600; letter-spacing: 1.5px; text-transform: uppercase; color: #e9f1ff; opacity: 0.6; margin-left: 6px; }
-#dialogue p { font-size: 15px; line-height: 1.5; font-weight: 500; }
-.dlg-options { display: flex; flex-wrap: wrap; gap: 8px; }
+.dlg-head { display: flex; justify-content: space-between; align-items: center; gap: 16px; border-bottom: 1px solid var(--line); padding-bottom: 11px; }
+.dlg-eyebrow, .dlg-step { font-size: 9px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: var(--accent); opacity: .8; }
+.dlg-name { font-family: var(--display); font-weight: 700; font-size: 22px; line-height: 1.05; letter-spacing: 2px; text-transform: uppercase; color: var(--accent-2); text-shadow: var(--outline); }
+.dlg-role { margin-top: 4px; font-size: 10px; font-weight: 600; letter-spacing: 1.4px; text-transform: uppercase; color: #e9f1ff; opacity: 0.58; }
+#dialogue.quest-story { box-shadow: inset 0 2px 0 #ffcf7a, inset 0 0 0 1px var(--line), 0 18px 55px rgba(0,0,0,.42); }
+#dialogue.quest-story .dlg-eyebrow, #dialogue.quest-story .dlg-name { color: #ffcf7a; }
+#dialogue.quest-side { box-shadow: inset 0 2px 0 #5ee6ff, inset 0 0 0 1px var(--line), 0 18px 55px rgba(0,0,0,.42); }
+#dialogue.quest-side .dlg-eyebrow, #dialogue.quest-side .dlg-name { color: #5ee6ff; }
+#dialogue .dlg-line { margin: 14px 0 18px; max-width: 62ch; font-size: 16px; line-height: 1.6; font-weight: 500; color: #f2f4f8; }
+.dlg-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr)); gap: 7px; }
+.dlg-options button { display: flex; align-items: center; gap: 11px; min-height: 40px; padding: 7px 11px; text-align: left; font-size: 12px; letter-spacing: .7px; }
+.dlg-choice-copy { display: grid; gap: 2px; min-width: 0; }
+.dlg-choice-copy > small { color: var(--accent-2); font: 700 9px var(--ui); letter-spacing: 1.3px; text-transform: uppercase; }
+.dlg-options button[data-primary="true"] { background: rgba(240,198,116,.1); box-shadow: inset 0 0 0 1px rgba(240,198,116,.48); color: var(--accent-2); }
 .dlg-options button.quest { color: var(--accent-2); box-shadow: inset 0 0 0 1px rgba(240, 198, 116, 0.6); }
+.dlg-options button.quest.story { color: #ffcf7a; box-shadow: inset 0 0 0 1px rgba(255,207,122,.65); }
+.dlg-options button.quest.side { color: #7cecff; box-shadow: inset 0 0 0 1px rgba(94,230,255,.58); }
 .dlg-notes { display: grid; gap: 8px; margin: 0 0 12px; max-height: 40vh; overflow-y: auto; }
-.dlg-note { background: rgba(255, 255, 255, 0.04); box-shadow: inset 0 0 0 1px var(--line); padding: 8px 12px; }
+.dlg-note { background: rgba(255, 255, 255, 0.04); box-shadow: inset 0 0 0 1px var(--line); padding: 11px 13px; }
+.dlg-note header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .dlg-note b { font-family: var(--display); font-weight: 700; letter-spacing: 1.2px; text-transform: uppercase; color: var(--accent-2); }
-.dlg-note small { float: right; font-size: 11px; font-weight: 600; letter-spacing: 1px; opacity: 0.75; }
+.dlg-note header small { flex: 0 0 auto; font-size: 9px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: #b5c1d0; opacity: 0.8; }
+.dlg-note.available { border-left: 2px solid var(--accent-2); }
+.dlg-note.ready { border-left: 2px solid #9fffc0; }
+.dlg-note.ready header small { color: #9fffc0; }
+.dlg-note.active { border-left: 2px solid var(--accent); }
+.dlg-note header small { padding: 3px 7px; background: rgba(255,255,255,.07); }
 #dialogue .dlg-note p { margin: 4px 0 0; font-size: 13.5px; line-height: 1.4; }
+.dlg-note-action { margin-top: 9px; width: 100%; display: flex; align-items: center; min-height: 36px; padding: 6px 10px; background: rgba(240,198,116,.08); color: var(--accent-2); border: 0; box-shadow: inset 0 0 0 1px rgba(240,198,116,.38); clip-path: var(--cut-s); font: 600 11px var(--display); letter-spacing: .7px; text-align: left; cursor: pointer; }
+.dlg-note-action:hover { background: rgba(240,198,116,.16); box-shadow: inset 0 0 0 1px var(--accent-2); }
+.dlg-note-action .dlg-choice-copy { display: flex; flex-direction: row; align-items: baseline; justify-content: space-between; gap: 8px; flex: 1; }
 
 /* ---------- inventory (the game menu's Inventory tab) ---------- */
 #inventory { max-width: 1280px; margin: 0 auto; }
@@ -625,7 +658,7 @@ body.at-title #chat { display: none; }
 .gm-gear li.none b { opacity: 0.3; }
 .gm-gear small { font-size: 11px; opacity: 0.6; }
 .gm-wide { grid-column: 1 / -1; width: 100%; max-width: 900px; justify-self: center; }
-.gm-quest { margin: 0 0 12px; padding: 8px 0 8px 14px; box-shadow: inset 2px 0 0 var(--accent-2); }
+.gm-quest { margin: 0 0 12px; padding: 12px 14px; background: rgba(255,255,255,.025); box-shadow: inset 2px 0 0 var(--accent-2), inset 0 0 0 1px rgba(190,214,255,.07); }
 .gm-quest.ready { box-shadow: inset 2px 0 0 #9fffc0; }
 .gm-quest h4 { margin: 0; font-family: var(--display); font-weight: 700; font-size: 19px; letter-spacing: 2px; text-transform: uppercase; color: #fff; text-shadow: var(--outline); }
 .gm-quest small { font-size: 10.5px; font-weight: 600; letter-spacing: 1.5px; text-transform: uppercase; color: var(--accent-2); }
@@ -639,6 +672,12 @@ body.at-title #chat { display: none; }
 .gm-quest.tracked { box-shadow: inset 3px 0 0 var(--accent); }
 .gm-quest.tracked h4 .gm-btn { color: var(--accent); }
 .gm-quest p { margin: 6px 0 0; font-size: 13px; line-height: 1.4; opacity: 0.85; }
+.gm-quest-progress { display: flex; align-items: center; gap: 12px; margin-top: 10px; font-size: 10px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: #c4cedc; }
+.gm-quest-progress > span { flex: 0 0 auto; }
+.gm-quest-progress > i { flex: 1; height: 4px; overflow: hidden; background: rgba(255,255,255,.1); }
+.gm-quest-progress > i b { display: block; height: 100%; background: var(--accent-2); box-shadow: 0 0 8px rgba(240,198,116,.55); }
+.gm-quest.ready .gm-quest-progress { color: #9fffc0; }
+.gm-quest.ready .gm-quest-progress > i b { background: #9fffc0; box-shadow: 0 0 8px rgba(159,255,192,.5); }
 .qtabs { margin: 0 0 16px; }
 .qtabs small { margin-left: 4px; opacity: 0.7; }
 .gm-story { margin: 10px 0 0; padding: 9px 14px 10px; background: rgba(255, 255, 255, 0.03); box-shadow: inset 0 0 0 1px var(--line); }

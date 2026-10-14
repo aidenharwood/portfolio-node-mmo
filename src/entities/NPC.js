@@ -68,8 +68,17 @@ export class NPC {
     const log = this.game.quests;
     if (log.readyToTurnIn(this.id).length) return '?';
     if (log.wants(this.id)) return '…';
-    if (QUEST_ROLES.has(this.role) && log.available(this.id).length) return '!';
+    if ((QUEST_ROLES.has(this.role) || this.role === 'story') && log.available(this.id).length) return '!';
     return null;
+  }
+
+  // The marker keeps its state (offer, talk, or turn-in); its shape identifies the quest type.
+  get markerKind() {
+    const log = this.game.quests;
+    return log.readyToTurnIn(this.id)[0]?.kind
+      ?? log.wantedQuest(this.id)?.kind
+      ?? (QUEST_ROLES.has(this.role) || this.role === 'story' ? log.available(this.id)[0]?.kind : null)
+      ?? null;
   }
 
   // How solid the figure is (0..1): each figure has its own materials, so it fades on its own.

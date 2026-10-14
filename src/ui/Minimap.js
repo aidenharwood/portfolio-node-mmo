@@ -68,8 +68,17 @@ export class Minimap {
     const s = styles[kind] ?? styles.default;
     ctx.save();
     ctx.translate(x, z);
+    const matrix = ctx.getTransform();
+    const scale = Math.hypot(matrix.a, matrix.b) || 1;
+    ctx.beginPath();
+    ctx.arc(0, 0, r + 3 / scale, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(8,12,20,.88)';
+    ctx.fill();
+    ctx.strokeStyle = s.stroke;
+    ctx.lineWidth = 1.25 / scale;
+    ctx.stroke();
     ctx.strokeStyle = '#0a0c13';
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 1.5 / scale;
     ctx.fillStyle = s.fill;
     ctx.beginPath();
     if (s.mark === 'diamond') {
@@ -101,6 +110,25 @@ export class Minimap {
     }
     ctx.fill();
     ctx.stroke();
+    ctx.restore();
+  }
+
+  questSearchArea(x, z, kind, radius) {
+    if (!['goto', 'defend', 'clear'].includes(kind) || radius <= 8) return;
+    const ctx = this.ctx;
+    const color = kind === 'goto' ? '#a3f5b0' : kind === 'defend' ? '#ff9d7d' : '#d8b5ff';
+    const matrix = ctx.getTransform();
+    const scale = Math.hypot(matrix.a, matrix.b) || 1;
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(x, z, radius, 0, Math.PI * 2);
+    ctx.fillStyle = `${color}06`;
+    ctx.fill();
+    ctx.setLineDash([4 / scale, 5 / scale]);
+    ctx.lineWidth = 1.25 / scale;
+    ctx.strokeStyle = `${color}70`;
+    ctx.stroke();
+    ctx.setLineDash([]);
     ctx.restore();
   }
 
@@ -229,7 +257,10 @@ export class Minimap {
     for (const m of mates) this.dot(m.x, m.z, 2.1, PARTY_COLOR);
 
     const wp = game.questWaypoint();
-    if (wp) this.questMarker(wp.x, wp.z, wp.kind ?? 'default', wp.radius ?? 4);
+    if (wp) {
+      this.questSearchArea(wp.x, wp.z, wp.kind, wp.radius ?? 0);
+      this.questMarker(wp.x, wp.z, wp.kind ?? 'default', 6 / k);
+    }
     if (game.customMarker) this.dot(game.customMarker.x, game.customMarker.z, 2, '#4ad2ff');
     ctx.restore();
 

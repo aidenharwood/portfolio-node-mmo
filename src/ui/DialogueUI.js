@@ -2,6 +2,9 @@
 // marks) and option buttons.
 import { esc } from './cards.js';
 
+const QUEST_KIND_LABEL = { story: 'Story Quest', side: 'Side Quest', errand: 'Errand', contract: 'Warden Contract', hunt: 'Hunt', job: 'Board Posting' };
+const QUEST_KIND_CLASS = new Set(Object.keys(QUEST_KIND_LABEL));
+
 export class DialogueUI {
   constructor(game, el) {
     this.game = game;
@@ -15,13 +18,22 @@ export class DialogueUI {
 
   get isOpen() { return !this.el.classList.contains('hidden'); }
 
-  open({ name, title = '', text, options, notes = [] }) {
+  open({ name, title = '', text, options, notes = [], questKind = null }) {
     this.options = [...options, { label: 'Leave', onClick: () => this.game.closeMenus() }];
+    const actionButton = (o, i, extraClass = '') => {
+      const classes = (o.cls ?? '').split(/\s+/).filter((c) => QUEST_KIND_CLASS.has(c) || c === 'quest').join(' ');
+      return `<button data-i="${i}" class="${classes} ${extraClass}"${i === 0 ? ' data-primary="true"' : ''}><span class="dlg-choice-copy">${o.action ? `<small>${esc(o.action)}</small>` : ''}<span>${esc(o.label)}</span></span></button>`;
+    };
+    const linked = new Set(notes.map((n) => n.optionIndex).filter(Number.isInteger));
+    const actions = this.options.map((o, i) => linked.has(i) ? '' : actionButton(o, i)).join('');
+    const kindClass = QUEST_KIND_CLASS.has(questKind) ? questKind : '';
+    this.el.classList.toggle('quest-story', kindClass === 'story');
+    this.el.classList.toggle('quest-side', kindClass === 'side');
     this.el.innerHTML = `
-      <div class="dlg-name">${esc(name)} <small>${esc(title)}</small></div>
-      <p>${esc(text)}</p>
-      ${notes.length ? `<div class="dlg-notes">${notes.map((n) => `<div class="dlg-note"><b>${esc(n.title)}</b>${n.tag ? `<small>${esc(n.tag)}</small>` : ''}<p>${esc(n.text)}</p></div>`).join('')}</div>` : ''}
-      <div class="dlg-options">${this.options.map((o, i) => `<button data-i="${i}" class="${o.cls ?? ''}">${esc(o.label)}</button>`).join('')}</div>`;
+      <header class="dlg-head"><div><div class="dlg-eyebrow">${esc(QUEST_KIND_LABEL[kindClass] ?? 'Conversation')}</div><div class="dlg-name">${esc(name)}</div>${title ? `<div class="dlg-role">${esc(title)}</div>` : ''}</div><span class="dlg-step">Choose a response</span></header>
+      <p class="dlg-line">${esc(text)}</p>
+      ${notes.length ? `<div class="dlg-notes">${notes.map((n) => `<article class="dlg-note ${esc(n.state ?? '')}"><header><b>${esc(n.title)}</b>${n.tag ? `<small>${esc(n.tag)}</small>` : ''}</header><p>${esc(n.text)}</p>${Number.isInteger(n.optionIndex) ? actionButton(this.options[n.optionIndex], n.optionIndex, 'dlg-note-action') : ''}</article>`).join('')}</div>` : ''}
+      ${actions ? `<div class="dlg-options">${actions}</div>` : ''}`;
     this.el.classList.remove('hidden');
   }
 

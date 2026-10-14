@@ -399,7 +399,12 @@ export class MapUI {
     const wp = g.questWaypoint();
     if (wp) {
       const [sx, sy] = this.toScreen(wp.x, wp.z);
-      this.questMarker(sx, sy, wp.kind ?? 'default', Math.max(8, (wp.radius ?? 4) * this.zoom * 0.9));
+      if (['goto', 'defend', 'clear'].includes(wp.kind) && wp.radius > 8) this.searchArea(sx, sy, wp.kind, wp.radius * this.zoom);
+      this.questMarker(sx, sy, wp.kind ?? 'default', 8);
+      const q = g.tracked && g.quests?.defs?.get(g.tracked);
+      if (q && sx > 24 && sx < W - 24 && sy > 42 && sy < H - 28) {
+        this.label(sx, sy - 18, `★ ${q.title}`, '#ffe08a', 12);
+      }
     }
     if (g.customMarker) {
       const [sx, sy] = this.toScreen(g.customMarker.x, g.customMarker.z);
@@ -465,14 +470,42 @@ export class MapUI {
     return styles[kind] ?? styles.default;
   }
 
+  searchArea(x, y, kind, radius) {
+    const ctx = this.ctx;
+    const s = this.questMarkerStyle(kind);
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.fillStyle = `${s.fill}08`;
+    ctx.fill();
+    ctx.setLineDash([5, 7]);
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = `${s.fill}70`;
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+  }
+
   questMarker(x, y, kind, radius = 9) {
     const ctx = this.ctx;
     const s = this.questMarkerStyle(kind);
     const r = radius;
     ctx.save();
     ctx.translate(x, y);
+    // A marker radius is visual size only; the objective's search radius is drawn separately.
+    ctx.shadowColor = 'rgba(0,0,0,.65)';
+    ctx.shadowBlur = 7;
+    ctx.beginPath();
+    ctx.arc(0, 0, r + 4, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(8,12,20,.82)';
+    ctx.fill();
+    ctx.strokeStyle = s.stroke;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.shadowColor = 'transparent';
+    ctx.shadowBlur = 0;
     ctx.lineWidth = 2.5;
-    ctx.strokeStyle = '#0a0c13';
+    ctx.strokeStyle = '#101723';
     ctx.fillStyle = s.fill;
     ctx.beginPath();
     if (s.mark === 'diamond') {

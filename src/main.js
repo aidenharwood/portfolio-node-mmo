@@ -104,6 +104,8 @@ const OBJECTS = {
 const FOLK_NEAR = 85;  // townsfolk are built when you come this close…
 const FOLK_FAR = 110;  // …and let go past this
 const rewardText = (q) => `${q.rewards.xp} XP · ${q.rewards.gold}g${q.rewards.weapon ? ' · a weapon' : q.rewards.armor ? ' · armour' : ''}`;
+const QUEST_KIND_LABEL = { story: 'Story quest', side: 'Side quest', errand: 'Errand', contract: 'Warden contract', hunt: 'Hunt', job: 'Board posting' };
+const questKindLabel = (q) => QUEST_KIND_LABEL[q?.kind] ?? 'Quest';
 
 // The screen's size in CSS pixels: the layout viewport, which pinch zoom and on-screen keyboards
 // don't change (window.innerWidth does, on iOS — and a game view sized to a zoomed-in viewport
@@ -127,8 +129,8 @@ class Game {
     this.prefs = readPrefs(readSave()?.settings);
     this.dynScale = 1;       // adaptive resolution's share of the pixel ratio
     this.frameStats = { t: 0, n: 0, sum: 0, last: 0 };
-    // Phones and tablets go without multisampling: it costs too much at their pixel densities.
-    this.renderer = new THREE.WebGLRenderer({ antialias: !TOUCH_DEVICE });
+    // Multisampling is handled by PostFX render targets, so it can be changed from Settings.
+    this.renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
     this.renderer.setPixelRatio(this.pixelRatio());
     setHatchScale(this.renderer.getPixelRatio());
     const view = viewSize();
@@ -348,15 +350,6 @@ class Game {
     if (!opts.online) this.char.dungeons = this.localDungeons();
     this.char.loadProgress(save);
     this.charLink.attach(this.char);
-    // A new character (offline) finds three weapons waiting by the camp.
-    if (!save && !opts.preview && !opts.online) {
-      const near = new THREE.Vector3(HUB.x, 0, HUB.z - 7.5);
-      const fx = [];
-      for (const [cls, x] of [['ranged', -2.5], ['magic', 0], ['melee', 2.5]]) {
-        this.char.spawn(this.char.gid(), generateWeapon({ level: 1, cls, rarity: 'uncommon' }), [near.x + x, near.y, near.z], fx, false);
-      }
-      this.onCharFx(fx);
-    }
     for (const id of this.world.waystones.keys()) this.world.setWaystoneActive(id, this.attuned.has(id));
     for (const id of this.world.chests.keys()) this.world.setChestOpen(id, this.openedChests.has(id));
     this.discovery.reveal(this.player.position.x, this.player.position.z);
@@ -409,7 +402,7 @@ class Game {
   // Device pixels per CSS pixel: the screen's (up to 2), the resolution setting, and the adaptive
   // resolution's current share.
   pixelRatio() {
-    return Math.min(window.devicePixelRatio || 1, 2) * (this.prefs.renderScale ?? 1) * (this.prefs.dynamicRes ? this.dynScale : 1);
+    return Math.min((window.devicePixelRatio || 1) * (this.prefs.renderScale ?? 1), 2) * (this.prefs.dynamicRes ? this.dynScale : 1);
   }
 
   setPixelRatio() {
@@ -464,7 +457,8 @@ class Game {
     // weapon — or hulls for both on Low), shadows and grass.
     const q = qualityOf(pr.graphics);
     const outlines = pr.outlines && this.outlinesOverride !== false;
-    this.post.configure(q, { outlines });
+    this.post.configure(q, { outlines, antialias: pr.antialias });
+    this.effects.setQuality(pr.graphics);
     setOutlinesVisible(outlines, { world: outlines && !q.ink, view: outlines });
     this.grass.configure(q.grass, q.grassRadius);
     setHatchScale(pr.hatching ? this.renderer.getPixelRatio() : 1e6);
@@ -477,6 +471,7 @@ class Game {
       this.renderer.shadowMap.enabled = pr.shadows;
       this.scene.traverse((o) => { if (o.material) o.material.needsUpdate = true; });
     }
+    this.shadows.setQuality(pr.shadowQuality);
     this.shadows.setMode(pr.shadows ? (q.csm ? 'cascaded' : 'single') : 'off');
   }
 
@@ -720,9 +715,6 @@ class Game {
   // goes back to play; over the title it closes settings or steps back a page. (The dev panel and
   // the chat line take their own Esc first.)
   onEscape() {
-    // The Esc that released the mouse can also arrive as a key press: don't let it close the menu
-    // it just opened.
-    if (performance.now() - this.menuOpenedAt < 250) return;
     // Esc in a trade cancels it (the window closes when the server says so).
     if (this.tradeUI.isOpen) { this.tradeUI.send('cancel'); return; }
     if (this.state === 'title') {
@@ -735,6 +727,7 @@ class Game {
   // ---------------------------------------------------------------- menus
   // The game menu (ui/GameMenu.js) on a tab. The world keeps running: the character stands idle.
   openGameMenu(tab, opts = {}) {
+    if (this.moments.active) return;
     if (this.state !== 'playing' && this.state !== 'menu' && !(this.state === 'paused' && this.backgroundPause)) return;
     this.dialogue.close();
     this.chat.close();
@@ -851,7 +844,7 @@ class Game {
       const dt = realDt;
       if (this.hitstopTimer > 0 && (this.hitstopTimer -= realDt) <= 0) this.hitstopSet.clear();
       this.simulate(dt);
-      this.effects.update(dt, realDt);
+      this.effects.update(dt, realDt, this.player.position, this.world.biomeAt(this.player.position.x, this.player.position.z), this.time, this.world.flames);
       this.effects.updatePools(dt, this.groundAt ??= (x, z) => this.world.supportHeight(x, z, this.player.position.y + 2));
       for (const d of this.drops) d.update(realDt, this.time);
       if (this.state === 'playing') {
@@ -1404,11 +1397,13 @@ class Game {
     const going = log.inProgress(npc.id);
     const choice = Object.keys(log.active).map((id) => [id, log.choiceAt(id, npc.id)]).find(([, c]) => c);
     const options = [];
+    let contextQuest = choice ? log.defs.get(choice[0]) : null;
+    contextQuest ??= this.said.at(-1)?.quest ? log.defs.get(this.said.at(-1).quest) : null;
     let text = said;
     if (choice) {
       const [qid, c] = choice;
       c.options.forEach((opt, i) => options.push({
-        label: opt.label, cls: 'quest',
+        label: opt.label, action: `${questKindLabel(contextQuest)} · Choose`, cls: `quest ${contextQuest?.kind ?? ''}`,
         onClick: () => {
           this.said = [];
           if (this.charLink.do({ op: 'choose', quest: qid, i, npc: npc.id }) && !this.moments.active) this.showTalk(npc, this.said.at(-1)?.text ?? null);
@@ -1416,12 +1411,16 @@ class Game {
       }));
       text ??= log.fill(log.stageOf(qid)?.say?.[Object.keys(log.stageOf(qid).say ?? {})[0]] ?? '', log.defs.get(qid)) || null;
     }
-    for (const q of ready) options.push({ label: `Complete: ${q.title}`, cls: 'quest', onClick: () => this.completeQuest(q.id, npc) });
+    for (const q of ready) {
+      contextQuest ??= q;
+      options.push({ label: q.title, action: `${questKindLabel(q)} · Turn in`, cls: `quest ${q.kind ?? ''}`, onClick: () => this.completeQuest(q.id, npc) });
+    }
     if (!text && ready.length) text = log.pick(ready[0].turnIn);
     // Taken: they tell you where to start (unless a story moment takes over).
     for (const q of avail) {
+      contextQuest ??= q;
       options.push({
-        label: `Accept: ${q.title}`, cls: 'quest',
+        label: q.title, action: `${questKindLabel(q)} · Accept`, cls: `quest ${q.kind ?? ''}`,
         onClick: () => {
           if (!this.charLink.do({ op: 'accept', id: q.id }) || this.moments.active) return;
           const first = log.stageOf(q.id)?.text ?? q.progress;
@@ -1431,6 +1430,7 @@ class Game {
     }
     if (!text && avail.length) text = log.fill(avail[0].offer, avail[0]);
     if (!text && going.length) text = log.fill(log.stageOf(going[0].id)?.text ?? going[0].progress ?? '', going[0]);
+    contextQuest ??= going[0] ?? log.wantedQuest(npc.id);
     // What they're there for.
     if (npc.role === 'trader') options.push({ label: 'Browse wares', onClick: () => this.openShop(npc) });
     if (npc.role === 'innkeeper') options.push({ label: 'Rest', onClick: () => this.restDialog(npc) });
@@ -1439,7 +1439,7 @@ class Game {
       text = npc.def.greeting ?? (npc.def.lines ? npc.def.lines[npc.lineIndex++ % npc.def.lines.length] : null)
         ?? (npc.role === 'trader' ? 'Steel, powder and sorcery — fair prices, mostly. Got anything to sell?' : 'Keep your blade sharp out there.');
     }
-    this.dialogue.open({ name: npc.name, title: npc.title, text, options });
+    this.dialogue.open({ name: npc.name, title: npc.title, text, options, questKind: contextQuest?.kind ?? null });
   }
 
   async completeQuest(id, npc) {
@@ -1469,17 +1469,21 @@ class Game {
       const going = log.inProgress(slot)[0];
       const offer = ready || going ? null : log.offer(slot);
       if (ready) {
-        notes.push({ title: ready.title, tag: 'Done', text: ready.turnIn });
-        options.push({ label: `Hand in: ${ready.title}`, cls: 'quest', onClick: async () => { await this.charLink.do({ op: 'turnin', id: ready.id }); this.openBoard(board); } });
-      } else if (going) notes.push({ title: going.title, tag: 'Taken', text: going.progress });
+        const note = { title: ready.title, tag: 'Ready to turn in', text: ready.turnIn, state: 'ready' };
+        note.optionIndex = options.length;
+        options.push({ label: ready.title, action: 'Turn in quest', cls: 'quest', onClick: async () => { await this.charLink.do({ op: 'turnin', id: ready.id }); this.openBoard(board); } });
+        notes.push(note);
+      } else if (going) notes.push({ title: going.title, tag: 'In progress', text: going.progress, state: 'active' });
       else if (offer) {
-        notes.push({ title: offer.title, tag: rewardText(offer), text: offer.offer });
-        options.push({ label: `Take: ${offer.title}`, cls: 'quest', onClick: () => { this.charLink.do({ op: 'accept', id: offer.id }); this.openBoard(board); } });
+        const note = { title: offer.title, tag: `Available · Reward ${rewardText(offer)}`, text: offer.offer, state: 'available' };
+        note.optionIndex = options.length;
+        options.push({ label: offer.title, action: 'Accept quest', cls: 'quest', onClick: () => { this.charLink.do({ op: 'accept', id: offer.id }); this.openBoard(board); } });
+        notes.push(note);
       }
     }
     this.dialogue.open({
       name: board.name, title: board.title, notes, options,
-      text: notes.length ? 'Notices pinned three deep — Warden business, most of it, with the reward held here.' : 'Nothing posted just now. The Wardens pin up more every day.',
+      text: notes.length ? 'Review each posting below. Active work and new contracts are listed separately.' : 'Nothing posted just now. The Wardens pin up more every day.',
     });
   }
 
@@ -1738,15 +1742,15 @@ class Game {
     }
     this.focusedDrop = best;
     const inv = p.inventory;
-    const full = inv.slots.every(Boolean) && inv.backpackFree === 0;
-    this.hud.setLoot(best?.weapon ?? null, p.weapon, full, inv.armor, this.stats.gearSets);
+    const canPickUp = best ? inv.canAdd(best.weapon) : true;
+    this.hud.setLoot(best?.weapon ?? null, p.weapon, canPickUp, inv.armor, this.stats.gearSets);
 
     // F: a tap (released before HOLD_SWAP) picks up; holding swaps. Looking away cancels.
     if (best && this.input.wasPressed('KeyF')) this.fHold = { drop: best, t: 0, done: false };
     const h = this.fHold;
     if (h) {
       if (!this.input.down('KeyF')) {
-        if (!h.done && h.drop === best) this.pickUp(best);
+        if (!h.done && h.drop === best && inv.canAdd(best.weapon)) this.pickUp(best);
         this.fHold = null;
       } else if (!h.done) {
         if (h.drop !== best) this.fHold = null;
@@ -1762,7 +1766,7 @@ class Game {
   // Hold F: the item takes the place of what you're using — the wielded weapon, or the armour in
   // its slot — and that is left on the ground where the new one lay.
   swapPickUp(drop) {
-    if (drop.gid !== null) this.charLink.do({ op: 'pick', gid: drop.gid, swap: true });
+    if (drop.gid !== null) this.charLink.do({ op: 'pick', gid: drop.gid, swap: true, at: drop.position.toArray() });
   }
 
   // Dev tools (offline): an item straight into the inventory, or at your feet if it's full.
@@ -1773,7 +1777,7 @@ class Game {
   }
 
   pickUp(drop) {
-    if (drop.gid !== null) this.charLink.do({ op: 'pick', gid: drop.gid });
+    if (drop.gid !== null) this.charLink.do({ op: 'pick', gid: drop.gid, at: drop.position.toArray() });
   }
 
   // ---------------------------------------------------------------- combat services
@@ -1796,7 +1800,8 @@ class Game {
 
   explode(pos, radius, damage, attacker, weapon, { color = 0xffb347, knockback = 8, scaled = false, element, inflict } = {}) {
     const center = pos.clone();
-    this.effects.spawnBurst(center, radius, color);
+    this.post.shockwave(center, radius);
+    this.effects.spawnBurst(center, radius, color, element ?? weapon?.element ?? 'none');
     const kind = (attacker !== this.player && !attacker.remote) || weapon?.cls === 'melee' || !weapon ? 'quake' : weapon.cls === 'magic' ? 'arcane' : 'blast';
     this.audio.explosion(center, radius, kind, element ?? weapon?.element ?? 'none');
     // Another player's blast is only a show here (the server will resolve its damage).
@@ -1841,10 +1846,18 @@ class Game {
     _v.y += target.height * 0.7;
     const elColor = hit.element !== 'none' ? ELEMENTS[hit.element].css : null;
 
+    if (this.prefs.gore && target !== this.player && target.type?.race && target.type.race !== 'synth' && hit.source !== 'status') {
+      const normal = hit.normal?.clone?.() ?? hit.direction?.clone?.() ?? new THREE.Vector3(0, 0.5, 0);
+      this.effects.blood(_v, normal, hit.crit ? 1.5 : 1);
+    }
+
     if (hit.source === 'status') {
       this.effects.damageNumber(_v, hit.damage, '', elColor);
       return;
     }
+    if (hit.crit) this.post.hitFlash(0.32);
+    else if (hit.source === 'explosion' || (hit.attack?.hitstop ?? 0) >= 0.08) this.post.hitFlash(0.18);
+    if (hit.element !== 'none') this.effects.elementHit(_v, hit.element, hit.crit ? 8 : 5);
     const fromPlayer = attacker === this.player;
     if (target === this.player) this.audio.playerHurt(hit.damage / Math.max(1, this.player.maxHp));
     else if (fromPlayer) {
@@ -1858,7 +1871,7 @@ class Game {
     if (hit.source === 'melee') this.hitstop(hit.attack?.hitstop ?? 0.05, attacker, target);
     else if (hit.source === 'explosion') this.hitstop(0.04, target);
     this.rig.addShake(fromPlayer ? (hit.attack?.shake ?? 0.04) : (hit.attack?.shake ?? 0.35));
-    if (fromPlayer) this.hud.hitMarker(hit.crit, !target.alive);
+    if (fromPlayer) this.hud.hitMarker(hit.crit, false);
     if (fromPlayer && hit.source === 'melee' && this.firstPerson) this.viewModel.onImpact(hit.crit);
     if (fromPlayer && (hit.source === 'melee' || (hit.source === 'explosion' && this.player.weaponClass === 'melee'))) this.player.addCombo();
 
@@ -1866,8 +1879,9 @@ class Game {
       const sparkColor = hit.element !== 'none' ? ELEMENTS[hit.element].color : hit.crit ? 0xffd23f : 0xfff6d0;
       this.effects.spawnSparks(_v, fromPlayer ? sparkColor : 0xff6a5a, hit.crit ? 14 : 8);
     }
+    const weakPoint = fromPlayer && hit.component === 'head';
     const kind = !fromPlayer ? 'hurt' : hit.crit ? 'crit' : '';
-    this.effects.damageNumber(_v, hit.crit ? `${hit.damage}!` : hit.damage, kind, fromPlayer && !hit.crit ? elColor : null);
+    this.effects.damageNumber(_v, hit.damage, kind, fromPlayer && !hit.crit ? elColor : null, weakPoint ? 'weakpoint' : null);
   }
 
   // A beat of impact freeze for the characters involved in a hit.
@@ -1973,8 +1987,7 @@ class Game {
     setTimeout(() => {
       if (this.state !== 'dead') return;
       this.releaseMouse();
-      const lost = Math.floor(this.stats.gold * 0.1);
-      this.hud.showOverlay('YOU FELL', `You'll wake in ${this.homePoint().name}${lost ? ` (−${lost}g)` : ''}. Press R or click below.`, [
+      this.hud.showOverlay('YOU FELL', `You'll wake in ${this.homePoint().name}. Press R or click below.`, [
         { label: 'Rise again', onClick: () => this.respawn() },
       ]);
     }, 1400);

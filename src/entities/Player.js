@@ -156,6 +156,8 @@ export class Player extends Character {
     this.gliding = false;
     this.attackFacing = null;
     this.groundFn = (x, z) => this.game.world.supportHeight(x, z, this.position.y + 0.6);
+    this.supportFn = (x, z, maxY) => this.game.world.supportHeight(x, z, maxY);
+    this.resolveFn = (pos, radius, stepUp, height) => this.game.world.resolve(pos, radius, stepUp, height);
     this.collectMaterials();
   }
 
@@ -520,8 +522,9 @@ export class Player extends Character {
       if (!this.trailSpawned) {
         this.trailSpawned = true;
         const w = this.weapon;
-        this.game.effects.spawnSlash(this.position, this.facing, {
-          arc: a.arc, range: a.range, vertical: a.vertical,
+        const shownWeapon = this.game.firstPerson && this.game.viewModel?.model ? this.game.viewModel.model : this.weaponModel;
+        this.game.effects.spawnWeaponTrail(shownWeapon, this.facing, {
+          direction: a.swing?.path === 'slashL' ? -1 : 1,
           color: w.element !== 'none' ? ELEMENTS[w.element].color : MANUFACTURERS[w.manufacturer].palette.energy,
         });
       }
@@ -1024,7 +1027,8 @@ export class Player extends Character {
     };
     const w = this.weapon;
     const color = w.element !== 'none' ? ELEMENTS[w.element].color : MANUFACTURERS[w.manufacturer].palette.energy;
-    this.game.effects.spawnSlash(this.position, this.facing, { arc: 360, range: this.slideAttack.def.range, color, height: 0.6 });
+    const shownWeapon = this.game.firstPerson && this.game.viewModel?.model ? this.game.viewModel.model : this.weaponModel;
+    this.game.effects.spawnWeaponTrail(shownWeapon, this.facing, { color });
     this.game.audio.swing({ weapon: w, weight: 0.5, dur: 0.32, spin: true });
   }
 
@@ -1326,7 +1330,9 @@ export class Player extends Character {
     }
   }
 
-  onDeath() {
+  onDeath(hit) {
+    const direction = hit?.direction;
+    this.deathKick = direction ? [direction.x, direction.y, direction.z] : [0, 0, 0];
     this.setState('dead');
     this.game.onPlayerDeath();
   }
@@ -1337,6 +1343,8 @@ export class Player extends Character {
     this.mana = this.maxMana;
     this.stamina = this.maxStamina;
     this.deathFall = 0;
+    this.deathKick = null;
+    this.animator.resetRagdoll();
     this.statuses = {};
     this.knockback.set(0, 0, 0);
     this.velocity.set(0, 0, 0);
@@ -1378,6 +1386,8 @@ export class Player extends Character {
     s.grounded = this.grounded;
     s.sprint = this.sprinting;
     s.ground = this.groundFn;
+    s.supportHeight = this.supportFn;
+    s.resolve = this.resolveFn;
     s.flinch = this.flinch > 0 ? this.flinch / 0.3 : 0;
     s.flip = this.flipT;
     s.corkscrew = this.bulletJumpT > 0 && st === 'move' ? 1 - this.bulletJumpT / 0.45 : 0;
@@ -1399,6 +1409,7 @@ export class Player extends Character {
     s.poseRate = 16;
     s.recoil = this.recoil;
     s.armSwing = cls === 'melee' ? 1 : 0.25;
+    s.deathKick = this.deathKick;
     s.t = 0;
     if (!this.alive) {
       this.deathFall = Math.min(1, this.deathFall + dt * 1.6);

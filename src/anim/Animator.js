@@ -7,6 +7,7 @@
 // springs so state changes blend instead of popping.
 import * as THREE from 'three';
 import { solveTwoBone, Spring } from './IK.js';
+import { resolveRagdollMeshContacts } from './RagdollContacts.js';
 
 const TAU = Math.PI * 2;
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
@@ -56,6 +57,10 @@ const _qChest = new THREE.Quaternion();
 const _qModel = new THREE.Quaternion();
 const _qInv = new THREE.Quaternion();
 const _target = [new THREE.Vector3(), new THREE.Vector3()];
+const _contactWorld = new THREE.Vector3();
+const _contactBefore = new THREE.Vector3();
+const _contactLocal = new THREE.Vector3();
+const _contactParent = new THREE.Vector3();
 
 // Hand frame gripping a handle at `grip` (world) for a weapon oriented `qw`: the handle runs along
 // the hand's Z and the hand turns about it so its wrist faces the arm (toward a point just below the
@@ -109,6 +114,7 @@ export function makeAnimState() {
   return {
     mode: 'ground',        // ground | air | slide | dash | airdash | mantle | slam | dead | stagger
     vx: 0, vz: 0, vy: 0, facing: 0, grounded: true,
+    brokenLegs: [],
     sprint: false,
     t: 0,                  // 0..1 progress for timed modes (dash, mantle, dead)
     dashX: 0, dashZ: 1,    // dash direction, model space
@@ -252,6 +258,8 @@ export class Animator {
     // Hand orientations last frame (chest-local), for capping how fast a hand can turn.
     this.handPrev = [new THREE.Quaternion(), new THREE.Quaternion()];
     this.handSet = [false, false];
+    this.ragdoll = null;
+    this.ragdollPose = null;
   }
 
   // The current weapon pose re-expressed in `space` (YXZ Euler, chosen nearest to `near`).
@@ -277,6 +285,109 @@ export class Animator {
   // Landing impact (m/s downward) compresses the legs and springs back.
   land(impact) {
     this.sp.base.kick(-Math.min(5, impact * 0.35));
+  }
+
+  resetRagdoll() { this.ragdoll = null; }
+
+  // An articulated secondary simulation. Start from the last live pose, then let each joint carry
+  // its own angular momentum, respond to gravity in its parent's frame and settle into a varied
+  // loose pose. The captured pose also avoids accumulating rotations from the death animation.
+  updateRagdoll(dt, s) {
+    const r = this.rig;
+    const bones = [r.hips, r.spine, r.chest, r.head, r.armR.upper, r.armR.fore,
+      r.armL.upper, r.armL.fore, r.legs[0].thigh, r.legs[0].shin, r.legs[1].thigh, r.legs[1].shin];
+    if (!this.ragdoll) {
+      const kick = s.deathKick ?? [0, 0, 0];
+      const seed = Math.random() * Math.PI * 2;
+      const contacts = [r.armR.hand, r.armL.hand, r.legs[0].foot, r.legs[1].foot, r.head];
+      const pose = this.ragdollPose ?? [...bones, ...contacts].map((bone) => ({
+        bone, position: bone.position.clone(), quaternion: bone.quaternion.clone(),
+      }));
+      const saved = new Map(pose.map((p) => [p.bone, p]));
+      // Per-joint angular travel in the local frame. Forearms and shins mostly hinge, while the
+      // torso and shoulders get a little more freedom to roll with the fall.
+      const limits = [
+        [1.65, 0.85], [0.7, 0.55], [0.8, 0.65], [0.65, 0.5],
+        [0.85, 0.72], [1.15, 0.28], [0.85, 0.72], [1.15, 0.28],
+        [0.82, 0.58], [1.18, 0.22], [0.82, 0.58], [1.18, 0.22],
+      ];
+      this.ragdoll = { time: 0, pose, hipY: saved.get(r.hips).position.y, hipV: 0,
+        contacts: contacts.map((bone) => ({ bone, rest: saved.get(bone).position.clone() })), bones: bones.map((bone, i) => {
+        const strength = i === 0 ? 0.55 : i < 4 ? 0.28 : 0.18;
+        const roll = Math.sin(seed + i * 7.1);
+        const pitch = Math.cos(seed + i * 5.3);
+        _e.setFromQuaternion(saved.get(bone).quaternion, 'XYZ');
+        const initialX = clamp(_e.x, -limits[i][0], limits[i][0]);
+        const initialZ = clamp(_e.z, -limits[i][1], limits[i][1]);
+        const base = _q.setFromAxisAngle(Y_AXIS, _e.y).clone();
+        const fall = Math.sin(seed) < 0 ? -1 : 1;
+        const restX = i === 0 ? fall * (1.35 + Math.abs(roll) * 0.2)
+          : i === 1 ? fall * 0.32 + roll * 0.14
+            : i === 2 ? fall * 0.22 + roll * 0.18
+              : i === 3 ? -fall * 0.16 + roll * 0.12 : 0;
+        const restZ = i === 0 ? pitch * 0.42
+          : i < 4 ? roll * 0.18 : 0;
+        return { bone, base, x: initialX, z: initialZ,
+          restX, restZ, limitX: limits[i][0], limitZ: limits[i][1],
+          vx: (kick[2] * 0.8 + roll * 0.4) * strength,
+          vz: (-kick[0] * 0.8 + pitch * 0.4) * strength };
+      }) };
+    }
+    const sim = this.ragdoll;
+    sim.time += dt;
+    dt = Math.min(dt, 1 / 30);
+    for (const p of sim.pose) if (p.bone !== r.hips) p.bone.position.copy(p.position);
+    // The pelvis has mass too: let it drop from its live height, then catch it close to the ground.
+    const floorHipY = Math.max(0.3, this.d.hipY * 0.34);
+    sim.hipV -= 7.5 * dt;
+    sim.hipY = Math.max(floorHipY, sim.hipY + sim.hipV * dt);
+    if (sim.hipY <= floorHipY) sim.hipV = 0;
+    r.hips.position.y = sim.hipY;
+    for (let i = 0; i < sim.bones.length; i++) {
+      const j = sim.bones[i];
+      // The pelvis drives the fall. Core joints settle into a loose collapse, while each limb
+      // segment gets gravity torque in its own frame so it hangs toward the ground independently.
+      const core = i < 4;
+      const spring = i === 0 ? 15 : 11;
+      const damping = i === 0 ? 6 : core ? 5.2 : 5.8;
+      if (core) {
+        j.vx += ((j.restX - j.x) * spring - j.vx * damping) * dt;
+        j.vz += ((j.restZ - j.z) * spring - j.vz * damping) * dt;
+      } else {
+        j.bone.getWorldQuaternion(_qInv).invert();
+        _v.set(0, -9.8, 0).applyQuaternion(_qInv);
+        j.vx += (-_v.z * 0.55 - j.vx * damping) * dt;
+        j.vz += (_v.x * 0.55 - j.vz * damping) * dt;
+      }
+      j.x += j.vx * dt;
+      j.z += j.vz * dt;
+      if (j.x > j.limitX) { j.x = j.limitX; if (j.vx > 0) j.vx = 0; }
+      else if (j.x < -j.limitX) { j.x = -j.limitX; if (j.vx < 0) j.vx = 0; }
+      if (j.z > j.limitZ) { j.z = j.limitZ; if (j.vz > 0) j.vz = 0; }
+      else if (j.z < -j.limitZ) { j.z = -j.limitZ; if (j.vz < 0) j.vz = 0; }
+      _e.set(j.x, 0, j.z, 'XYZ');
+      j.bone.quaternion.copy(j.base).multiply(_q.setFromEuler(_e));
+      r.model.updateWorldMatrix(true, false);
+    }
+
+    // Keep hands, feet and head from passing through terrain or the tops/edges of world props.
+    // Resolve in world space, then carry the correction back into each joint's local frame.
+    if (s.supportHeight || s.resolve) {
+      r.model.updateWorldMatrix(true, true);
+      for (const c of sim.contacts) {
+        c.bone.position.copy(c.rest);
+        r.model.updateWorldMatrix(true, true);
+        c.bone.getWorldPosition(_contactWorld);
+        _contactBefore.copy(_contactWorld);
+        if (s.resolve) s.resolve(_contactWorld, 0.12, 0, 0.2);
+        if (s.supportHeight) _contactWorld.y = Math.max(_contactWorld.y, s.supportHeight(_contactWorld.x, _contactWorld.z, _contactWorld.y + 0.25));
+        if (_contactWorld.distanceToSquared(_contactBefore) < 1e-8) continue;
+        c.bone.parent.worldToLocal(_contactLocal.copy(_contactWorld));
+        c.bone.parent.worldToLocal(_contactParent.copy(_contactBefore));
+        c.bone.position.copy(c.rest).add(_contactLocal.sub(_contactParent));
+      }
+    }
+    resolveRagdollMeshContacts(r, s);
   }
 
   update(dt, s) {
@@ -305,6 +416,9 @@ export class Animator {
     const run = smoothstep(2.4 * scale, 5.5 * scale, speed);
     const move = smoothstep(0.1, 0.9 * scale, speed);
     const sprint = s.sprint ? smoothstep(7, 10, speed) : 0;
+    const brokenLeft = s.brokenLegs?.includes('leftLeg') ?? false;
+    const brokenRight = s.brokenLegs?.includes('rightLeg') ?? false;
+    const lostLegs = Number(brokenLeft) + Number(brokenRight);
     const mode = s.mode;
     const grounded = s.grounded && (mode === 'ground' || mode === 'stagger' || mode === 'dash');
     // Dash: the direction (model space) and an envelope rising and falling over it. A dash is
@@ -320,10 +434,10 @@ export class Animator {
     const vert = hipJoint - d.ankle;
     const reach = Math.sqrt(Math.max(0.01, (L * 0.97) ** 2 - vert * vert));
     const S = Math.min(2 * reach * 0.96, 0.2 + speed * 0.5);
-    const D = lerp(0.6, 0.26, run) - 0.07 * sprint;
+    const D = Math.min(0.82, lerp(0.6, 0.26, run) - 0.07 * sprint + 0.1 * lostLegs);
     const C = Math.max(0.2, S / D);
     if (s.grounded) this.phase = (this.phase + (speed / C) * dt) % 1;
-    const lift = L * lerp(0.12, 0.42, run);
+    const lift = L * lerp(0.12, 0.42, run) * (lostLegs ? 1.18 : 1);
     const stance = sp.stance.step(s.stance ?? 0, dt);
 
     // ---- foot targets (model space): ground gait
@@ -331,6 +445,11 @@ export class Animator {
     const uz = this.dir.y;
     for (let i = 0; i < 2; i++) {
       const side = i === 0 ? 1 : -1;
+      if (i === 0 ? brokenLeft : brokenRight) {
+        _target[i].set(side * d.hipX, -d.hipDrop - L * 0.12, -L * 0.08);
+        _pitch[i] = 0;
+        continue;
+      }
       const ph = (this.phase + i * 0.5) % 1;
       let a;
       let y;
@@ -358,6 +477,7 @@ export class Animator {
     m.updateWorldMatrix(true, false);
     const modelY = m.matrixWorld.elements[13];
     for (let i = 0; i < 2; i++) {
+      if (i === 0 ? brokenLeft : brokenRight) { _h[i] = 0; continue; }
       if (s.ground && mode !== 'dead') {
         _v.set(_target[i].x, 0, _target[i].z).applyMatrix4(m.matrixWorld);
         _h[i] = clamp((s.ground(_v.x, _v.z) - modelY) / mScale, -0.55, 0.55);
@@ -367,10 +487,14 @@ export class Animator {
 
     // ---- hips
     const groundW = sp.ground.step(grounded ? 1 : 0, dt);
-    const lowFoot = Math.min(0, _h[0], _h[1]);
-    let base = d.hipY - drop + lowFoot * groundW - s.hunch * 0.06 - (s.crouch ?? 0) * L * 0.17;
+    const supportHeights = [];
+    if (!brokenLeft) supportHeights.push(_h[0]);
+    if (!brokenRight) supportHeights.push(_h[1]);
+    const lowFoot = Math.min(0, ...supportHeights);
+    const collapse = lostLegs === 2 ? 0.4 : lostLegs === 1 ? 0.16 : 0;
+    let base = d.hipY - drop + lowFoot * groundW - s.hunch * 0.06 - (s.crouch ?? 0) * L * 0.17 - L * collapse;
     if (mode === 'slide') base = d.hipY * 0.55;
-    else if (mode === 'dead') base = lerp(d.hipY, d.hipY * 0.25, ease(clamp(s.t * 1.4, 0, 1)));
+    else if (mode === 'dead') base = lerp(d.hipY, d.hipY * 0.14, ease(clamp(s.t * 1.4, 0, 1)));
     else if (mode === 'mantle') base = d.hipY * 0.92;
     const baseY = sp.base.step(base, dt);
     // How high the hips are carried (springs, no bob), for the first-person eye — which keeps only
@@ -384,13 +508,15 @@ export class Animator {
     r.hips.position.set(sway, baseY + bob + breathe - d.hipY * 0.13 * dashE, 0);
 
     // Pelvis twist follows the legs; strafing turns the hips toward travel, shoulders stay on aim.
-    const nL = _target[0].z / Math.max(0.01, S / 2);
+    const gaitLeg = brokenLeft ? _target[1] : _target[0];
+    const nL = gaitLeg.z / Math.max(0.01, S / 2);
     const gaitYaw = -0.14 * clamp(nL, -1, 1) * move * groundW * lerp(0.6, 1, run);
     const strafe = speed > 0.5 ? Math.atan2(lx, Math.abs(lz) + 0.6) * 0.55 * move : 0;
     const strafeYaw = sp.hipYaw.step(strafe * groundW, dt);
     // The hips take a fifth of any torso twist (swings, bladed aiming) so the turn reads full-body.
     const hipYaw = strafeYaw + gaitYaw + sp.twist.x * 0.2;
-    const hipRoll = 0.05 * Math.sin(TAU * this.phase) * move * groundW;
+    const limpRoll = brokenLeft && !brokenRight ? 0.16 : brokenRight && !brokenLeft ? -0.16 : 0;
+    const hipRoll = 0.05 * Math.sin(TAU * this.phase) * move * groundW + limpRoll;
     let hipPitch = 0.06 * run * groundW;
     if (mode === 'slide') hipPitch = -0.28;
     else if (mode === 'dash') hipPitch += 0.18 * dashZ * dashE;
@@ -493,6 +619,13 @@ export class Animator {
     r.hips.getWorldQuaternion(_qc);
     for (let i = 0; i < 2; i++) {
       const leg = r.legs[i];
+      if (i === 0 ? brokenLeft : brokenRight) {
+        // Leave the severed stump out of foot placement and ground support.
+        leg.thigh.quaternion.setFromAxisAngle(X_AXIS, 0.45);
+        leg.shin.quaternion.identity();
+        leg.foot.quaternion.identity();
+        continue;
+      }
       const side = i === 0 ? 1 : -1;
       _v.copy(_target[i]).applyMatrix4(m.matrixWorld);
       _pole.set(side * 0.12, mode === 'slide' && i === 1 ? -0.6 : 0, 1).normalize().applyQuaternion(_qc);
@@ -653,6 +786,20 @@ export class Animator {
       blendQ(a.fore.quaternion, _fkF, a.fore.quaternion, wIK, bm[1]);
       blendQ(a.hand.quaternion, _fkH, a.hand.quaternion, wIK, bm[2]);
     } else a.hand.quaternion.identity();
+    if (mode === 'dead') this.updateRagdoll(dt, s);
+    else {
+      this.resetRagdoll();
+      const bones = [r.hips, r.spine, r.chest, r.head, r.armR.upper, r.armR.fore,
+        r.armL.upper, r.armL.fore, r.legs[0].thigh, r.legs[0].shin, r.legs[1].thigh, r.legs[1].shin,
+        r.armR.hand, r.armL.hand, r.legs[0].foot, r.legs[1].foot];
+      if (!this.ragdollPose) this.ragdollPose = bones.map((bone) => ({
+        bone, position: bone.position.clone(), quaternion: bone.quaternion.clone(),
+      }));
+      else for (const p of this.ragdollPose) {
+        p.position.copy(p.bone.position);
+        p.quaternion.copy(p.bone.quaternion);
+      }
+    }
   }
 
   // Caps how fast a gripping hand may turn (chest-relative): steady motion passes untouched, but a

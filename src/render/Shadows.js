@@ -13,11 +13,13 @@ const SUN_DIR = new THREE.Vector3(-18, -34, -12).normalize(); // as World.update
 // Two cascades: a sharp map close in and a coarse one out to 130 m. (Each one draws every shadow
 // caster again, so a third cost more than it showed.)
 const CASCADES = 2;
+const SHADOW_MAP_SIZE = { low: 1024, medium: 1536, high: 2048 };
 
 export class Shadows {
   constructor(game) {
     this.game = game;
     this.csm = null;
+    this.quality = 'high';
     this.saved = new Map(); // material → its own hook and program key, to put back
     this.forget = (e) => this.release(e.target, false);
   }
@@ -32,7 +34,7 @@ export class Shadows {
     const g = this.game;
     const sun = g.world.sun;
     this.csm = new CSM({
-      camera: g.camera, parent: g.scene, cascades: CASCADES, maxFar: 130, mode: 'practical', shadowMapSize: 1536,
+      camera: g.camera, parent: g.scene, cascades: CASCADES, maxFar: 130, mode: 'practical', shadowMapSize: SHADOW_MAP_SIZE[this.quality],
       lightDirection: SUN_DIR.clone(), lightIntensity: sun.intensity, lightMargin: 80, shadowBias: -0.0004,
     });
     this.csm.fade = true;
@@ -42,6 +44,22 @@ export class Shadows {
     }
     sun.visible = false;
     this.fov = null;
+  }
+
+  setQuality(name) {
+    const quality = SHADOW_MAP_SIZE[name] ? name : 'high';
+    if (quality === this.quality) return;
+    this.quality = quality;
+    const size = SHADOW_MAP_SIZE[quality];
+    const update = (light) => {
+      const shadow = light?.shadow;
+      if (!shadow || shadow.mapSize.x === size && shadow.mapSize.y === size) return;
+      shadow.map?.dispose();
+      shadow.map = null;
+      shadow.mapSize.set(size, size);
+    };
+    update(this.game.world.sun);
+    for (const light of this.csm?.lights ?? []) update(light);
   }
 
   stop() {

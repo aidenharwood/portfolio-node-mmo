@@ -339,8 +339,6 @@ export class CharacterCore {
         fx.push({ k: 'toast', text: `Threat: ${TIERS[op.v].name}` });
         return true;
       case 'respawn': {
-        const lost = Math.floor(s.gold * 0.1);
-        s.gold -= lost;
         this.teleportUntil = this.time + 10;
         return true;
       }
@@ -634,17 +632,19 @@ export class CharacterCore {
     fx.push({ k: 'toast', text: 'Backpack full — reward dropped at your feet' });
   }
 
-  // Tap F: into an empty matching slot or the backpack; when everything is full (or on a hold of
-  // F) it takes the place of what's worn there — the armour in its slot, or the wielded weapon —
-  // and that is left on the ground where the new one lay.
+  // Tap F adds loot when there's room. Hold F equips it in place of the current item, keeping the
+  // replaced item in the backpack when possible or on the ground where this drop landed.
   pick(op, fx) {
     const g = this.ground.get(op.gid);
     if (!g || !op.roll || !this.near(g.at[0], g.at[2], REACH.loot)) return false;
     const inv = this.inventory;
     const item = g.item;
+    const at = Array.isArray(op.at) && op.at.length === 3 && op.at.every(Number.isFinite) ? op.at : g.at;
+    if (Math.hypot(at[0] - g.at[0], at[2] - g.at[2]) > 6 || !this.near(at[0], at[2], REACH.loot)) return false;
     let where = op.swap ? null : inv.add(item);
+    if (!op.swap && !where) return false;
     let old = null;
-    if (!where) {
+    if (op.swap) {
       if (isArmor(item)) {
         old = inv.armor[item.slot];
         inv.armor[item.slot] = item;
@@ -657,7 +657,7 @@ export class CharacterCore {
     this.ground.delete(op.gid);
     this.recordItem(item);
     fx.push({ k: 'unground', gid: op.gid });
-    if (old) this.spawn(op.roll.gid, old, op.swap ? g.at : [this.position.x, this.position.y, this.position.z], fx, false);
+    if (old && (!op.swap || !inv.stash(old))) this.spawn(op.roll.gid, old, at, fx, false);
     if (where !== 'backpack') fx.push({ k: 'gear' });
     fx.push({ k: 'toast', text: where === 'backpack' ? `${item.name} → backpack` : old && op.swap ? `Swapped ${old.name} for ${item.name}` : `Equipped ${item.name}` });
     return true;

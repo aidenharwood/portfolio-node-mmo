@@ -30,8 +30,9 @@ measured before and after each phase, at every quality setting.
   `world/Towns.js`; villages, hamlets, camps, forts, landmarks and story sites each have bespoke
   code (`world/Landmarks.js`, `world/World.js`, `world/StorySites.js`); dungeons have their own kit
   (`world/InteriorKit.js`).
-- **Effects:** additive glow sprites, streaks, toon smoke puffs, rings, telegraphs and damage numbers
-  (`fx/Effects.js`). They're generic, not tied to what was hit.
+- **Effects:** GPU particle pools now carry sword sweeps, flame tongues, explosion smoke, sparks,
+  debris and biome ambience; additive glow accents, rings, telegraphs and damage numbers remain in
+  `fx/Effects.js`. Surface impacts route through the hit material kind.
 
 ---
 
@@ -119,7 +120,7 @@ A modular, procedural generator in `src/world/build/` that every builder can use
 - **Explosions:** a flash, a shockwave ring with a slight screen distortion, flying debris, a rising
   toon smoke column, and a scorch decal that fades.
 - **Magic and elements:**
-  - ribbon trails on spells and slashes;
+  - ribbon trails on spells; slashes use short GPU particle streak sweeps;
   - fire embers and heat shimmer, frost shards and mist;
   - shock arcs that branch, corrosive drips and bubbling pools.
 - **Weapons:** tracers, layered muzzle flashes per maker, shell casings that bounce, charge-up glows.
@@ -180,4 +181,47 @@ A modular, procedural generator in `src/world/build/` that every builder can use
     surfaces off (15.1 vs 15.5 ms, medians of six runs).
   - *Not yet*: toon highlights on metal and glass, crease ink, line weight by depth — moved to G4
     polish. Brick, cobbles and corrugated are ready for the building kit (G2) to use.
-- **G2 Building kit:** next.
+- **G2 Building kit:** implemented for the main town, city, hamlet, Scav hut, and landmark house
+  builders. `src/world/build/kit.js` makes seeded plans with rectangular, L, T, U and court
+  footprints; seven roof forms; wall modules and style details; and rotated footprint colliders.
+  Styles cover settler, city, desert, cold, Warden, Scav, Hive, Synth and Maker construction.
+  Far POIs use the same footprint and roof form with simplified walls and no small modules; they
+  rebuild with full details as the player approaches, with hysteresis to avoid threshold churn.
+  `tools/buildcheck.mjs` now runs as part of `npm test` and checks deterministic plans, roof and
+  footprint combinations, nonempty geometry, reachable doors and collider placement. Existing
+  bespoke camp/fort, story-site and dungeon builders have not all been migrated to the kit; they
+  retain their bespoke geometry and use G1 surface baking where applicable. Style captures and
+  before/after performance measurements remain outstanding.
+- **G3 Special effects:** implemented for surface-aware impacts, particle-based flame tongues and
+  weapon-attached melee sparks (emitted from transformed mesh geometry at the striking end),
+  toggleable blood particles for organic enemy hits, nearby scenery flames with pooled flickering
+  point lights as well as broad, layered flame tongues, drifting embers and rising smoke wisps that
+  scale with their source, particle
+  explosion smoke, GPU particle pools with quality budgets, hit flashes, screen-space explosion
+  shockwaves, debris, fading scorch decals, elemental
+  particles, branching shock arcs, corrosive pools, snow, leaves, drifting biome motes, fireflies
+  in forests at night, wet-biome rain and embers near world fires. The F3 panel reports live and total particle budgets, and
+  `tools/effectcheck.mjs` checks pool bounds, expiry and cleanup under `npm test`. Captures across
+  every element and surface, and a crowded-fight budget capture, remain outstanding. Fountain/
+  waterfall spray is not implemented.
+- **G4 Performance and polish:** the F3 readout reports frame time, draw calls, triangles, geometry,
+  textures, programs, entities, drops, shots and particle use; near/far building detail levels are
+  implemented; and `tools/worldshots.js` provides repeatable generated-world contact sheets.
+  Repeated terrain scenery is instanced and building meshes are baked by colour. Tour outputs and
+  quality-by-quality before/after measurements remain outstanding. G1 metal/glass toon highlights,
+  crease ink and depth-varying line weight remain open.
+  - `render/Particles.js` provides fixed-capacity instanced GPU pools for additive streaks and
+    cel-shaded debris. `fx/Effects.js` owns and updates both pools, routes projectile and melee
+    sparks through them, emits debris for impacts, and uses GPU particles for explosion embers and
+    debris. Fire, shock, frost and corrosive hits and blasts have distinct particle accents. Pools
+    are cleared with the rest of the effects on map changes. Ambient effects now cover all twelve
+    biomes: snowfall, falling leaves and fireflies; colored spores and pollen; drifting dust and
+    cinders; highland seeds, mountain wind streaks and crystal glints.
+    Explosions now trigger an expanding screen-space distortion ring in the existing post chain,
+    including while the player is stationary and at Low quality.
+  - Building walls, forest trunks, crystal formations, rocks, shrooms and cacti now carry surface
+    kinds into projectile impacts. Rain is implemented for jungle and marsh biomes; snow, leaves,
+    spores and dust motes cover additional biomes, and embers rise near world fires. Remaining:
+    expand impact surface tags across settlement/camp/Hive props; add waterfall/fountain spray;
+    capture all elements and surfaces and verify a crowded-fight budget in game. Explosion
+    scorch decals already fade out over time.

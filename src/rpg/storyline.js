@@ -221,7 +221,7 @@ export const MOMENTS = {
   },
   act1: {
     at: 'player', title: ['Act I', 'Signal Fire'], shots: [
-      { from: [8, 6, 10], lift: 1.6, t: 5, line: null },
+      { from: [8, 6, 10], lift: 1.6, t: 5, line: ['Warden Maren', 'Smoke over the road. Scavengers hit a village west of here — go and see who made it out.'] },
     ],
   },
   city: {

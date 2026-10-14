@@ -5,6 +5,7 @@
 import * as THREE from 'three';
 import { enemyType, enemyAttacks, enemyRadius, enemyMaxHp, STATES, FLAG } from '../sim/enemyDefs.js';
 import { SHIELD } from '../sim/affixes.js';
+import { legDamageProfile } from '../combat/HitComponents.js';
 
 const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 const lerp = (a, b, t) => a + (b - a) * t;
@@ -30,7 +31,7 @@ export class EnemyReplica {
     this.displayName = info.nm ?? (info.el ? `${info.el}` : this.type.name);
     this.attacks = enemyAttacks(this.type, info.lv);
     this.radius = enemyRadius(this.type);
-    this.height = this.type.height;
+    this.baseHeight = this.type.height;
     this.mass = this.type.mass;
     this.hover = this.type.hover ?? 0;
     this.maxHp = info.mh;
@@ -45,6 +46,10 @@ export class EnemyReplica {
     this.apply(info.s, 0);
     this.position.set(info.s[1], info.s[2], info.s[3]);
     this.facing = info.s[4];
+  }
+
+  get height() {
+    return this.baseHeight * legDamageProfile(this.type, this.brokenParts).height;
   }
 
   push(ts, s) {
@@ -94,8 +99,9 @@ export class EnemyReplica {
     this.attackSeq = s[16];
     this.maxHp = s[17] ?? this.maxHp;
     // A shield comes with the state while there is one (an affix's, or a raid boss's own).
-    if (s[18] !== undefined) { this.shield = s[18]; this.shieldMax = Math.max(this.shieldMax, s[18]); }
+    if (typeof s[18] === 'number') { this.shield = s[18]; this.shieldMax = Math.max(this.shieldMax, s[18]); }
     else if (this.shieldMax) this.shield = 0;
+    this.brokenParts = Array.isArray(s[19]) ? s[19] : [];
     this.immune = !!(fl & FLAG.immune);
     this.rallied = !!(fl & FLAG.rallied);
     this.alive = !!(fl & FLAG.alive);

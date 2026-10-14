@@ -11,6 +11,7 @@
 // Owners fill a state like makeLegState() each frame and call update().
 import * as THREE from 'three';
 import { solveTwoBone, Spring } from './IK.js';
+import { resolveRagdollMeshContacts } from './RagdollContacts.js';
 
 const TAU = Math.PI * 2;
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
@@ -31,6 +32,7 @@ export function makeLegState() {
   return {
     mode: 'ground',      // ground | air | stagger | dead
     vx: 0, vz: 0, facing: 0, grounded: true,
+    brokenLegs: [],
     ground: null,        // (x, z) => world height
     pose: 'idle',        // idle | bite | charge | howl | pounce | spit | rear | swipe
     phase: 'none',       // windup | active | recover | none
@@ -55,6 +57,8 @@ export class LegAnimator {
     this.mem = rig.legs.map(() => ({ perp: new THREE.Vector3(), set: false }));
     this.feet = rig.legs.map(() => new THREE.Vector3());
     this.dir = new THREE.Vector2(0, 1);
+    this.ragdoll = null;
+    this.ragdollPose = null;
   }
 
   update(dt, s) {
@@ -96,8 +100,14 @@ export class LegAnimator {
     let backH = 0;
     let leftH = 0;
     let rightH = 0;
+    let nf = 0, nb = 0, nl = 0, nr = 0, supported = 0;
     r.legs.forEach((leg, i) => {
       const lc = leg.cfg;
+      if (s.brokenLegs?.includes(`leg${i}`)) {
+        // The detached limb no longer plants a foot or carries the body's weight.
+        this.feet[i].set(lc.foot[0], -L * 0.2, lc.foot[2]);
+        return;
+      }
       const ph = (this.phase + lc.phase) % 1;
       let a;
       let y;
@@ -134,29 +144,32 @@ export class LegAnimator {
         h = clamp((s.ground(_v.x, _v.z) - modelY) / mScale, -0.6, 0.6);
       }
       rest.y += h + (c.ankle ?? 0.05);
-      if (lc.front) frontH += h; else backH += h;
-      if (lc.side > 0) leftH += h; else rightH += h;
+      if (lc.front) { frontH += h; nf++; } else { backH += h; nb++; }
+      if (lc.side > 0) { leftH += h; nl++; } else { rightH += h; nr++; }
+      supported++;
     });
-    const nf = r.legs.filter((l) => l.cfg.front).length || 1;
-    const nb = r.legs.length - nf || 1;
-    const nl = r.legs.filter((l) => l.cfg.side > 0).length || 1;
-    frontH /= nf;
-    backH /= nb;
-    leftH /= nl;
-    rightH /= r.legs.length - nl || 1;
+    const allH = supported ? (frontH + backH) / supported : 0;
+    frontH = nf ? frontH / nf : allH;
+    backH = nb ? backH / nb : allH;
+    leftH = nl ? leftH / nl : allH;
+    rightH = nr ? rightH / nr : allH;
+    const lost = r.legs.length - supported;
+    const loss = lost / Math.max(1, r.legs.length);
 
     // ---- body
     const crouch = sp.crouch.step(s.crouch + (s.pose === 'charge' && s.phase === 'windup' ? 0.25 : 0) + (s.pose === 'pounce' && s.phase === 'windup' ? 0.35 : 0)
       + (s.pose === 'howl' ? 0.1 : 0) + (s.mode === 'stagger' ? 0.15 : 0), dt);
-    const bob = Math.cos(TAU * 2 * this.phase) * L * 0.035 * move;
-    const baseY = c.bodyY * (1 - crouch * 0.4) + Math.min(frontH, backH) * 0.5 + Math.max(frontH, backH) * 0.5 - dead * c.bodyY * 0.55;
+    const bob = Math.cos(TAU * 2 * this.phase) * L * 0.035 * move * (1 - loss * 0.75);
+    const collapse = L * 0.45 * loss;
+    const baseY = c.bodyY * (1 - crouch * 0.4) + Math.min(frontH, backH) * 0.5 + Math.max(frontH, backH) * 0.5 - dead * c.bodyY * 0.55 - collapse;
     r.body.position.y = sp.y.step(baseY, dt) + bob;
     const len = c.bodyLen ?? 1;
-    let pitch = Math.atan2(backH - frontH, len);
+    let pitch = Math.atan2(backH - frontH, len) + ((nf - nb) / Math.max(1, supported)) * 0.12;
     if (s.pose === 'spit') pitch -= poseActive('spit') * 0.4;
     pitch -= rear * 1.05;
     if (s.pose === 'charge' && s.phase === 'active') pitch += 0.12;
-    const roll = Math.atan2(rightH - leftH, (c.bodyWidth ?? 0.6)) * 0.6 + dead * 1.4 - clamp(yawRate * speed * 0.01, -0.2, 0.2);
+    const roll = Math.atan2(rightH - leftH, (c.bodyWidth ?? 0.6)) * 0.6
+      + ((nr - nl) / Math.max(1, supported)) * 0.22 + dead * 1.4 - clamp(yawRate * speed * 0.01, -0.2, 0.2);
     const lean = sp.lean.step(s.flinch * -0.2 + (s.pose === 'bite' && s.phase === 'active' ? 0.12 : 0), dt);
     _e.set(sp.pitch.step(pitch, dt) + lean, 0, sp.roll.step(roll, dt), 'YXZ');
     r.body.quaternion.setFromEuler(_e);
@@ -189,6 +202,12 @@ export class LegAnimator {
     // ---- legs: IK to the feet
     m.updateMatrixWorld(true);
     r.legs.forEach((leg, i) => {
+      if (s.brokenLegs?.includes(`leg${i}`)) {
+        leg.upper.quaternion.setFromAxisAngle(X, 0.45);
+        leg.lower.quaternion.identity();
+        leg.foot.quaternion.identity();
+        return;
+      }
       const lc = leg.cfg;
       _p.copy(this.feet[i]).applyMatrix4(m.matrixWorld);
       // Knee/elbow direction: front elbows back, hind knees forward, spider knees up and out.
@@ -201,6 +220,97 @@ export class LegAnimator {
       leg.upper.parent.getWorldQuaternion(_q).multiply(leg.upper.quaternion).multiply(leg.lower.quaternion).invert();
       if (leg.foot) leg.foot.quaternion.copy(_q).multiply(m.getWorldQuaternion(_q2));
     });
+    if (s.mode === 'dead') this.updateRagdoll(dt, s);
+    else {
+      this.ragdoll = null;
+      const bones = this.ragdollBones();
+      if (!this.ragdollPose) this.ragdollPose = bones.map((bone) => ({
+        bone, position: bone.position.clone(), quaternion: bone.quaternion.clone(),
+      }));
+      else for (const p of this.ragdollPose) {
+        p.position.copy(p.bone.position);
+        p.quaternion.copy(p.bone.quaternion);
+      }
+    }
+  }
+
+  ragdollBones() {
+    const r = this.rig;
+    return [r.body, r.chest, r.neck, r.head, ...(r.tail ?? []), ...r.legs.flatMap((leg) => [leg.upper, leg.lower, leg.foot])].filter(Boolean);
+  }
+
+  updateRagdoll(dt, s) {
+    const r = this.rig;
+    const bones = this.ragdollBones();
+    if (!this.ragdoll) {
+      const pose = this.ragdollPose ?? bones.map((bone) => ({
+        bone, position: bone.position.clone(), quaternion: bone.quaternion.clone(),
+      }));
+      const saved = new Map(pose.map((p) => [p.bone, p]));
+      const seed = Math.random() * Math.PI * 2;
+      this.ragdoll = {
+        pose, time: 0, bodyY: saved.get(r.body).position.y, bodyV: 0,
+        joints: bones.map((bone, i) => {
+          const core = i < 4 + (r.tail?.length ?? 0);
+          const p = saved.get(bone);
+          _e.setFromQuaternion(p.quaternion, 'XYZ');
+          return {
+            bone, base: _q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), _e.y).clone(),
+            x: _e.x, z: _e.z,
+            tx: i === 0 ? (Math.sin(seed) < 0 ? -1 : 1) * (1.25 + Math.abs(Math.sin(seed * 2)) * 0.2)
+              : core ? Math.sin(seed + i) * 0.28 : 0,
+            tz: i === 0 ? Math.cos(seed) * 0.48 : core ? Math.cos(seed + i) * 0.18 : 0,
+            limitX: i === 0 ? 1.65 : core ? 0.8 : 1.35,
+            limitZ: i === 0 ? 0.85 : core ? 0.65 : 0.75,
+            vx: Math.sin(seed + i * 2.7) * (core ? 0.25 : 0.12),
+            vz: Math.cos(seed + i * 1.9) * (core ? 0.2 : 0.12),
+            core,
+          };
+        }),
+        contacts: [...r.legs.map((leg) => leg.foot), r.head].filter(Boolean),
+      };
+    }
+    const sim = this.ragdoll;
+    sim.time += dt;
+    dt = Math.min(dt, 1 / 30);
+    for (const p of sim.pose) if (p.bone !== r.body) p.bone.position.copy(p.position);
+    const floorY = Math.max(0.08, this.cfg.bodyY * 0.16);
+    sim.bodyV -= 9.8 * dt;
+    sim.bodyY = Math.max(floorY, sim.bodyY + sim.bodyV * dt);
+    if (sim.bodyY <= floorY) sim.bodyV = 0;
+    r.body.position.y = sim.bodyY;
+    for (const j of sim.joints) {
+      if (j.core) {
+        const k = j.bone === r.body ? 13 : 10;
+        const damp = j.bone === r.body ? 5.8 : 5.0;
+        j.vx += ((j.tx - j.x) * k - j.vx * damp) * dt;
+        j.vz += ((j.tz - j.z) * k - j.vz * damp) * dt;
+      } else {
+        j.bone.getWorldQuaternion(_q).invert();
+        _v.set(0, -9.8, 0).applyQuaternion(_q);
+        j.vx += (-_v.z * 0.48 - j.vx * 5.2) * dt;
+        j.vz += (_v.x * 0.48 - j.vz * 5.2) * dt;
+      }
+      j.x += j.vx * dt;
+      j.z += j.vz * dt;
+      j.x = clamp(j.x, -j.limitX, j.limitX);
+      j.z = clamp(j.z, -j.limitZ, j.limitZ);
+      _e.set(j.x, 0, j.z, 'XYZ');
+      j.bone.quaternion.copy(j.base).multiply(_q.setFromEuler(_e));
+      r.model.updateWorldMatrix(true, false);
+    }
+    if (s.ground) {
+      r.model.updateWorldMatrix(true, true);
+      for (const bone of sim.contacts) {
+        bone.getWorldPosition(_p);
+        const floor = s.ground(_p.x, _p.z) + 0.025;
+        if (_p.y >= floor) continue;
+        _p.y = floor;
+        bone.parent.worldToLocal(_p);
+        bone.position.copy(_p);
+      }
+    }
+    resolveRagdollMeshContacts(r, s);
   }
 
   // How far the creature rears up onto its hind legs (rear pose, and the swipe's half-rear).
@@ -228,6 +338,8 @@ export class HoverAnimator {
     this.rig = rig;
     this.time = Math.random() * 10;
     this.sp = { pitch: new Spring(3), roll: new Spring(3), dead: new Spring(2), cast: new Spring(6), recoil: new Spring(8) };
+    this.ragdoll = null;
+    this.ragdollPose = null;
   }
 
   update(dt, s) {
@@ -249,7 +361,7 @@ export class HoverAnimator {
     const roll = sp.roll.step(clamp(-lx * 0.06, -0.4, 0.4) + dead * 1.2, dt);
     _e.set(pitch + dead * 0.6, 0, roll, 'YXZ');
     r.body.quaternion.setFromEuler(_e);
-    for (const ring of r.spin ?? []) ring.rotation.y += dt * (ring.userData.rate ?? 4) * (1 - dead * 0.9);
+    if (s.mode !== 'dead') for (const ring of r.spin ?? []) ring.rotation.y += dt * (ring.userData.rate ?? 4) * (1 - dead * 0.9);
     if (r.arms) {
       r.arms.forEach((arm, i) => {
         const side = i === 0 ? 1 : -1;
@@ -258,5 +370,90 @@ export class HoverAnimator {
       });
     }
     if (r.robe) r.robe.rotation.set(clamp(lz * 0.08, -0.4, 0.5) + Math.sin(this.time * 2.6) * 0.06, Math.sin(this.time * 1.9) * 0.1, 0, 'YXZ');
+    if (s.mode === 'dead') this.updateRagdoll(dt, s);
+    else {
+      this.ragdoll = null;
+      const bones = this.ragdollBones();
+      if (!this.ragdollPose) this.ragdollPose = bones.map((bone) => ({
+        bone, position: bone.position.clone(), quaternion: bone.quaternion.clone(),
+      }));
+      else for (const p of this.ragdollPose) {
+        p.position.copy(p.bone.position);
+        p.quaternion.copy(p.bone.quaternion);
+      }
+    }
+  }
+
+  ragdollBones() {
+    const r = this.rig;
+    return [r.body, ...(r.arms ?? []).flatMap((arm) => [arm.upper, arm.fore, arm.hand]), r.robe].filter(Boolean);
+  }
+
+  updateRagdoll(dt, s) {
+    const r = this.rig;
+    const bones = this.ragdollBones();
+    if (!this.ragdoll) {
+      const pose = this.ragdollPose ?? bones.map((bone) => ({
+        bone, position: bone.position.clone(), quaternion: bone.quaternion.clone(),
+      }));
+      const saved = new Map(pose.map((p) => [p.bone, p]));
+      const seed = Math.random() * Math.PI * 2;
+      this.ragdoll = {
+        pose, time: 0, bodyY: saved.get(r.body).position.y, bodyV: 0,
+        joints: bones.map((bone, i) => {
+          const p = saved.get(bone);
+          _e.setFromQuaternion(p.quaternion, 'XYZ');
+          return {
+            bone, base: _q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), _e.y).clone(),
+            x: _e.x, z: _e.z,
+            tx: i === 0 ? (Math.sin(seed) < 0 ? -1 : 1) * 1.35 : Math.sin(seed + i) * 0.3,
+            tz: i === 0 ? Math.cos(seed) * 0.55 : Math.cos(seed + i) * 0.22,
+            limitX: i === 0 ? 1.65 : 1.15, limitZ: i === 0 ? 0.85 : 0.75,
+            vx: Math.sin(seed + i * 2.3) * (i === 0 ? 0.35 : 0.18),
+            vz: Math.cos(seed + i * 1.7) * (i === 0 ? 0.3 : 0.16),
+          };
+        }),
+        contacts: (r.arms ?? []).map((arm) => arm.hand),
+      };
+    }
+    const sim = this.ragdoll;
+    sim.time += dt;
+    dt = Math.min(dt, 1 / 30);
+    for (const p of sim.pose) if (p.bone !== r.body) p.bone.position.copy(p.position);
+    const floorY = Math.max(0.08, this.rig.cfg.bodyY * 0.12);
+    sim.bodyV -= 9.8 * dt;
+    sim.bodyY = Math.max(floorY, sim.bodyY + sim.bodyV * dt);
+    if (sim.bodyY <= floorY) sim.bodyV = 0;
+    r.body.position.y = sim.bodyY;
+    for (let i = 0; i < sim.joints.length; i++) {
+      const j = sim.joints[i];
+      if (i === 0 || j.bone === r.robe) {
+        const k = i === 0 ? 12 : 7;
+        const d = i === 0 ? 5.5 : 4.5;
+        j.vx += ((j.tx - j.x) * k - j.vx * d) * dt;
+        j.vz += ((j.tz - j.z) * k - j.vz * d) * dt;
+      } else {
+        j.bone.getWorldQuaternion(_q).invert();
+        _v.set(0, -9.8, 0).applyQuaternion(_q);
+        j.vx += (-_v.z * 0.5 - j.vx * 5.4) * dt;
+        j.vz += (_v.x * 0.5 - j.vz * 5.4) * dt;
+      }
+      j.x = clamp(j.x + j.vx * dt, -j.limitX, j.limitX);
+      j.z = clamp(j.z + j.vz * dt, -j.limitZ, j.limitZ);
+      _e.set(j.x, 0, j.z, 'XYZ');
+      j.bone.quaternion.copy(j.base).multiply(_q.setFromEuler(_e));
+      r.model.updateWorldMatrix(true, false);
+    }
+    if (s.ground) {
+      r.model.updateWorldMatrix(true, true);
+      for (const bone of sim.contacts) {
+        bone.getWorldPosition(_p);
+        if (_p.y >= s.ground(_p.x, _p.z) + 0.025) continue;
+        _p.y = s.ground(_p.x, _p.z) + 0.025;
+        bone.parent.worldToLocal(_p);
+        bone.position.copy(_p);
+      }
+    }
+    resolveRagdollMeshContacts(r, s);
   }
 }

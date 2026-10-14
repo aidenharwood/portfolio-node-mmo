@@ -13,10 +13,13 @@ export const DEFAULT_PREFS = {
   fov: 55,            // field of view outside aim-down-sights
   shake: 1,           // camera shake scale
   motionFX: true,     // speed blur and lines
+  gore: false,       // blood particles on organic enemy hits
+  antialias: TOUCH_DEVICE ? 'off' : 'msaa', // 'off' · 'fxaa' · 'msaa' · 'msaa+fxaa'
+  shadowQuality: 'high', // shadow map resolution: 'low' · 'medium' · 'high'
   shadows: true,
   outlines: true,
   hatching: true,
-  fullscreen: true,   // fullscreen in play (lets Esc open and close menus without losing the mouse)
+  fullscreen: false,  // opt in to fullscreen in play from Settings
   graphics: 'medium', // quality: 'low' · 'medium' · 'high' (render/Quality.js)
   renderScale: 1,     // × the screen's resolution (capped at 2× CSS pixels)
   dynamicRes: true,   // lower the resolution while frames run slow, raise it again when they don't
@@ -25,7 +28,7 @@ export const DEFAULT_PREFS = {
 };
 
 // Phones and tablets start lighter: no shadows, hatching or speed effects, and fewer pixels.
-const TOUCH_DEFAULTS = { graphics: 'low', motionFX: false, shadows: false, hatching: false, renderScale: 0.75 };
+const TOUCH_DEFAULTS = { graphics: 'low', motionFX: false, shadows: false, hatching: false, antialias: 'off', renderScale: 0.75 };
 
 export function defaultPrefs() {
   return { ...DEFAULT_PREFS, ...(TOUCH_DEVICE ? TOUCH_DEFAULTS : {}) };
@@ -40,7 +43,11 @@ export function readPrefs(legacy = null) {
     if (typeof legacy.volume === 'number') prefs.volume = legacy.volume;
     if (typeof legacy.muted === 'boolean') prefs.muted = legacy.muted;
   }
-  for (const [k, v] of Object.entries(stored ?? {})) if (k in prefs && typeof v === typeof prefs[k]) prefs[k] = v;
+  for (const [k, v] of Object.entries(stored ?? {})) {
+    if (k === 'antialias' && typeof v === 'boolean') {
+      prefs.antialias = v ? 'msaa' : 'off'; // migrate the earlier toggle preference
+    } else if (k in prefs && typeof v === typeof prefs[k]) prefs[k] = v;
+  }
   return prefs;
 }
 

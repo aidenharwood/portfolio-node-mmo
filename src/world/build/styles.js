@@ -3,7 +3,7 @@
 // pipes, light strips, quoins, crenellations — with the chance of each. The colours of walls and
 // roofs come from the builder (world/Towns.js picks them by climate); a style's own colours are its
 // plinth, beams and glass. What a wall or roof colour is drawn as (render/Surfaces.js) is here too.
-import { C, HEARTH, FORGE } from '../palette.js';
+import { C, ARC, HEARTH, FORGE, HIVE, RUNE } from '../palette.js';
 import { shade } from '../../render/ModelKit.js';
 
 export const KIT_STYLES = {
@@ -37,6 +37,22 @@ export const KIT_STYLES = {
     roofs: ['shed', 'gable'], flatRoofs: ['parapet', 'sawtooth', 'dome'], pitch: 0.3, frontGable: 0,
     strip: HEARTH, pipes: 0.3,
     plinth: C.metalDark, beam: C.metalDark, glass: 0x10202c,
+  },
+  // Synth installations: sterile white panel walls, glazed shed roofs and bright conduits.
+  synth: {
+    roofs: ['shed', 'gable'], flatRoofs: ['parapet', 'sawtooth', 'dome'], pitch: 0.3, frontGable: 0,
+    strip: ARC, pipes: 0.3, plinth: C.metalDark, beam: C.metalDark, glass: 0x10202c,
+  },
+  // Hive forms: low resin shells, swollen domes, ribs and luminous seams.
+  hive: {
+    roofs: ['dome', 'cone', 'hip'], flatRoofs: ['dome', 'cone'], pitch: 0.2, overhang: 0.12,
+    spikes: 0.7, pipes: 0.25, strip: HIVE, plinth: C.resinDark, beam: C.chitin, glass: C.egg,
+  },
+  // Maker ruins: carved stone, steep caps, arcades and runic details.
+  maker: {
+    roofs: ['hip', 'gable', 'cone'], flatRoofs: ['dome', 'parapet'], pitch: 0.36, frontGable: 0.25,
+    arch: true, quoins: true, vigas: 0.35, dormers: 0.1, strip: RUNE,
+    plinth: C.stoneDark, beam: C.stone, glass: 0x18202b,
   },
   // The story cities: stone with quoins and a cornice under hipped tile.
   city: {
@@ -72,10 +88,12 @@ const WALL_SURF = new Map([
   [0xd8b890, 'adobe'], [C.wood, 'planks'], [0x8a6a48, 'planks'], [0xa08a68, 'planks'], [C.steel, 'panels'],
   [0x8a7a68, 'planks'], [0x9aa4b4, 'panels'], [C.stone, 'blocks'], [C.stoneDark, 'blocks'], [0xc8d0da, 'panels'],
   [0x9a3a2a, 'planks'],
+  [C.resin, 'resin'], [C.resinDark, 'resin'], [C.chitin, 'chitin'], [C.obsidian, 'rock'],
 ]);
 const ROOF_SURF = new Map([
   [0x9a3a2a, 'tiles'], [0x4a5560, 'shingles'], [0xb08a5a, 'tiles'], [0xb0583a, 'tiles'], [C.thatch, 'thatch'],
   [0x7a6a40, 'thatch'], [C.metalDark, 'corrugated'], [0x3a4450, 'corrugated'], [0x3a3f4a, 'corrugated'], [C.rust, 'corrugated'],
+  [C.resin, 'resin'], [C.chitin, 'chitin'], [C.obsidian, 'rock'],
 ]);
 export const wallSurface = (color) => WALL_SURF.get(color);
 export const roofSurface = (color) => ROOF_SURF.get(color);

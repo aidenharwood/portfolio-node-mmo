@@ -306,15 +306,15 @@ export class HUD {
 
   // Focused loot card (looking at a drop), compared against the equipped weapon (or the armour in
   // its slot); `sets` counts the set pieces worn, for the card's set bonuses.
-  setLoot(weapon, current, backpackFull, armorSlots = {}, sets = {}) {
+  setLoot(weapon, current, canPickUp, armorSlots = {}, sets = {}) {
     if (weapon && isArmor(weapon)) current = armorSlots[weapon.slot];
-    const key = weapon ? `${weapon.uid}|${current?.uid}|${backpackFull}|${weapon.set ? sets[weapon.set] ?? 0 : ''}` : '';
+    const key = weapon ? `${weapon.uid}|${current?.uid}|${canPickUp}|${weapon.set ? sets[weapon.set] ?? 0 : ''}` : '';
     if (this.keys.loot === key) return;
     this.keys.loot = key;
     const el = this.el.loot;
     if (!weapon) { el.classList.add('hidden'); return; }
     const hold = current ? `Swap for ${esc(current.name)}` : 'Equip now';
-    const footer = `<div class="lc-prompt"><kbd>F</kbd> ${backpackFull ? 'Pick up (swaps with equipped)' : 'Pick up'}</div>`
+    const footer = (canPickUp ? `<div class="lc-prompt"><kbd>F</kbd> Pick up</div>` : '')
       + `<div class="lc-prompt lc-hold"><kbd>Hold F</kbd> ${hold}<i></i></div>`;
     el.innerHTML = itemCardHTML(weapon, { compare: current, thumb: this.thumbs.get(weapon), footer, sets });
     el.classList.remove('hidden');

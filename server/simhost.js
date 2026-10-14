@@ -360,7 +360,8 @@ export class SimHost {
       STATE_CODE[e.state], r2(e.stateTime), e.curIndex, e.hitIndex, Math.round(e.hp), fl, r2(e.lift), r2(e.alt),
       e.foe?.id ?? -1, e.attackSeq, e.maxHp,
     ];
-    if (e.shieldMax) st.push(Math.round(e.shield));
+    if (e.shieldMax || e.brokenParts.length) st.push(e.shieldMax ? Math.round(e.shield) : null);
+    if (e.brokenParts.length) st.push(e.brokenParts);
     return st;
   }
 
@@ -384,6 +385,7 @@ export class SimHost {
     metrics.inc('hits');
     this.sim.applyHit(e.id, {
       by: s.id, damage: Math.round(damage), source: src,
+      component: typeof m.cp === 'string' ? m.cp.slice(0, 24) : null,
       poise: Math.min(500, Math.max(0, Number(m.po) || 0)), knockback: Math.min(60, Math.max(0, Number(m.kb) || 0)),
       dir: { x: dx / len, z: dz / len },
     });
@@ -401,7 +403,7 @@ export class SimHost {
 // by itself (stateTime counting up)? Positions to 5 cm, facing to ~2°.
 const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 function changed(a, b, dt) {
-  if (a[7] !== b[7] || a[9] !== b[9] || a[10] !== b[10] || a[11] !== b[11] || a[12] !== b[12] || a[15] !== b[15] || a[16] !== b[16] || a[17] !== b[17] || a[18] !== b[18]) return true;
+  if (a[7] !== b[7] || a[9] !== b[9] || a[10] !== b[10] || a[11] !== b[11] || a[12] !== b[12] || a[15] !== b[15] || a[16] !== b[16] || a[17] !== b[17] || a[18] !== b[18] || JSON.stringify(a[19]) !== JSON.stringify(b[19])) return true;
   if (Math.abs(a[1] - b[1]) > 0.05 || Math.abs(a[2] - b[2]) > 0.05 || Math.abs(a[3] - b[3]) > 0.05) return true;
   if (Math.abs(wrap(a[4] - b[4])) > 0.03 || Math.abs(a[5] - b[5]) > 0.1 || Math.abs(a[6] - b[6]) > 0.1) return true;
   if (Math.abs(a[13] - b[13]) > 0.03 || Math.abs(a[14] - b[14]) > 0.03) return true;

@@ -15,6 +15,7 @@ import {
   CLOSE_KINDS, RANGED_KINDS, MELEE_KINDS, KITERS,
 } from './enemyDefs.js';
 import { resolveType } from '../combat/bestiary.js';
+import { anyComponentSpec, legDamageProfile } from '../combat/HitComponents.js';
 import { rollAffixes, affixCount, SHIELD, RALLY, VAMPIRIC_REGEN, OVERCHARGE, VOLATILE } from './affixes.js';
 import { inPocket } from '../world/dungeons.js';
 
@@ -31,6 +32,7 @@ const randIn = ([a, b]) => a + Math.random() * (b - a);
 const wrapAngle = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 const r3 = (v) => [Math.round(v.x * 100) / 100, Math.round(v.y * 100) / 100, Math.round(v.z * 100) / 100];
 const MAX_SLOPE = 1.25;
+const CORPSE_LIFETIME = 9.5;
 
 const AGGRO_RADIUS = 13;
 const LEASH_RADIUS = 34;   // how far from home an enemy will follow...
@@ -67,11 +69,13 @@ export class EnemySim {
     this.isBoss = !!type.boss;
     this.faction = 'enemy';
     this.radius = enemyRadius(type);
-    this.height = type.height;
+    this.baseHeight = type.height;
     this.mass = type.mass;
     this.baseMaxHp = enemyMaxHp(type, level);
     this.maxHp = this.baseMaxHp;
     this.hp = this.maxHp;
+    this.componentDamage = Object.create(null);
+    this.brokenParts = [];
     this.affixes = elite ? (affixes ?? rollAffixes(type.race, affixCount(level, this.champion))) : [];
     this.affix = new Set(this.affixes);
     this.shieldMax = this.affix.has('shielded') ? Math.round(this.baseMaxHp * SHIELD.share) : 0;
@@ -264,7 +268,9 @@ export class EnemySim {
 
   steer(desired, dt, rate) {
     this.avoid(desired);
-    this.velocity.lerp(desired, 1 - Math.exp(-rate * dt));
+    // A damaged gait also takes longer to change direction, so a severed leg affects
+    // handling as well as the maximum speed used by the footwork behaviours.
+    this.velocity.lerp(desired, 1 - Math.exp(-rate * this.locomotionMultiplier * dt));
   }
 
   // If an enemy that wants to move hasn't made progress, try a sideways detour; a returning
@@ -343,7 +349,15 @@ export class EnemySim {
   }
 
   get moveSpeed() {
-    return this.type.speed * this.speedMultiplier() * (this.frenzy > 0 ? 1.3 : 1);
+    return this.type.speed * this.speedMultiplier() * this.locomotionMultiplier * (this.frenzy > 0 ? 1.3 : 1);
+  }
+
+  get height() {
+    return this.baseHeight * legDamageProfile(this.type, this.brokenParts).height;
+  }
+
+  get locomotionMultiplier() {
+    return legDamageProfile(this.type, this.brokenParts).move;
   }
 
   // ================================================================ update
@@ -383,7 +397,7 @@ export class EnemySim {
         break;
       case 'idle': this.updateIdle(dt); break;
       case 'return': {
-        const d = this.moveToward(this.home, this.type.speed * 1.4, dt);
+        const d = this.moveToward(this.home, this.moveSpeed * 1.4, dt);
         this.hp = Math.min(this.maxHp, this.hp + this.maxHp * RETURN_REGEN * dt);
         if (d < 1.2) {
           this.setState('idle');
@@ -411,7 +425,7 @@ export class EnemySim {
         break;
       case 'dead':
         this.damp(dt, 4);
-        if (this.stateTime >= 1.3) this.removeMe = true;
+        if (this.stateTime >= CORPSE_LIFETIME) this.removeMe = true;
         break;
     }
 
@@ -459,7 +473,7 @@ export class EnemySim {
       this.wanderTarget.set(this.home.x + Math.cos(a) * 3, 0, this.home.z + Math.sin(a) * 3);
       this.stateTime = 0;
     }
-    this.moveToward(this.wanderTarget, Math.min(1.2, this.type.speed * 0.4), dt, 4);
+    this.moveToward(this.wanderTarget, Math.min(1.2, this.moveSpeed * 0.4), dt, 4);
   }
 
   // ================================================================ footwork
@@ -633,6 +647,7 @@ export class EnemySim {
     const opts = [];
     for (const a of this.attacks) {
       if (a.cd > 0) continue;
+      if (this.attackDisabled(a)) continue;
       if (a.minLevel && this.level < a.minLevel) continue;
       if (a.hpBelow && this.hp / this.maxHp > a.hpBelow) continue;
       const reach = CLOSE_KINDS.has(a.kind) ? a.range + p.radius - 0.2 : a.range;
@@ -647,6 +662,11 @@ export class EnemySim {
     let r = Math.random() * total;
     for (const [a, w] of opts) if ((r -= w) <= 0) return a;
     return null;
+  }
+
+  attackDisabled(attack) {
+    if (!this.brokenParts.length) return false;
+    return this.brokenParts.some((id) => anyComponentSpec(id)?.attacks?.includes(attack.kind));
   }
 
   allies(radius) {
@@ -762,7 +782,7 @@ export class EnemySim {
       case 'swing': case 'combo': case 'bite': case 'bash': {
         this.forward(_fwd);
         const lunge = a.lunge ?? 0;
-        this.velocity.copy(_fwd).multiplyScalar(a.kind === 'bash' ? lunge * (1 - 0.5 * t / a.active) : lunge * (1 - t / a.active));
+        this.velocity.copy(_fwd).multiplyScalar((a.kind === 'bash' ? lunge * (1 - 0.5 * t / a.active) : lunge * (1 - t / a.active)) * this.locomotionMultiplier);
         if (a.kind === 'bash') this.guarding = !a.stab;
         if (!this.landed && this.reaches(a.arc, a.range, p)) this.landed = true;
         if (t >= a.active || (a.kind === 'bash' && this.landed)) {
@@ -955,6 +975,12 @@ export class EnemySim {
     const by = hit.by ?? null;
     let damage = hit.damage;
     this.calm = 0;
+    const part = hit.component && anyComponentSpec(hit.component);
+    let componentAccumulated = 0;
+    if (part?.breakable && !this.brokenParts.includes(part.id)) {
+      componentAccumulated = (this.componentDamage[part.id] ?? 0) + Math.max(0, hit.damage);
+      this.componentDamage[part.id] = componentAccumulated;
+    }
     // A shield soaks up hits until it breaks.
     if (this.shield > 0) {
       const soak = Math.min(this.shield, damage);
@@ -978,6 +1004,13 @@ export class EnemySim {
     if (this.hp <= 0) {
       this.alive = false;
       this.statuses = {};
+      // Parts accumulate damage while alive, but only the lethal hit can sever one. Heads are
+      // weak points and sever on a lethal headshot; limbs still require their accumulated threshold.
+      if (part && !this.brokenParts.includes(part.id)
+        && (part.severOnKill || (part.breakable && componentAccumulated >= part.threshold))) {
+        this.brokenParts.push(part.id);
+        this.sim.emit({ k: 'part', id: this.id, part: part.id, at: this.position });
+      }
       this.onDeath(hit);
       return true;
     }

@@ -10,6 +10,7 @@ import { Dungeons } from '../sim/Dungeons.js';
 import { EnemyReplica } from '../net/EnemyReplica.js';
 import { Enemy, prewarmRace, RACE_GLOW } from './Enemy.js';
 import { ELEMENTS } from '../items/elements.js';
+import { detachComponent } from './Dismemberment.js';
 
 // Projectile looks by the sim's `proj`: spitters' acid and lancers' spines, energy bolts from
 // techs and synths, psions' homing psi orbs, crawlers' sticky resin, grenades and mortar shells.
@@ -199,6 +200,7 @@ export class EnemyLayer {
   reportHit(view, hit) {
     const msg = {
       by: this.myId, damage: hit.damage, source: hit.source, poise: hit.poise ?? 0, knockback: hit.knockback ?? 0,
+      component: hit.component ?? null,
       dir: { x: hit.direction?.x ?? 0, z: hit.direction?.z ?? 0 },
     };
     if (this.sim) {
@@ -209,7 +211,7 @@ export class EnemyLayer {
     }
     // Online: reported to the server, and shown at once (a kill too) — the server's word follows.
     const r = (v) => Math.round(v * 100) / 100;
-    this.game.net.send({ t: 'hit', id: view.id, d: msg.damage, src: msg.source, po: msg.poise, kb: msg.knockback, dx: r(msg.dir.x), dz: r(msg.dir.z) });
+    this.game.net.send({ t: 'hit', id: view.id, d: msg.damage, src: msg.source, po: msg.poise, kb: msg.knockback, cp: msg.component, dx: r(msg.dir.x), dz: r(msg.dir.z) });
     const soak = Math.min(view.shield ?? 0, msg.damage);
     view.shield -= soak;
     view.hp = Math.max(0, view.hp - (msg.damage - soak));
@@ -323,6 +325,9 @@ export class EnemyLayer {
           }
           g.audio.ward?.(_p);
         }
+        break;
+      case 'part':
+        if (v) detachComponent(v, ev.part);
         break;
       case 'poof':
         if (v) g.effects.spawnPuff(v.position, { size: 1.4, life: 0.6, color: 0x3a3440 });
