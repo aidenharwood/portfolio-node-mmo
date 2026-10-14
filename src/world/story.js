@@ -25,14 +25,20 @@ export const STORY_PLACES = {
   relicdig: { name: 'Warden Relic Dig', from: 'city1', turn: 2.3, dist: CITY_WALL + 90, r: 14, flat: [8, 14], act: 1 },
   // Act II's dungeon (gameplay phase 5), out past Farcall.
   broodpits: { name: 'The Brood Pits', from: 'city2', turn: 2.2, dist: CITY_WALL + 180, r: 14, flat: [10, 16], act: 2 },
+  // Act II round Farcall: the field where the spore pods took root, and the nest of the Psion
+  // driving the swarms.
+  sporefield: { name: 'The Spore Field', from: 'city2', turn: -1.2, dist: CITY_WALL + 140, r: 12, flat: [8, 14], act: 2 },
+  psionnest: { name: 'Psion\'s Nest', from: 'city2', turn: 0.9, dist: CITY_WALL + 220, r: 12, flat: [8, 14], act: 2 },
 };
 // (New places go on the end: each draws from the seed in turn, so the earlier ones stay put.)
-const ORDER = ['foundry', 'outpost', 'vault', 'beacon1', 'beacon2', 'relicdig', 'pilgrim', 'broodpits'];
+const ORDER = ['foundry', 'outpost', 'vault', 'beacon1', 'beacon2', 'relicdig', 'pilgrim', 'broodpits', 'sporefield', 'psionnest'];
 
 // Story folk with names of their own (looks fixed; world/settlements.js dresses them).
 export const STORY_FOLK = {
   chief: { name: 'Orla Penn', title: 'Dig Chief', look: { skin: 0xc68a5e, hair: 0x2a1a12, hairStyle: 'bun', top: 0x8a6a3a, topDark: 0x5a4424, trim: 0xf0c75e, pants: 0x3a3a46, boots: 0x3a2a1a, leather: 0x6a4a2a, metal: 0xc9d1dc, glow: 0xffb347, hat: 'helmet', hatColor: 0xd9a227, goggles: true, apron: 0x5a5f6a } },
   krell: { name: 'Krell', title: 'Ironjaw\'s Lieutenant', look: { skin: 0xe0ac84, hair: 0x1f1a17, hairStyle: 'spiky', top: 0x6a3a2a, topDark: 0x4a2418, trim: 0xb0583a, pants: 0x2e2e36, boots: 0x2a2018, leather: 0x4a3a2a, metal: 0x8a909c, glow: 0xff8a2a, beard: 0x1f1a17, pauldrons: true } },
+  // Farcall's captain of the watch (Act II), in Warden green, with a mast officer's goggles.
+  captain: { name: 'Vey Okonta', title: 'Captain of the Watch', look: { skin: 0x8d5a3b, hair: 0x1a1412, hairStyle: 'short', top: 0x3a6a4a, topDark: 0x2a4a34, trim: 0xd0d0d0, pants: 0x2a2e36, boots: 0x3a2a1a, leather: 0x4a3a2a, metal: 0xc9d1dc, glow: 0x7aff9a, goggles: true, pauldrons: true, cape: 0x2a4a34 } },
 };
 
 // Whether (x, z) keeps clear of the hub, the cities, the waystones (and the villages and towns
@@ -138,7 +144,26 @@ export function storyIn(gen, rx, rz) {
       poi.npcs = [folkFor(poi, rng, 0, 'object', P.rot + Math.PI, 7.5, { object: 'vault:door', model: 'vaultdoor', facing: P.rot })];
     } else if (P.key === 'broodpits') {
       poi = { ...base, type: 'story', kind: 'broodpits', id: `p:${key}:broodpits`, r: P.r, tag: 'sbp' };
-      poi.npcs = [folkFor(poi, rng, 0, 'object', P.rot, 3, { object: 'broodpits:mouth', model: 'broodmouth', facing: P.rot + Math.PI })];
+      // The way down, and (Act II) the nest-node the Matron's brood grew round the Array's call.
+      poi.npcs = [
+        folkFor(poi, rng, 0, 'object', P.rot, 3, { object: 'broodpits:mouth', model: 'broodmouth', facing: P.rot + Math.PI }),
+        folkFor(poi, rng, 1, 'object', P.rot + 1.2, 6, { object: 'broodpits:node', model: 'console', facing: P.rot + 1.2 + Math.PI }),
+      ];
+    } else if (P.key === 'sporefield') {
+      // Three spore pods rooted round the field, and Krell (if he was let go in Act I), whose crew
+      // the Hive hit too.
+      poi = { ...base, type: 'story', kind: 'sporefield', id: `p:${key}:sporefield`, r: P.r, tag: 'ssf' };
+      poi.npcs = [
+        ...[0, 1, 2].map((i) => folkFor(poi, rng, i, 'object', P.rot + i * 2.1, 7, { object: `sporefield:pod${i + 1}`, model: 'strongbox' })),
+        folkFor(poi, rng, 3, 'story', P.rot + 1.05, 4, { folk: 'krell', when: { quest: 'b2', flag: 'krell_freed' } }),
+      ];
+    } else if (P.key === 'psionnest') {
+      // A Hive nest with a Psion at its head: the voice driving the swarms (Act II).
+      poi = {
+        ...base, type: 'camp', id: `sc:${key}:psion`, radius: 12, race: 'hive', style: 'nest', level: Math.max(12, P.level),
+        boss: { type: 'psion', name: 'Hive Psion', tag: 'psion' }, tag: 'spn',
+      };
+      poi.npcs = [];
     } else if (P.key === 'relicdig') {
       poi = { ...base, type: 'story', kind: 'relicdig', id: `p:${key}:relicdig`, r: P.r, tag: 'sr' };
       poi.npcs = [folkFor(poi, rng, 0, 'story', P.rot, 4, { folk: 'chief' })];
@@ -197,7 +222,7 @@ function resolve(world, ref, ctx) {
     if (!c) return null;
     const heart = gen.region(c.rx, c.rz).pois.find((p) => p.type === 'city');
     if (!tail) return { x: c.x, z: c.z, r: CITY_WALL, name: c.name, poi: heart?.id };
-    return person(npcOf(heart, (n) => n.role === tail), heart);
+    return person(npcOf(heart, (n) => n.role === tail || n.folk === tail), heart);
   }
   const S = storyPlaces(gen)[head];
   if (S) {
@@ -212,6 +237,13 @@ function resolve(world, ref, ctx) {
     const v = nearest(world, 0, 0, 700, ['settlement']) ?? nearest(world, 0, 0, 700, ['hamlet']);
     if (!tail) return target(v);
     return person(npcOf(v, (n) => n.role === 'trader') ?? npcOf(v, (n) => n.role === 'giver') ?? npcOf(v, (n) => n.role === 'flavor'), v);
+  }
+  // The three hamlets out past Farcall that stopped answering (Act II): the nearest to the city.
+  if (/^quiet[123]$/.test(head)) {
+    const c = gen.cities()[1];
+    if (!c) return null;
+    const near = world.poisNear(c.x, c.z, 1400, ['hamlet']).sort((a, b) => Math.hypot(a.x - c.x, a.z - c.z) - Math.hypot(b.x - c.x, b.z - c.z));
+    return target(near[Number(head.slice(5)) - 1]) ?? null;
   }
   if (ref === 'hubcamp') return target(nearest(world, 0, 0, 500, ['camp'], (c) => !c.stronghold && !c.story), { camp: true });
   if (head === 'home' && ctx.home) {

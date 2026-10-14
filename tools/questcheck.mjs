@@ -16,6 +16,7 @@ import { ACTS, STORY } from '../src/rpg/storyline.js';
 import { SIDE_CHAINS } from '../src/rpg/sidequests.js';
 import { reachedPlaces, defenceAt, heldObjectives, questDrops } from '../src/rpg/questWatch.js';
 import { storyRef } from '../src/world/story.js';
+import { settlementFolk } from '../src/world/settlements.js';
 
 const seed = Number(process.argv[2] ?? 12345);
 const w = new HeadlessWorld(seed);
@@ -129,6 +130,26 @@ console.log('Lines keyed by story flags:');
   check(heard(false) === 'B', 'and without it, the default');
   const act2 = ACTS.find((A) => A.act === 2);
   check(act2?.title === 'Act II' && act2.sub === 'The Brood' && act2.levels === '8–16', 'Act II, The Brood (8–16), is in the journal\'s acts');
+}
+
+// ---------------------------------------------------------------- Act II's people and places
+console.log('Act II\'s people and places:');
+{
+  const vey = storyRef(w, 'city2:captain');
+  const veyNpc = vey?.npc && npc(vey.npc);
+  const shown = veyNpc && settlementFolk(w.placeOf(veyNpc), veyNpc);
+  check(shown?.name === 'Vey Okonta' && shown.title === 'Captain of the Watch', `Farcall's captain of the watch stands in the city (${shown?.name ?? 'nobody'})`);
+  const quiet = ['quiet1', 'quiet2', 'quiet3'].map((r) => storyRef(w, r));
+  check(quiet.every((h) => h?.poi && w.poiById(h.poi)?.type === 'hamlet') && new Set(quiet.map((h) => h?.poi)).size === 3, 'the three hamlets gone quiet are three different hamlets');
+  const krell = storyRef(w, 'sporefield:krell');
+  const k = krell?.npc && npc(krell.npc);
+  const log = new QuestLog(host);
+  log.active.b2 = [0];
+  log.flags.krell_freed = true;
+  check(!!k?.when && log.whenHolds(k.when), 'Krell, let go in Act I, turns up at the Spore Field');
+  log.flags.krell_freed = false;
+  log.flags.krell_captured = true;
+  check(!!k?.when && !log.whenHolds(k.when), 'but not if he was taken in chains');
 }
 
 // ---------------------------------------------------------------- the story
