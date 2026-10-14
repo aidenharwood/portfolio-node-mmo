@@ -155,7 +155,11 @@ Built beyond the plan:
 - The client's `Enemy` view draws and animates an enemy from sim state (offline: the local sim;
   online: interpolated snapshots). It turns events into effects and sound.
 - The server keeps a headless `World` (terrain heights and colliders) loaded around every player,
-  runs `WorldSim` and streams the result.
+  runs `WorldSim` and streams the result. What comes into range is built a few milliseconds a
+  tick. A player who has just arrived waits out of the simulation (nothing spawns round them, no
+  camp wakes for them) while their surroundings are built, theirs first and with whatever the tick
+  has spare; that's usually well under a second. Brightwater's surroundings are built before a
+  layer opens and stay built.
 - Status effects (burn, chill, corrosion, shock chains) run on the server. Enemy projectiles and
   blasts are replayed on every screen and only hurt the player whose screen they hit.
 - Rewards: every player who damaged an enemy, or was close by, gets the kill's XP and gold. The
