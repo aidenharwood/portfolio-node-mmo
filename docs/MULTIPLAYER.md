@@ -117,7 +117,7 @@ about 110 players. Gateways put players on them.
 | 2 | Server-run world at 20 Hz with area of interest | ✅ |
 | 2 | Hits judged on screen, validated by server; statuses on server | ✅ |
 | 2 | Shared kill credit, instanced loot, health scaling with players | ✅ |
-| 3 | Inventory, gold, XP, attributes, trader, quests, chests on the server | ✅ predicted and rolled ops, hash checks |
+| 3 | Inventory, gold, XP, talents, trader, quests, chests on the server | ✅ predicted and rolled ops, hash checks |
 | 3 | Movement validation with corrections; travel done by the server | ✅ one speed bank rather than a per-move envelope |
 | 3 | Rate limits and sanity checks on every message | ✅ |
 | 4 | Parties | ✅ except below |
@@ -130,7 +130,7 @@ about 110 players. Gateways put players on them.
 | 5 | Binary delta snapshots | 🟡 deltas and distance tiers, but JSON with compression rather than binary |
 | 5 | Per-region simulation in worker threads | 🟡 scaled out with layers (processes) instead; regions within a layer are still a [next step](DEPLOY.md#further-not-built) |
 | 5 | Database hot standby, or Postgres | ✅ Postgres for the cluster (SQLite stays for one process), nightly dumps; no standby |
-| 5 | Container image; TLS through a reverse proxy | ✅ Dockerfile, Compose with Caddy, and Kubernetes manifests with CI for the portfolio cluster (the image hasn't been built here: no Docker) |
+| 5 | Container image; TLS through a reverse proxy | ✅ Dockerfile, Compose with Caddy, and Kubernetes manifests (in `portfolio-helm-website`) with CI for the portfolio cluster; CI builds and pushes the image on every push to `main` |
 | 5 | Health checks, metrics, structured logs | ✅ |
 | 5 | Crash reporting | 🟡 caught and logged, not sent to an external service |
 | — | PvP areas | ➖ left out for now |

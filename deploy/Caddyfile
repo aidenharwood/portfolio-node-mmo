@@ -1,0 +1,8 @@
+# HTTPS in front of the realm (WebSockets included). Caddy fetches the certificate itself.
+{$DOMAIN} {
+	encode zstd gzip
+	reverse_proxy celblade:8080
+	# The metrics are for your monitoring, not the public.
+	@metrics path /metrics
+	respond @metrics 404
+}
