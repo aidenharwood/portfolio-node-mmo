@@ -33,7 +33,11 @@ const suffix = (i) => [676, 26, 1].map((d) => String.fromCharCode(97 + (Math.flo
 const tally = (map, k) => map.set(k, (map.get(k) ?? 0) + 1);
 const signInT = new Timings();
 const welcomeT = new Timings();
-let rtt = new Timings();
+// Ping round trips: while bots are joining (until 5 s after the last is in), then settled.
+const joiningRtt = new Timings();
+const settledRtt = new Timings();
+let rtt = joiningRtt;
+let ping = new Timings(); // this progress line's
 const failures = new Map();
 const closes = new Map();
 const totals = { snaps: 0, bytes: 0, wire: 0, corrections: 0 };
@@ -100,7 +104,7 @@ async function bot(i) {
       b.bytes += data.length;
       const msg = JSON.parse(data);
       if (msg.t === 'snap') b.snaps++;
-      else if (msg.t === 'pong') rtt.add(Date.now() - msg.c);
+      else if (msg.t === 'pong') { rtt.add(Date.now() - msg.c); ping.add(Date.now() - msg.c); }
       else if (msg.t === 'pos') totals.corrections++;
       else if (msg.t === 'error') tally(failures, msg.error);
       else if (msg.t === 'welcome') {
@@ -143,7 +147,7 @@ function play(b, i, welcome) {
       ws.send(JSON.stringify({ t: 'fx', list: [{ k: 'shot', o: [x + d[0] * 0.8, y + 1.45, z + d[2] * 0.8], d, pk: 'bullet', c: 0xffd8a0, sp: 400, lf: 0.8, gv: 9.8, wt: type, m: true }] }));
     }
   }, step * 1000));
-  b.timers.push(setInterval(() => ws.send(JSON.stringify({ t: 'ping', c: Date.now() })), 2000));
+  b.timers.push(setInterval(() => ws.send(JSON.stringify({ t: 'ping', c: Date.now() })), 1000));
   if (opts.chat > 0) b.timers.push(setInterval(() => ws.send(JSON.stringify({ t: 'chat', text: `load test chatter from ${b.name}` })), opts.chat * 1000));
 }
 
@@ -172,18 +176,16 @@ const online = () => bots.filter((b) => b.in && b.ws.readyState === WebSocket.OP
 console.log(`  ${online()} of ${opts.bots} in the world · sign-in ${signInT} · into the world ${welcomeT}`);
 
 take();
-rtt = new Timings();
 const before = await serverStats(server.base);
 const t0 = performance.now();
 const worst = { p50: 0, p95: 0, max: 0 }; // the server's tick times (ms), worst seen
 for (let s = 0, lastAt = t0; s < opts.duration && !stopped(); s += 5) {
-  const ping = new Timings();
-  const seen = rtt.v.length;
+  ping = new Timings();
   await wait(Math.min(5, opts.duration - s) * 1000);
   const now = performance.now();
   const secs = (now - lastAt) / 1000;
   lastAt = now;
-  for (const ms of rtt.v.slice(seen)) ping.add(ms);
+  rtt = settledRtt;
   const got = take();
   const n = Math.max(1, online());
   const st = await serverStats(server.base);
@@ -205,7 +207,8 @@ const n = Math.max(1, ok);
 console.log(`\n${ok} of ${opts.bots} bots stayed in for ${secs.toFixed(0)} s`);
 console.log(`  sign-in        ${signInT}`);
 console.log(`  into world     ${welcomeT}`);
-console.log(`  ping           ${rtt}`);
+console.log(`  ping, joining  ${joiningRtt}`);
+console.log(`  ping, settled  ${settledRtt}`);
 console.log(`  each received  ${(totals.snaps / n / secs).toFixed(1)} snapshots/s, ${(totals.wire / n / secs / 1024).toFixed(1)} KB/s on the wire (${(totals.bytes / n / secs / 1024).toFixed(1)} KB/s of JSON)`);
 if (totals.corrections) console.log(`  position corrections: ${totals.corrections}`);
 if (worst.p50) console.log(`  server tick    worst p50 ${worst.p50} ms${worst.p95 ? `, worst p95 ${worst.p95} ms, slowest ${worst.max} ms` : ''} (budget 50 ms)`);
