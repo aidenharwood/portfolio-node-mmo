@@ -9,7 +9,7 @@
 // rather than chords that cut inside them.
 import * as THREE from 'three';
 import { dealDamage } from './Damage.js';
-import { componentAtPoint } from './HitComponents.js';
+import { componentAtPoint, skinnedWorldPositions } from './HitComponents.js';
 
 // Strike points: one per CELL-sized cube of the weapon's surface past the leading hand, grown
 // coarser for big heads so a swing traces at most MAX_POINTS. Points are kept in runs of CHUNK
@@ -167,18 +167,13 @@ export class WeaponSweep {
 }
 
 // ---------------------------------------------------------------- the target's surface
-// Scratch buffers, grown as needed: world vertex positions (with the pass that last skinned each),
-// bones' skinning matrices, and the triangles near the sweep (v0, edge1, edge2 — 9 floats each).
-let _world = new Float32Array(0);
-let _stamps = new Uint32Array(0);
-let _stamp = 0;
-let _boneM = new Float32Array(0);
+// Scratch buffers, grown as needed: a rigid mesh's world vertex positions, and the triangles near
+// the sweep (v0, edge1, edge2 — 9 floats each).
+let _rigid = new Float32Array(0);
+let _world = _rigid; // the positions addTri reads: _rigid, or a skinned mesh's
 let _tris = new Float32Array(0);
 let _triCount = 0;
 const _box = { min: [0, 0, 0], max: [0, 0, 0] };
-const _parts = new WeakMap();
-// How far a vertex blended across a joint can stray from where its main bone alone puts it.
-const PART_SLACK = 0.15;
 
 // The earliest point (as a fraction of the frame) any strike point's path crosses `target`'s
 // surface, or null. `path` holds steps + 1 poses of `count` points.
@@ -255,7 +250,8 @@ function addRigid(mesh) {
   const geo = mesh.geometry;
   const pos = geo.attributes.position;
   const n = pos.count;
-  if (_world.length < n * 3) _world = new Float32Array(n * 3 * 1.5);
+  if (_rigid.length < n * 3) _rigid = new Float32Array(n * 3 * 1.5);
+  _world = _rigid;
   const e = mesh.matrixWorld.elements;
   for (let v = 0; v < n; v++) {
     const x = pos.getX(v), y = pos.getY(v), z = pos.getZ(v);
@@ -268,144 +264,20 @@ function addRigid(mesh) {
   for (let i = 0; i + 2 < m; i += 3) addTri(idx ? idx[i] : i, idx ? idx[i + 1] : i + 1, idx ? idx[i + 2] : i + 2);
 }
 
-// A skinned mesh, part by part (the triangles each bone carries): only the parts that can reach
-// the sweep are skinned (as the skinning shader does, from the bones' current world matrices) and
-// tested. Reads baked geometry: plain position, skinIndex and skinWeight arrays.
+// A skinned mesh as posed now (HitComponents.skinnedWorldPositions: skinned on the CPU once a pose,
+// shared with aim and shots), passed over whole when its box misses the sweep's.
 function addSkinned(mesh) {
+  const { pos, box } = skinnedWorldPositions(mesh);
+  for (let k = 0; k < 3; k++) if (box[k] > _box.max[k] || box[k + 3] < _box.min[k]) return;
   const geo = mesh.geometry;
-  const parts = partsOf(geo);
-  const n = geo.attributes.position.count;
-  if (_world.length < n * 3) _world = new Float32Array(n * 3 * 1.5);
-  if (_stamps.length < n) _stamps = new Uint32Array(n * 1.5);
-  const stamp = ++_stamp;
-  boneMatrices(mesh);
-  const M = _boneM;
-  const p = geo.attributes.position.array;
-  const si = geo.attributes.skinIndex.array;
-  const sw = geo.attributes.skinWeight.array;
-  const idx = geo.index?.array;
-  const W = _world;
-  for (const part of parts) {
-    const o = part.bone * 12;
-    const { x, y, z } = part.center;
-    _sphere.center.set(
-      M[o] * x + M[o + 3] * y + M[o + 6] * z + M[o + 9],
-      M[o + 1] * x + M[o + 4] * y + M[o + 7] * z + M[o + 10],
-      M[o + 2] * x + M[o + 5] * y + M[o + 8] * z + M[o + 11],
-    );
-    const scale = Math.sqrt(Math.max(
-      M[o] * M[o] + M[o + 1] * M[o + 1] + M[o + 2] * M[o + 2],
-      M[o + 3] * M[o + 3] + M[o + 4] * M[o + 4] + M[o + 5] * M[o + 5],
-      M[o + 6] * M[o + 6] + M[o + 7] * M[o + 7] + M[o + 8] * M[o + 8],
-    ));
-    _sphere.radius = part.radius * scale + PART_SLACK;
-    if (!sphereMeetsBox(_sphere, _box)) continue;
-    for (const i of part.tris) {
-      for (let k = 0; k < 3; k++) {
-        const v = idx ? idx[i + k] : i + k;
-        if (_stamps[v] === stamp) continue;
-        _stamps[v] = stamp;
-        const vx = p[v * 3], vy = p[v * 3 + 1], vz = p[v * 3 + 2];
-        let ox = 0, oy = 0, oz = 0;
-        for (let q = 0; q < 4; q++) {
-          const w = sw[v * 4 + q];
-          if (w === 0) continue;
-          const b = si[v * 4 + q] * 12;
-          ox += w * (M[b] * vx + M[b + 3] * vy + M[b + 6] * vz + M[b + 9]);
-          oy += w * (M[b + 1] * vx + M[b + 4] * vy + M[b + 7] * vz + M[b + 10]);
-          oz += w * (M[b + 2] * vx + M[b + 5] * vy + M[b + 8] * vz + M[b + 11]);
-        }
-        W[v * 3] = ox;
-        W[v * 3 + 1] = oy;
-        W[v * 3 + 2] = oz;
-      }
-      addTri(idx ? idx[i] : i, idx ? idx[i + 1] : i + 1, idx ? idx[i + 2] : i + 2);
-    }
-  }
-}
-
-// Each bone's skinning matrix, flattened to 12 floats in _boneM:
-// world = matrixWorld · bindMatrixInverse · (bone.matrixWorld · boneInverse) · bindMatrix, where an
-// attached mesh's bindMatrixInverse is its world matrix inverted (as of the last render: so not
-// read here — the two cancel).
-function boneMatrices(mesh) {
-  const sk = mesh.skeleton;
-  const nb = sk.bones.length;
-  if (_boneM.length < nb * 12) _boneM = new Float32Array(nb * 12);
-  if (mesh.bindMode === THREE.AttachedBindMode) _rel.identity();
-  else _rel.multiplyMatrices(mesh.matrixWorld, mesh.bindMatrixInverse);
-  for (let b = 0; b < nb; b++) {
-    _m.multiplyMatrices(sk.bones[b].matrixWorld, sk.boneInverses[b]);
-    const e = _m.premultiply(_rel).multiply(mesh.bindMatrix).elements;
-    const o = b * 12;
-    _boneM[o] = e[0]; _boneM[o + 1] = e[1]; _boneM[o + 2] = e[2];
-    _boneM[o + 3] = e[4]; _boneM[o + 4] = e[5]; _boneM[o + 5] = e[6];
-    _boneM[o + 6] = e[8]; _boneM[o + 7] = e[9]; _boneM[o + 8] = e[10];
-    _boneM[o + 9] = e[12]; _boneM[o + 10] = e[13]; _boneM[o + 11] = e[14];
-  }
-}
-
-// A skinned geometry's triangles grouped by the bone that carries them (their first vertex's
-// heaviest weight), each group with its bind-pose bounding sphere; held gear left out. Cached.
-function partsOf(geo) {
-  let parts = _parts.get(geo);
-  if (parts) return parts;
-  const p = geo.attributes.position.array;
-  const si = geo.attributes.skinIndex.array;
-  const sw = geo.attributes.skinWeight.array;
+  const held = geo.userData.held;
   const idx = geo.index?.array;
   const m = idx ? geo.index.count : geo.attributes.position.count;
-  const held = geo.userData.held;
-  // Each triangle's bone (-1: held gear).
-  const triBone = new Int32Array(m / 3);
-  let bones = 0;
-  for (let t = 0; t < triBone.length; t++) {
-    const a = idx ? idx[t * 3] : t * 3;
-    if (held && held[a]) { triBone[t] = -1; continue; }
-    let bone = si[a * 4];
-    let weight = sw[a * 4];
-    for (let q = 1; q < 4; q++) if (sw[a * 4 + q] > weight) { weight = sw[a * 4 + q]; bone = si[a * 4 + q]; }
-    triBone[t] = bone;
-    if (bone >= bones) bones = bone + 1;
+  _world = pos;
+  for (let i = 0; i + 2 < m; i += 3) {
+    const a = idx ? idx[i] : i;
+    if (!held?.[a]) addTri(a, idx ? idx[i + 1] : i + 1, idx ? idx[i + 2] : i + 2);
   }
-  // Each bone's triangle count and bounds, then its triangles and how far they reach from the
-  // bounds' centre.
-  const count = new Uint32Array(bones);
-  const box = new Float64Array(bones * 6).fill(Infinity);
-  for (let b = 0; b < bones; b++) box[b * 6 + 3] = box[b * 6 + 4] = box[b * 6 + 5] = -Infinity;
-  for (let t = 0; t < triBone.length; t++) {
-    const b = triBone[t];
-    if (b < 0) continue;
-    count[b]++;
-    for (let k = 0; k < 3; k++) {
-      const v = (idx ? idx[t * 3 + k] : t * 3 + k) * 3;
-      for (let c = 0; c < 3; c++) {
-        if (p[v + c] < box[b * 6 + c]) box[b * 6 + c] = p[v + c];
-        if (p[v + c] > box[b * 6 + 3 + c]) box[b * 6 + 3 + c] = p[v + c];
-      }
-    }
-  }
-  const byBone = [];
-  for (let b = 0; b < bones; b++) {
-    if (!count[b]) { byBone.push(null); continue; }
-    const o = b * 6;
-    const center = new THREE.Vector3((box[o] + box[o + 3]) / 2, (box[o + 1] + box[o + 4]) / 2, (box[o + 2] + box[o + 5]) / 2);
-    byBone.push({ bone: b, tris: new Uint32Array(count[b]), center, radius: 0, n: 0 });
-  }
-  for (let t = 0; t < triBone.length; t++) {
-    if (triBone[t] < 0) continue;
-    const part = byBone[triBone[t]];
-    part.tris[part.n++] = t * 3;
-    for (let k = 0; k < 3; k++) {
-      const v = (idx ? idx[t * 3 + k] : t * 3 + k) * 3;
-      const dx = p[v] - part.center.x, dy = p[v + 1] - part.center.y, dz = p[v + 2] - part.center.z;
-      const d2 = dx * dx + dy * dy + dz * dz;
-      if (d2 > part.radius) part.radius = d2;
-    }
-  }
-  parts = byBone.filter(Boolean).map(({ bone, tris, center, radius }) => ({ bone, tris, center, radius: Math.sqrt(radius) }));
-  _parts.set(geo, parts);
-  return parts;
 }
 
 // Keeps triangle (a, b, c) of _world if it reaches into the sweep's box.
