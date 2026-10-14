@@ -5,7 +5,8 @@
 //              and is left alone inside; a solid crate is stepped onto or blocks; an overhead deck
 //              stops a jump; the inside of a solid is solid and the inside of a ring is not
 //   ragdolls   a dead body's joints keep their lengths, come to rest on the ground (and on a
-//              prop's top), and nothing of it ends up under the ground
+//              prop's top), and nothing of it ends up under the ground; a severed limb comes off
+//              where it was and is a ragdoll of its own
 // Run: node tools/physicscheck.mjs
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
@@ -19,6 +20,7 @@ import { MODELS, bindAny } from '../src/models/Creatures.js';
 import { Animator, makeAnimState } from '../src/anim/Animator.js';
 import { LegAnimator, makeLegState, HoverAnimator, makeHoverState } from '../src/anim/LegAnimator.js';
 import { prepareRagdoll } from '../src/anim/Ragdoll.js';
+import { detachComponent, updateDetachedParts } from '../src/entities/Dismemberment.js';
 
 let failed = 0;
 const check = (ok, what) => {
@@ -309,6 +311,75 @@ console.log('Ragdolls:');
   const below = kill('fauna:hound', inRoom, new THREE.Vector3(1, 0, 2));
   const m = survey(below, (p) => it.floorAt(p.x, p.z));
   check(m.low > -0.03 && below.rd.centre.y - inRoom.y < 0.6, `a body in a dungeon lies on its floor (centre ${(below.rd.centre.y - inRoom.y).toFixed(2)} m up)`);
+
+  // Severed parts: a limb comes off where it was, flies as a ragdoll of its own (bending at its
+  // joints), lands, lies still and goes.
+  const sever = (key, part, where) => {
+    const tpl = MODELS[key]();
+    prepareRagdoll(tpl.model);
+    const model = cloneSkinned(tpl.model);
+    let sk = null;
+    model.traverse((o) => { if (o.isSkinnedMesh) { if (!sk) sk = o.skeleton; else if (o.skeleton !== sk) o.bind(sk, o.bindMatrix); } });
+    const rig = bindAny(model);
+    rig.skeleton = sk;
+    const root = new THREE.Group();
+    root.position.copy(where);
+    root.add(model);
+    const scene = new THREE.Scene();
+    scene.add(root);
+    root.updateMatrixWorld(true);
+    const skin = (mesh) => {
+      mesh.updateMatrixWorld(true);
+      mesh.skeleton.update();
+      const out = [];
+      const v = new THREE.Vector3();
+      const used = new Set(mesh.geometry.index ? mesh.geometry.index.array : []);
+      for (const k of used) { mesh.getVertexPosition(k, v); out.push(v.clone().applyMatrix4(mesh.matrixWorld)); }
+      return out;
+    };
+    const before = [];
+    model.traverse((o) => { if (o.isSkinnedMesh && !o.material.isShaderMaterial) before.push(...skin(o)); });
+    const enemy = { rig, model, game: { scene, world: w }, forward: (v) => v.set(1, 0, 0), velocity: new THREE.Vector3(), height: rig.height ?? 2, severed: new Set(), detachedParts: [] };
+    detachComponent(enemy, part);
+    const p = enemy.detachedParts[0];
+    const pieces = [];
+    p.group.traverse((o) => { if (o.isSkinnedMesh) pieces.push(o); });
+    let jump = 0;
+    for (const m of pieces) {
+      for (const v of skin(m).slice(0, 300)) {
+        let best = Infinity;
+        for (const b of before) best = Math.min(best, b.distanceToSquared(v));
+        jump = Math.max(jump, Math.sqrt(best));
+      }
+    }
+    // How much its first joint bends over the flight (an arm at the elbow, a leg at the knee).
+    const rd = p.ragdoll;
+    const joint = rd.joints[0];
+    const angleAt = () => {
+      if (!joint) return 0;
+      const g = rd.groups;
+      const a = rd.points[g[0].ids[0]].p;
+      const b = rd.points[joint.b].p;
+      const c = rd.points[g[1].ids.find((i) => i !== joint.b) ?? joint.b].p;
+      return new THREE.Vector3().subVectors(b, a).angleTo(new THREE.Vector3().subVectors(c, b));
+    };
+    const first = angleAt();
+    let bent = 0;
+    for (let i = 0; i < 60 * 4; i++) {
+      updateDetachedParts(enemy, DT);
+      bent = Math.max(bent, Math.abs(angleAt() - first));
+    }
+    const m = survey({ rd, model: p.group }, terrain);
+    const low = Math.min(...rd.points.map((b) => b.p.y - b.r - w.groundHeight(b.p.x, b.p.z)));
+    for (let i = 0; i < 60 * 2; i++) updateDetachedParts(enemy, DT);
+    return { jump, bent, off: m.off, low, rested: rd.asleep, segments: rd.groups.length, gone: !enemy.detachedParts.length && !scene.children.includes(p.group) };
+  };
+  for (const [key, part] of [['scav:cutter', 'leftArm'], ['scav:ironclad', 'leftArm'], ['fauna:hound', 'leg0'], ['scav:cutter', 'head']]) {
+    const r = sever(key, part, at(800, 650));
+    const jointed = r.segments > 1;
+    check(r.jump < 0.01 && r.low > -0.02 && r.off < 0.1 && r.rested && r.gone && (!jointed || r.bent > 0.05),
+      `${key}'s ${part} comes off where it was (${r.jump.toFixed(3)} m), flies as its own ragdoll of ${r.segments} piece(s)${jointed ? ` bending ${r.bent.toFixed(2)} rad at its joint` : ''}, lands (lowest ${r.low.toFixed(3)} m), lies still and goes`);
+  }
   Math.random = random;
 }
 

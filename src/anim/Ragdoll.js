@@ -125,6 +125,21 @@ function outlineOf(mesh) {
   return out;
 }
 
+// A skinned mesh cut from another (a severed limb's skin, bound to copies of its bones) takes its
+// outline from it, without working it out again: `ids` maps the source skeleton's bone indices to
+// the new one's.
+// (No `ids`: the same skeleton — a body's mesh trimmed of what was cut off.)
+export function inheritOutline(mesh, source, ids = null) {
+  const from = outlineOf(source);
+  if (!ids) { outlines.set(mesh.geometry, from); return; }
+  const out = new Map();
+  for (const [a, b] of ids) {
+    const pts = from.get(a);
+    if (pts) out.set(b, pts);
+  }
+  outlines.set(mesh.geometry, out);
+}
+
 // Works out a model's outlines ahead (a template, before any copy of it dies).
 export function prepareRagdoll(model) {
   model.traverse((mesh) => {
@@ -260,12 +275,13 @@ export class Ragdoll {
   // After the extremes, up to `extra` more are spread over the rest of the outline, each as far
   // from those already placed as it can be, until none of it is more than `gap` (model units)
   // from one (a long abdomen, a shell's flanks, a skirt).
-  shell(bones, dirs, r, bone, extra = 0, gap = 0.2) {
+  // `seeds` (world points: balls already there, a joint) count as placed but aren't added.
+  shell(bones, dirs, r, bone, extra = 0, gap = 0.2, seeds = []) {
     const pts = this.outline(bones);
     if (!pts.length) return [];
     const q = this.model.getWorldQuaternion(_q);
     const radius = r * this.scale * this.size;
-    const chosen = [];
+    const chosen = [...seeds];
     for (const d of dirs) {
       _v.copy(d).normalize().applyQuaternion(q);
       let top = -Infinity;
@@ -291,7 +307,7 @@ export class Ragdoll {
     const mid = new THREE.Vector3();
     for (const p of pts) mid.add(p);
     mid.divideScalar(pts.length);
-    return chosen.map((p) => {
+    return chosen.slice(seeds.length).map((p) => {
       _w.subVectors(mid, p);
       const len = _w.length();
       _w.multiplyScalar(len > radius ? radius / len : 0).add(p);
@@ -326,8 +342,7 @@ export class Ragdoll {
   // drive(bone, 'frame', pivot, end, { side: [right, left] }) in its place among the drives).
   piece(bone, of, from, axis, side, r, extra = 8, gap = 0.15) {
     const pivot = this.point(bone, null, r);
-    this.link(from, pivot);
-    this.joints.push(this.links.at(-1));
+    this.joint(from, pivot);
     const end = this.tip(bone, axis, r, 0, of);
     const left = this.tip(bone, side, r, 0, of);
     const right = this.tip(bone, side.clone().negate(), r, 0, of);
@@ -354,6 +369,13 @@ export class Ragdoll {
       pt.r = r;
       pt.w = 1 / (r * r * 100);
     }
+  }
+
+  // A ball joint: two balls (of two stiff pieces) kept together, solved after everything else.
+  joint(a, b) {
+    if (a < 0 || b < 0) return;
+    this.link(a, b);
+    this.joints.push(this.links.at(-1));
   }
 
   // A rod between two balls at their distance now (`stiff` < 1 gives a little).
@@ -424,7 +446,7 @@ export class Ragdoll {
     d.rest = _v.sub(_w).normalize().clone();
     if (type === 'root' || type === 'frame') {
       d.Q0 = bone.getWorldQuaternion(new THREE.Quaternion());
-      d.M0 = frame(_v.subVectors(P[to].p, P[from].p), _w.subVectors(P[o.side[1]].p, P[o.side[0]].p), new THREE.Matrix4());
+      if (!o.group) d.M0 = frame(_v.subVectors(P[to].p, P[from].p), _w.subVectors(P[o.side[1]].p, P[o.side[0]].p), new THREE.Matrix4());
       d.pos0 = bone.position.clone();
     }
     if (type === 'limb' || type === 'hinge') {
@@ -839,4 +861,55 @@ export function severRagdoll(rd, ids, boneOf) {
     if (bone) bones.add(bone);
   }
   rd.sever(bones);
+}
+
+// ---------------------------------------------------------------- a part on its own
+// A severed limb, a head, a beast's leg (entities/Dismemberment.js), on the bones it took with it
+// (`root` and its bones, under `model`): each bone a stiff piece with balls over what moves with
+// it, on ball joints to the next, bending at each only so far — an arm folds at the elbow and the
+// wrist, a leg at the knee. A foot, a skull or a jaw stays stiff on the bone before it.
+const STIFF = /foot|skull|jaw/;
+export function partRagdoll(model, root, size, velocity, spin) {
+  const rd = new Ragdoll(model, size);
+  const kids = (b) => b.children.filter((c) => c.isBone);
+  // The pieces, parents first.
+  const segs = [];
+  const visit = (bone, parent) => {
+    let seg = parent;
+    if (!(parent && !kids(bone).length && STIFF.test(bone.name))) {
+      seg = { bones: [bone], parent, children: [] };
+      parent?.children.push(seg);
+      segs.push(seg);
+    } else seg.bones.push(bone);
+    for (const c of kids(bone)) visit(c, seg);
+  };
+  visit(root, null);
+  const r = 0.045;
+  for (const seg of segs) seg.origin = rd.point(seg.bones[0], null, r);
+  for (const seg of segs) {
+    // Where each piece after it hangs on: a ball of this one, at that joint.
+    seg.ends = seg.children.map((c) => rd.point(seg.bones[0], seg.bones[0].worldToLocal(rd.points[c.origin].p.clone()), r));
+    if (seg.children.length) rd.thick(seg.origin, seg.bones[0], seg.children[0].origin, 0.16);
+    const seeds = [seg.origin, ...seg.ends].map((i) => rd.points[i].p);
+    seg.shell = rd.shell(seg.bones, [], r, seg.bones[0], 8, 0.1, seeds);
+    const all = [seg.origin, ...seg.ends, ...seg.shell];
+    // (A bone with nothing on it still needs a second ball to turn by.)
+    if (all.length < 2) all.push(rd.point(seg.bones[0], new THREE.Vector3(0, -0.05, 0), r));
+    seg.all = all;
+    seg.group = rd.group(all);
+  }
+  for (const seg of segs) {
+    seg.children.forEach((c, k) => rd.joint(seg.ends[k], c.origin));
+    if (!seg.parent) continue;
+    // Bends at most so far from straight: measured to the far end of this piece.
+    const far = seg.ends[0] ?? seg.all.reduce((a, b) => (rd.points[b].p.distanceTo(rd.points[seg.origin].p) > rd.points[a].p.distanceTo(rd.points[seg.origin].p) ? b : a));
+    if (far !== seg.origin) rd.bend(seg.parent.origin, seg.origin, far, 2.3);
+  }
+  for (const seg of segs) {
+    for (const bone of seg.bones) rd.drive(bone, bone === root ? 'root' : 'frame', seg.origin, seg.all[1], { group: seg.group });
+  }
+  // Thrown, and turning end over end (the far pieces flung one way, the root the other).
+  const tips = segs.filter((g) => !g.children.length).flatMap((g) => g.all);
+  rd.start(velocity, spin, tips);
+  return rd;
 }

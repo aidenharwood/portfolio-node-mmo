@@ -21,7 +21,7 @@ import { Animator, makeAnimState } from '../anim/Animator.js';
 import { LegAnimator, makeLegState, HoverAnimator, makeHoverState } from '../anim/LegAnimator.js';
 import { prepareRagdoll } from '../anim/Ragdoll.js';
 import { AFFIXES, RALLY } from '../sim/affixes.js';
-import { detachComponent, updateDetachedParts } from './Dismemberment.js';
+import { detachComponent, updateDetachedParts, removeDetachedPart } from './Dismemberment.js';
 
 export { ENEMY_TYPES };
 
@@ -450,10 +450,7 @@ export class Enemy extends Character {
     this.wardMesh?.material.dispose();
     this.aura?.material.dispose();
     for (const geometry of this.severedGeometry) geometry.dispose();
-    for (const part of this.detachedParts) {
-      this.game.scene.remove(part.group);
-      part.group.traverse((o) => { o.geometry?.dispose(); o.material?.dispose?.(); });
-    }
+    for (const part of this.detachedParts) removeDetachedPart(this, part);
     this.detachedParts.length = 0;
   }
 
