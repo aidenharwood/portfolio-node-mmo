@@ -20,7 +20,7 @@ npm install
 npm start                      # http://localhost:8080
 ADMINS=youraccount npm start   # the same, with your account as an admin
 npm run dev                    # restarts when server/ changes
-npm test                       # smoke test: sign up, join, chat
+npm test                       # every Node check, then the smoke test: sign up, join, chat, a raid group, a dungeon
 ```
 
 Open the address, register an account on the title screen and make a character. Anyone on your
@@ -39,9 +39,10 @@ npm run test:cluster                                # two players on two layers,
 
 ## On Kubernetes (the portfolio cluster)
 
-`deploy/k8s/templates/cel-blade/` holds the manifests, written for the portfolio cluster: plain
-templates for `portfolio-helm-website/templates/cel-blade/` (Argo CD syncs them into the `website`
-namespace), Traefik, `local-path` storage and Cilium.
+The manifests live in the chart repo, `aidenharwood/portfolio-helm-website`, under
+`templates/cel-blade/` (Argo CD syncs them into the `website` namespace), written for the
+portfolio cluster: Traefik, `local-path` storage and Cilium. This repo doesn't keep a copy;
+change them there.
 
 | File | |
 |---|---|
@@ -53,6 +54,7 @@ namespace), Traefik, `local-path` storage and Cilium.
 | `cronjob.portfolio-cel-blade.yaml` | A nightly `pg_dump`, keeping the newest 14. |
 | `networkpolicy.portfolio-cel-blade.yaml` | Only Cel Blade's pods reach its database; only gateways reach the layers. |
 | `hpa.portfolio-cel-blade.yaml` | One to four gateways, by CPU. |
+| `secret.portfolio-cel-blade.yaml` | The Postgres password and the layers' internal key: generated on first install, then kept (Helm `lookup`). |
 
 `.github/workflows/deploy.yaml` follows the other portfolio apps:
 1. **Test:** syntax check, then the smoke test on SQLite and as a cluster against a Postgres
@@ -60,25 +62,20 @@ namespace), Traefik, `local-path` storage and Cilium.
 2. **Build:** build and push `ghcr.io/aidenharwood/portfolio/cel-blade:<run>`.
 3. **Release:** write that image into `portfolio-helm-website`, which Argo CD rolls out.
 
-Setting it up, once:
+How it was set up (already done; for setting up again):
 
-1. **The secret** (never in git):
-
-   ```
-   kubectl -n website create secret generic portfolio-cel-blade \
-     --from-literal=postgres-password=$(openssl rand -hex 24) \
-     --from-literal=internal-key=$(openssl rand -hex 24)
-   ```
-
-   Keep the password hex (or otherwise URL-safe): it goes into `DATABASE_URL`.
-2. **The repository**: push this project to GitHub (say `aidenharwood/portfolio-node-cel-blade`).
-   Give it the same secrets as the other app repos: `GHCR_USERNAME`, `GHCR_PAT` and `GH_PAT`.
-3. **The chart**: copy `deploy/k8s/templates/cel-blade/` into `portfolio-helm-website/templates/`.
+1. **The secret**: nothing to do by hand. The chart's `secret.portfolio-cel-blade.yaml` generates
+   both values (alphanumeric, so the password is safe in `DATABASE_URL`) and keeps the existing
+   ones on later renders. (That needs a renderer with cluster access: one rendering without it
+   would generate new values every time.)
+2. **The repository**: this one, `aidenharwood/portfolio-node-mmo`, with the same secrets as the
+   other app repos: `GHCR_USERNAME`, `GHCR_PAT` and `GH_PAT`.
+3. **The chart**: `templates/cel-blade/` in `portfolio-helm-website`.
    - Set `ADMINS` on the realm StatefulSet to your account name.
    - Push. Argo CD creates Postgres, the services and the ingress straight away. The gateway and
      realm pods wait for the first image.
-4. **The first build**: push to `master` (or run the workflow by hand). CI builds the image and bumps
-   it in the chart, and Argo CD rolls it out.
+4. **The first build**: push to `main` (or run the workflow by hand). CI builds the image and bumps
+   it in the chart, and Argo CD rolls it out. Pull requests run the tests only.
 5. **DNS**: point `celblade.aidenharwood.uk` at the cluster like the other subdomains.
    WebSockets need nothing special (the realm pings every 20 s, well inside Cloudflare's and
    Traefik's idle timeouts).

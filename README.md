@@ -7,7 +7,7 @@ a Node server runs the shared world.
 npm install               # once (three, the WebSocket library and the Postgres driver, for the server)
 npm start                 # game server: serves the client + the online realm at http://localhost:8080
 ADMINS=youraccount npm start   # the same, with your account as an admin
-npm test                  # power curve, horde, progression, place, settlement, story, dungeon, surface, building, raid, event and physics checks, then the smoke test: sign up, join the world, chat, form a raid group, go down a dungeon
+npm test                  # power curve, horde, progression, place, settlement, story, dungeon, surface, building, raid, event, physics and persistence checks, then the smoke test: sign up, join the world, chat, form a raid group, go down a dungeon
 npm run load [-- <url>]   # load tests (HTTP, sign-ins, players in the world) on localhost:8080, a throwaway server, or <url>
 python serve.py 5173      # or: offline-only dev server (single-player), http://localhost:5173
 ```
@@ -111,6 +111,7 @@ Momentum carries: bullet jumps launch faster than the slide that fed them (chain
 - **Ink**: on Low (and on the first-person weapon at every quality) outlines are inverted hulls; their width is set per layer (`INK_SCALE` in `render/Toon.js`). World outlines thin as the view zooms in (aiming, scopes) so a magnified target isn't buried in ink, and the first-person weapon has its own thinner layer that thins again while aiming.
 
 ## Dev tools
+- What's left to build, and who's on it: [docs/ROADMAP.md](docs/ROADMAP.md) (the reasons and order) and [docs/WORK_PLAN.md](docs/WORK_PLAN.md) (the tasks, one lane per working session).
 - In game: `` ` `` / F1 opens the dev panel — god mode, infinite resources, noclip, one-hit kills, levels, gold and a free talent reset; teleport to any camp / waystone / landmark or the reticle; go straight down into any dungeon (any theme, open world or a private run at a tier) or raid; spawn any enemy or sub-type (level, count; elite or champion with a chosen affix) or a whole warband at the reticle; start a public event of any kind at the nearest place that suits it, and win or lose it on the spot (online, admins have `/admin event`); an audio board that plays every sound; forge any weapon type or armour slot at any rarity, level and set (or wear a whole set at once); render toggles (outlines, hatching, fog, shadows, speed FX, player skeleton, world colliders); time scale and pause; save export/wipe; a JS console (`g`/`game`, `p`, `THREE` in scope); and the error log. F3 toggles the performance overlay. The game loop never freezes on an exception — errors are caught, logged there and badged on screen.
 - `tools/armory.html` — grid of generated items, filter by type / maker.
 - `tools/worldstats.mjs` (biome shares, relief and POI counts for a seed) and `tools/poicheck.mjs` (builds every landmark, village kit, hamlet style, a town, a city's heart, walls and districts, Brightwater, every camp style and stronghold, and the story's places headlessly, checks each size of settlement offers what it should, and that nobody stands inside a wall); `tools/worldshots.js` tours the world from the console and saves contact sheets.
