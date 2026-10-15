@@ -1,6 +1,7 @@
 // In-game overlay: vitals, gold, compass, zone name, quest tracker, boss bar, reticle + hit
 // markers, damage-direction arcs, low-health vignette, weapon card with magazine pips, weapon
 // slots, focused-loot card, interaction prompt, banners and toasts.
+import { STORY } from '../rpg/storyline.js';
 import { markHtml, toneOf } from './questMarks.js';
 import { RARITY } from '../items/rarity.js';
 import { MANUFACTURERS } from '../items/manufacturers.js';
@@ -168,7 +169,7 @@ export class HUD {
         it.el.style.display = '';
         // The tracked quest's pip wears its mark, as on the waypoint and over heads (ui/questMarks.js).
         if (it.mk === 'quest') {
-          const html = markHtml(t.mark ?? { state: 'objective', tone: 'story', n: 1 }, false);
+          const html = markHtml(t.mark ?? { state: 'objective', tone: 'story', n: 1 });
           if (it.html !== html) { it.html = html; it.el.innerHTML = html; }
         }
         b = Math.atan2(t.x - p.x, -(t.z - p.z));
@@ -253,7 +254,12 @@ export class HUD {
     const log = game.quests;
     const ids = game.trackedOrder(3);
     const more = Object.keys(log.active).length - ids.length;
-    const key = JSON.stringify([ids, ids.map((id) => [log.stage[id] ?? 0, log.active[id]]), game.tracked, more]);
+    // With no story quest under way, a hint at the next one and who has it (no waypoint: it's
+    // there when you want it).
+    const next = !Object.keys(log.active).some((id) => log.defs.get(id)?.kind === 'story')
+      && STORY.find((s) => !log.completed.has(s.id) && !log.active[s.id] && log.requirementsMet(s));
+    const hint = next ? `<div class="quest next-story"><small>Next story quest</small><b>${esc(next.title)}</b><p>${esc(log.giverName(log.giverId(next)))} has it.</p></div>` : '';
+    const key = JSON.stringify([ids, ids.map((id) => [log.stage[id] ?? 0, log.active[id]]), game.tracked, more, hint]);
     this.setHTML('quests', key, () => ids.map((id, k) => {
       const q = log.defs.get(id);
       if (!q) return '';
@@ -268,7 +274,7 @@ export class HUD {
         }).join('');
       const step = !done && k === 0 && log.stagesOf(q).length > 1 ? log.fill(log.stageOf(id)?.text ?? '', q) : '';
       return `<div class="quest ${q.kind === 'story' ? 'story' : ''} ${game.tracked === id ? 'tracked' : ''}"><b>${esc(q.title)}</b>${step ? `<p>${esc(step)}</p>` : ''}<ul>${objectives}</ul></div>`;
-    }).join('') + (more > 0 ? `<div class="quest more">+${more} more · Journal (L)</div>` : ''));
+    }).join('') + (more > 0 ? `<div class="quest more">+${more} more · Journal (L)</div>` : '') + hint);
   }
 
   renderBoss(game) {

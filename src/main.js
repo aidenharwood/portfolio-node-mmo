@@ -1315,10 +1315,7 @@ class Game {
       const state = this.quests.isComplete(id) ? 'turnin' : w.kind === 'talk' || w.kind === 'use' ? 'talk' : 'objective';
       return { ...w, quest: id, title: q.title, mark: { state, tone: toneOf(q.kind), kind: q.kind ?? null, n: 1 } };
     }
-    const giver = this.npcs.find((n) => n.marker === '!');
-    if (giver && !Object.keys(this.quests.active).length) {
-      return { x: giver.position.x, z: giver.position.z, radius: 2, kind: 'talk', mark: { ...giver.marks.find((m) => m.state === 'offer'), n: 1 } };
-    }
+    // (Nothing under way: no waypoint. The quest tracker names the next story quest instead.)
     return null;
   }
 

@@ -11,7 +11,6 @@ const css = (hex) => `#${(hex ?? 0xffd23f).toString(16).padStart(6, '0')}`;
 // up close, the marks alone further out.
 const LABEL_NEAR = 26;  // names and titles this close...
 const MARKER_FAR = 80;  // ...and quest marks out to here (folk are built from 85 m: main.js FOLK_NEAR)
-const CAPTION_NEAR = 14; // the marks' captions this close
 
 const _v = new THREE.Vector3();
 
@@ -106,9 +105,8 @@ export class WorldLabels {
         }
         // (Touch layouts show the titles of townsfolk only up close.)
         el.classList.toggle('far', d > 10 && !marks.length);
-        // Far off, just the marker (smaller with distance); its caption only up close.
+        // Far off, just the marks (smaller with distance).
         el.classList.toggle('marker-only', d > LABEL_NEAR);
-        el.classList.toggle('captioned', d <= CAPTION_NEAR);
         el.style.setProperty('--qm-scale', d > LABEL_NEAR ? Math.max(0.6, 1 - (d - LABEL_NEAR) / 90).toFixed(2) : '1');
         this.place(el, this.project(n.position, n.height + 0.3, w, h));
       }
@@ -153,7 +151,7 @@ export class WorldLabels {
         seen.add(key);
         const dist = Math.round(Math.hypot(wp.x - p.position.x, wp.z - p.position.z));
         // The tracked quest's waypoint wears its mark (as over the head of whoever it leads to).
-        const html = `${wp.mark ? markHtml(wp.mark, false) : '<div class="wp-diamond"></div>'}<div class="wp-dist">${dist}m</div>`;
+        const html = `${wp.mark ? markHtml(wp.mark) : '<div class="wp-diamond"></div>'}<div class="wp-dist">${dist}m</div>`;
         if (el._html !== html) { el._html = html; el.innerHTML = html; }
         _v.set(wp.x, game.world.groundHeight(wp.x, wp.z) + 2, wp.z).project(this.camera);
         let x = _v.x;

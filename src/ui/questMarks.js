@@ -63,16 +63,14 @@ export function markLabel(m) {
 // ---------------------------------------------------------------- HTML (overhead, waypoint, compass)
 const glyphHtml = (state) => (state === 'talk' ? '<i></i><i></i><i></i>' : state === 'objective' ? '<em></em>' : GLYPH[state]);
 
-// One badge; `caption` adds the words under it (shown up close: the .captioned class).
-export function markHtml(m, caption = true) {
-  const kind = KIND_TEXT[m.kind];
+// One badge (what it means is in its label, for screen readers).
+export function markHtml(m) {
   return `<div class="qm qm-${m.state} qm-${m.tone}" role="img" aria-label="${markLabel(m)}">`
-    + `<div class="qm-badge"><span class="qm-glyph">${glyphHtml(m.state)}</span>${m.n > 1 ? `<span class="qm-n">${m.n}</span>` : ''}</div>`
-    + `${caption ? `<div class="qm-cap">${kind ? `<b>${kind}</b> ` : ''}${STATE_TEXT[m.state]}</div>` : ''}</div>`;
+    + `<div class="qm-badge"><span class="qm-glyph">${glyphHtml(m.state)}</span>${m.n > 1 ? `<span class="qm-n">${m.n}</span>` : ''}</div></div>`;
 }
 
 // Several in a line.
-export const marksHtml = (marks, caption = true) => `<div class="qm-row">${marks.map((m) => markHtml(m, caption)).join('')}</div>`;
+export const marksHtml = (marks) => `<div class="qm-row">${marks.map((m) => markHtml(m)).join('')}</div>`;
 
 // ---------------------------------------------------------------- canvas (minimap, world map)
 // Drawn upright at screen point (x, y), `s` pixels across: the same shield (a speech bubble for

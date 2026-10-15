@@ -171,6 +171,10 @@ button { font-family: var(--ui); cursor: pointer; }
 .quest li { margin: 1px 0; }
 .quest li::marker { color: var(--accent); }
 .quest li.done { opacity: 0.45; text-decoration: line-through; }
+/* The next story quest, when none is under way: a hint, not a waypoint. */
+.quest.next-story { opacity: 0.85; }
+.quest.next-story small { display: block; font: 600 10px/1.2 var(--display); letter-spacing: 1.5px; text-transform: uppercase; color: #ffcf7a; }
+.quest.next-story p { margin: 1px 0 0; font-size: 12px; opacity: 0.8; }
 /* Handing a quest in: the step that's live now, with the turn-in mark's '?' in its quest's colour (ui/questMarks.js). */
 .quest li.handin, .gm-quest li.handin { list-style: none; margin-left: -14px; color: var(--qm-hi, #fff1cf); }
 .quest li.handin::before, .gm-quest li.handin::before { content: '?'; display: inline-grid; place-items: center; width: 14px; height: 15px; margin-right: 6px; vertical-align: -2px; font: 800 11px/1 var(--display); color: var(--qm-ink, #2a1a04); background: var(--qm, #ffcf7a); clip-path: polygon(50% 0, 100% 18%, 100% 62%, 50% 100%, 0 62%, 0 18%); }
@@ -372,9 +376,6 @@ kbd {
 .qm-objective .qm-badge { width: 22px; height: 22px; }
 .qm-objective .qm-badge::before, .qm-objective .qm-badge::after { clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); }
 .qm-objective .qm-glyph { margin-top: 0; }
-.qm-cap { display: none; margin-top: 4px; padding: 1px 7px 2px; white-space: nowrap; font: 600 10.5px/1.3 var(--display); letter-spacing: 1.5px; text-transform: uppercase; color: var(--qm-hi); background: rgba(10, 12, 19, 0.72); box-shadow: inset 0 -1px 0 var(--qm); text-shadow: var(--outline); }
-.qm-cap b { color: var(--qm); font-weight: 700; }
-.npc-label.captioned .qm-cap { display: block; }
 .npc-label.marker-only .np-name, .npc-label.marker-only .np-title, .npc-label.marker-only .np-say { display: none; }
 .waypoint .qm { margin: 0 auto; }
 .waypoint .qm-badge { animation: none; }
