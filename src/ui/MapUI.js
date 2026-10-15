@@ -9,6 +9,7 @@
 // smooth on a phone.
 //   Seen from above like the minimap, with the compass's north (−z) at the top and east (+x) to
 // the right. (The map tiles and fog are painted with +z at the top, so they're drawn flipped.)
+import { drawMark, drawMarks, TONES } from './questMarks.js';
 import { HUB, REGION } from '../world/Gen.js';
 import { CHUNK } from '../world/Chunks.js';
 import { PARTY_COLOR } from './PartyUI.js';
@@ -507,14 +508,25 @@ export class MapUI {
       ctx.restore();
       this.label(sx, sy - Math.max(7, m.r * this.zoom) - 6, m.name, color, 12);
     }
+    // Folk and props near you with quest marks: the same marks as over their heads.
+    for (const n of [...(g.npcs ?? []), ...(g.props?.values() ?? [])]) {
+      const marks = n.marks ?? [];
+      if (!marks.length) continue;
+      const [sx, sy] = this.toScreen(n.position.x, n.position.z);
+      if (sx < -20 || sy < -20 || sx > W + 20 || sy > H + 20) continue;
+      drawMarks(ctx, sx, sy - 10, marks, 16);
+    }
     const wp = g.questWaypoint();
     if (wp) {
       const [sx, sy] = this.toScreen(wp.x, wp.z);
       if (['goto', 'defend', 'clear'].includes(wp.kind) && wp.radius > 8) this.searchArea(sx, sy, wp.kind, wp.radius * this.zoom);
-      this.questMarker(sx, sy, wp.kind ?? 'default', 8);
-      const q = g.tracked && g.quests?.defs?.get(g.tracked);
-      if (q && sx > 24 && sx < W - 24 && sy > 42 && sy < H - 28) {
-        this.queueLabel(sx, sy - 18, `★ ${q.title}`, '#ffe08a', 12, 100);
+      // Someone to hand in to or talk to: their mark; somewhere to go: the objective's own shape.
+      if (wp.mark && wp.mark.state !== 'objective') drawMark(ctx, sx, sy - 12, wp.mark, 22);
+      else this.questMarker(sx, sy, wp.kind ?? 'default', 8);
+      // Named for the quest it's for (in its quest's colour).
+      const title = wp.title ?? (g.tracked && g.quests?.defs?.get(g.tracked)?.title);
+      if (title && sx > 24 && sx < W - 24 && sy > 42 && sy < H - 28) {
+        this.queueLabel(sx, sy - (wp.mark && wp.mark.state !== 'objective' ? 32 : 18), `★ ${title}`, TONES[wp.mark?.tone]?.hi ?? '#ffe08a', 12, 100);
       }
     }
     if (g.customMarker) {

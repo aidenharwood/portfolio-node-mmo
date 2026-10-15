@@ -4,26 +4,14 @@ import * as THREE from 'three';
 import { RARITY } from '../items/rarity.js';
 import { esc } from './cards.js';
 import { AFFIXES } from '../sim/affixes.js';
+import { marksHtml, markHtml } from './questMarks.js';
 
 const css = (hex) => `#${(hex ?? 0xffd23f).toString(16).padStart(6, '0')}`;
-// A marker's state: '!' a quest to take, '?' one to hand in, '…' someone a quest wants. Its
-// colour says what kind of quest (the story's gold, side quests' blue, work and bounties white),
-// its glyph what to do, and up close a caption spells both out.
-const MARK = { '!': 'offer', '?': 'turnin', '…': 'talk' };
-const MARK_TEXT = { '!': 'New quest', '?': 'Turn in', '…': 'Talk' };
-const KIND_TEXT = { story: 'Story', side: 'Side', contract: 'Contract', hunt: 'Hunt', errand: 'Errand', job: 'Job' };
+// Quest marks over folk and props (ui/questMarks.js): all that apply, in a line; names and titles
+// up close, the marks alone further out.
 const LABEL_NEAR = 26;  // names and titles this close...
-const MARKER_FAR = 80;  // ...and quest markers out to here (folk are built from 85 m: main.js FOLK_NEAR)
-const CAPTION_NEAR = 14; // a marker's caption this close
-
-function markerHtml(marker, kind) {
-  const tone = kind === 'story' ? 'story' : kind === 'side' ? 'side' : 'work';
-  const what = MARK_TEXT[marker] ?? 'Quest';
-  const label = KIND_TEXT[kind] ? `${KIND_TEXT[kind]} quest: ${what}` : what;
-  return `<div class="qm qm-${MARK[marker] ?? 'offer'} qm-${tone}" role="img" aria-label="${label}">`
-    + `<div class="qm-badge"><span class="qm-glyph">${marker === '…' ? '<i></i><i></i><i></i>' : marker}</span></div>`
-    + `<div class="qm-cap">${KIND_TEXT[kind] ? `<b>${KIND_TEXT[kind]}</b> ` : ''}${what}</div></div>`;
-}
+const MARKER_FAR = 80;  // ...and quest marks out to here (folk are built from 85 m: main.js FOLK_NEAR)
+const CAPTION_NEAR = 14; // the marks' captions this close
 
 const _v = new THREE.Vector3();
 
@@ -104,22 +92,20 @@ export class WorldLabels {
       for (const n of [...game.npcs, ...(game.props?.values() ?? [])]) {
         const d = n.position.distanceTo(p.position);
         if (d > (n.role === 'flavor' ? 12 : MARKER_FAR)) continue;
-        // (What the quest log says of them, asked a few times a second rather than every frame.)
-        if (!n._mark || game.time - n._mark.t > 0.25 || game.time < n._mark.t) n._mark = { t: game.time, marker: n.marker ?? null, kind: n.markerKind ?? null };
-        const { marker, kind: markerKind } = n._mark;
-        // Past the names' reach, only those with a marker over them.
-        if (d > LABEL_NEAR && !marker) continue;
+        const marks = n.marks ?? [];
+        // Past the names' reach, only those with a mark over them.
+        if (d > LABEL_NEAR && !marks.length) continue;
         const el = this.el(n, 'npc-label');
         seen.add(n);
         // What they call out as you come near (main.js updateBarks), for a few seconds.
         const say = n.bark && n.bark.until > game.time ? n.bark.text : '';
-        const key = `${marker ?? ''}|${markerKind ?? ''}|${say}`;
+        const key = `${marks.map((m) => `${m.state}.${m.tone}.${m.kind}.${m.n}`).join(',')}|${say}`;
         if (el._key !== key) {
           el._key = key;
-          el.innerHTML = `${say ? `<div class="np-say">${esc(say)}</div>` : ''}${marker ? markerHtml(marker, markerKind) : ''}<div class="np-name">${esc(n.name)}</div><div class="np-title">${esc(n.title ?? '')}</div>`;
+          el.innerHTML = `${say ? `<div class="np-say">${esc(say)}</div>` : ''}${marks.length ? marksHtml(marks) : ''}<div class="np-name">${esc(n.name)}</div><div class="np-title">${esc(n.title ?? '')}</div>`;
         }
         // (Touch layouts show the titles of townsfolk only up close.)
-        el.classList.toggle('far', d > 10 && !marker);
+        el.classList.toggle('far', d > 10 && !marks.length);
         // Far off, just the marker (smaller with distance); its caption only up close.
         el.classList.toggle('marker-only', d > LABEL_NEAR);
         el.classList.toggle('captioned', d <= CAPTION_NEAR);
@@ -166,7 +152,9 @@ export class WorldLabels {
         const el = this.el(key, cls);
         seen.add(key);
         const dist = Math.round(Math.hypot(wp.x - p.position.x, wp.z - p.position.z));
-        el.innerHTML = `<div class="wp-diamond"></div><div class="wp-dist">${dist}m</div>`;
+        // The tracked quest's waypoint wears its mark (as over the head of whoever it leads to).
+        const html = `${wp.mark ? markHtml(wp.mark, false) : '<div class="wp-diamond"></div>'}<div class="wp-dist">${dist}m</div>`;
+        if (el._html !== html) { el._html = html; el.innerHTML = html; }
         _v.set(wp.x, game.world.groundHeight(wp.x, wp.z) + 2, wp.z).project(this.camera);
         let x = _v.x;
         let y = _v.y;

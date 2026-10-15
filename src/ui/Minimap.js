@@ -4,6 +4,7 @@ import { RARITY } from '../items/rarity.js';
 import { CHUNK } from '../world/Chunks.js';
 import { PARTY_COLOR } from './PartyUI.js';
 import { FogLayer } from './MapFog.js';
+import { drawMarks, TONES } from './questMarks.js';
 
 // Settlements of every size on the minimap: their ground, a little brighter the smaller they are.
 const PLACE_FILL = {
@@ -254,8 +255,19 @@ export class Minimap {
       ctx.arc(m.x, m.z, m.r + 2 + Math.sin(performance.now() / 300) * 1.5, 0, Math.PI * 2);
       ctx.stroke();
     }
-    for (const n of game.npcs) this.dot(n.position.x, n.position.z, 1.3, n.marker ? '#ffd23f' : '#ffffff');
-    for (const s of game.props?.values() ?? []) this.dot(s.position.x, s.position.z, 1.5, s.marker ? '#ffd23f' : '#e8d4a0');
+    // Folk and props with quest marks wear them (drawn upright once the map's turned: see below).
+    const M = ctx.getTransform();
+    const up = [];
+    for (const n of game.npcs) {
+      const marks = n.marks ?? [];
+      if (marks.length) up.push({ at: M.transformPoint({ x: n.position.x, y: n.position.z }), marks });
+      else this.dot(n.position.x, n.position.z, 1.3, '#ffffff');
+    }
+    for (const s of game.props?.values() ?? []) {
+      const marks = s.marks ?? [];
+      if (marks.length) up.push({ at: M.transformPoint({ x: s.position.x, y: s.position.z }), marks });
+      else this.dot(s.position.x, s.position.z, 1.5, '#e8d4a0');
+    }
     for (const r of game.remotes?.list ?? []) if (!game.partyUI?.isMate(r.netId)) this.dot(r.position.x, r.position.z, 1.6, '#5ee6ff');
     const mates = (game.partyUI?.mates ?? []).filter((m) => m.online && m.known);
     for (const m of mates) this.dot(m.x, m.z, 2.1, PARTY_COLOR);
@@ -263,12 +275,20 @@ export class Minimap {
     const wp = game.questWaypoint();
     if (wp) {
       this.questSearchArea(wp.x, wp.z, wp.kind, wp.radius ?? 0);
-      this.questMarker(wp.x, wp.z, wp.kind ?? 'default', 6 / k);
+      // Its mark when it's someone (to hand in to, or talk to); the objective's own shape otherwise.
+      if (wp.mark && wp.mark.state !== 'objective') up.push({ at: M.transformPoint({ x: wp.x, y: wp.z }), marks: [wp.mark], wp: true });
+      else this.questMarker(wp.x, wp.z, wp.kind ?? 'default', 6 / k);
     }
     if (game.customMarker) this.dot(game.customMarker.x, game.customMarker.z, 2, '#4ad2ff');
     ctx.restore();
 
-    if (wp) this.rimArrow(wp, p, yaw, '#ffd23f');
+    // Upright, in screen space; the tracked one last (on top), a touch bigger.
+    for (const u of up.sort((a, b) => !!a.wp - !!b.wp)) {
+      const S2 = SIZE * 2;
+      if (Math.hypot(u.at.x - S2 / 2, u.at.y - S2 / 2) > S2 / 2 - 12) continue;
+      drawMarks(ctx, u.at.x, u.at.y, u.marks, u.wp ? 24 : 20);
+    }
+    if (wp) this.rimArrow(wp, p, yaw, TONES[wp.mark?.tone]?.fill ?? '#ffd23f');
     if (game.customMarker) this.rimArrow(game.customMarker, p, yaw, '#4ad2ff');
     if (horde) this.rimArrow(horde, p, yaw, '#ff4632');
     const ev = game.eventUI?.compassTarget();

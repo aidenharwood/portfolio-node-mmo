@@ -397,5 +397,15 @@ for (const a6 of [0, 1]) {
   }
 }
 
+// A story quest is handed in to whoever gives the next one, so the story walks you on to them.
+{
+  const off = STORY.filter((q) => {
+    const next = STORY.filter((n) => (n.requires ?? []).includes(q.id));
+    const back = q.returnTo === undefined ? q.giver : q.returnTo;
+    return next.length && !next.some((n) => n.giver === back);
+  });
+  check(!off.length, `every story quest is handed in to the giver of the next${off.length ? ` (not: ${off.map((q) => q.id).join(', ')})` : ''}`);
+}
+
 console.log(failed ? `questcheck: ${failed} failed` : 'questcheck: all good');
 process.exit(failed ? 1 : 0);

@@ -34,13 +34,13 @@ export const STORY = [
     rewards: { xp: 60, gold: 20 },
   },
   {
-    id: 'p2', kind: 'story', act: 0, level: 1, giver: 'warden', requires: ['p1'], title: 'A Blade for the Road',
-    offer: 'Brightwater keeps its walls by keeping the wilds thin. Before I trust you past the gate, show me you can hold a blade — and that you\'re still holding it afterwards.',
+    id: 'p2', kind: 'story', act: 0, level: 1, giver: 'warden', requires: ['p1'], returnTo: 'sage', title: 'A Blade for the Road',
+    offer: 'Brightwater keeps its walls by keeping the wilds thin. Before I trust you past the gate, show me you can hold a blade — and that you\'re still holding it afterwards. Then go and tell Ysolde; she\'s been fretting over you like a hen.',
     stages: [
       { text: 'Thin out the wilds round Brightwater.', objectives: [{ type: 'killAny', near: 'hub', r: 340, count: 6, text: 'Defeat enemies near Brightwater' }] },
       { text: 'Clear the camp nearest Brightwater: {hubcamp}.', objectives: [{ type: 'clear', camp: 'hubcamp', count: 1, text: 'Clear {hubcamp}' }] },
     ],
-    turnIn: 'Not bad, sleeper. Not bad at all. Take this — Warden issue, and better than what you came in with.',
+    turnIn: 'Maren sent a runner ahead of you: "The sleeper will do." From her, dear, that\'s a speech. She left this for you, too — Warden issue, and better than what you came in with.',
     rewards: { xp: 160, gold: 60, weapon: { minTier: 1 } },
   },
   {
@@ -55,14 +55,14 @@ export const STORY = [
     rewards: { xp: 160, gold: 50, armor: { minTier: 1 } },
   },
   {
-    id: 'p4', kind: 'story', act: 0, level: 2, giver: 'sage', requires: ['p2', 'p3'], title: 'The Wreck of the Pilgrim',
-    offer: 'If the stones know you, maybe the ship does too. The Pilgrim lies {pilgrim:dir} of here, nose-down in its own furrow; its old mind-core sat behind the bridge. Mind the scavengers — Ironjaw\'s lot have been picking the hull clean.',
+    id: 'p4', kind: 'story', act: 0, level: 2, giver: 'sage', requires: ['p2', 'p3'], returnTo: 'warden', title: 'The Wreck of the Pilgrim',
+    offer: 'If the stones know you, maybe the ship does too. The Pilgrim lies {pilgrim:dir} of here, nose-down in its own furrow; its old mind-core sat behind the bridge. Mind the scavengers — Ironjaw\'s lot have been picking the hull clean. And when you\'re back, tell Maren what you find: the wreck\'s the Wardens\' business as much as mine.',
     stages: [
       { text: 'Go to the Wreck of the Pilgrim.', objectives: [{ type: 'goto', at: 'pilgrim', count: 1, text: 'Reach the Wreck of the Pilgrim' }] },
       { text: 'Drive the scavengers off the wreck.', objectives: [{ type: 'defend', at: 'pilgrim', race: 'scav', waves: 2, count: 1, text: 'Hold the wreck' }] },
       { text: 'Search the bridge.', objectives: [{ type: 'use', object: 'pilgrim:console', count: 1, text: 'Wake the bridge console' }], done: { moment: 'manifest' } },
     ],
-    turnIn: 'It knew you. Your name, your rank — and it asked for you by both. Whatever\'s waking in the stones, dear, it\'s waking through you.',
+    turnIn: 'A wreck older than these walls, and it asked for you by name and rank. ...Whatever\'s waking out there, sleeper, it\'s waking through you. Then you\'d best be ready when it opens its eyes — and I\'ve work that\'ll see to that.',
     setFlags: ['pilgrim_awake'],
     rewards: { xp: 320, gold: 90, weapon: { minTier: 2 } },
   },
@@ -182,8 +182,8 @@ export const STORY = [
     rewards: { xp: 900, gold: 320, armor: { minTier: 2 } },
   },
   {
-    id: 'a8', kind: 'story', act: 1, level: 8, giver: 'city1:warden', requires: ['a7'], returnTo: 'sage', title: 'The Seal', moments: { done: 'act1end' },
-    offer: 'Old Ysolde, in Brightwater. Tell her what you saw at the vault — all of it.',
+    id: 'a8', kind: 'story', act: 1, level: 8, giver: 'city1:warden', requires: ['a7'], title: 'The Seal', moments: { done: 'act1end' },
+    offer: 'Old Ysolde, in Brightwater. Tell her what you saw at the vault — all of it. Then come back and tell me what she makes of it.',
     stages: [{
       text: 'Tell Old Ysolde what you saw.',
       objectives: [{ type: 'choose', npc: 'sage', count: 1, text: 'Tell Ysolde what happened' }],
@@ -196,7 +196,7 @@ export const STORY = [
         ],
       },
     }],
-    turnIn: 'Whatever comes up out of that hole, it\'ll come for the Wardens first and the stones second — and you\'re tied to both now. Rest, sleeper. You\'ve earned it.',
+    turnIn: 'A seal. A cage. Ysolde always did have the old words. Whatever comes up out of that hole, it\'ll come for the Wardens first and the stones second — and you\'re tied to both now. Rest, sleeper. You\'ve earned it.',
     setFlags: ['act1_done'],
     rewards: { xp: 1000, gold: 400, weapon: { minTier: 3 } },
   },
@@ -274,7 +274,7 @@ export const STORY = [
     rewards: { xp: 1550, gold: 540, weapon: { minTier: 3 } },
   },
   {
-    id: 'b5', kind: 'story', act: 2, level: 11, giver: 'sage', requires: ['b4'], title: 'Ysolde\'s Confession',
+    id: 'b5', kind: 'story', act: 2, level: 11, giver: 'sage', requires: ['b4'], returnTo: 'city2:captain', title: 'Ysolde\'s Confession',
     offer: 'Hear an old woman out. Then decide what to do with what you hear.',
     stages: [{
       text: 'Hear Old Ysolde out.',
@@ -294,8 +294,9 @@ export const STORY = [
       },
     }],
     turnIn: {
-      told_ashe: 'Go on to Ashe, then. I\'ll not be welcome at the Wardens\' table after this. That\'s as it should be.',
-      kept_wardens_secret: 'Go back to Farcall. Whatever that dish is singing, it\'s our song — the Wardens\' — and we\'ll be the ones to end it.',
+      told_ashe: 'Ashe\'s word came down the masts ahead of you: what the Array is, and who the first Wardens were. Doesn\'t change the job, sleeper. It only tells me why it\'s ours to finish.',
+      kept_wardens_secret: 'Back from Brightwater with a face like a shut door. Whatever the old woman told you, keep it — so long as it helps us silence that dish.',
+      default: 'Back from Brightwater. Good: the swarms didn\'t wait for you.',
     },
     rewards: { xp: 1600, gold: 560, armor: { minTier: 3 } },
   },

@@ -7,6 +7,7 @@ import { disposeObject } from '../render/Toon.js';
 import { wrapAngle } from './Character.js';
 import { Animator, makeAnimState } from '../anim/Animator.js';
 import { CapeCloth } from '../anim/Cloth.js';
+import { marksFor, markerChar } from '../ui/questMarks.js';
 
 export const INTERACT_RANGE = 3.2;
 const NEAR = 28;
@@ -62,24 +63,20 @@ export class NPC {
 
   dispose() { disposeObject(this.root); }
 
-  // '?' a quest to hand in here, '…' a running quest wants a word (or an answer) with them, '!'
-  // one to take (from those who give them); null otherwise.
-  get marker() {
-    const log = this.game.quests;
-    if (log.readyToTurnIn(this.id).length) return '?';
-    if (log.wants(this.id)) return '…';
-    if ((QUEST_ROLES.has(this.role) || this.role === 'story') && log.available(this.id).length) return '!';
-    return null;
+  // Every quest mark they carry (ui/questMarks.js): quests to hand in to them, quests that want a
+  // word with them, quests they give — asked of the log a few times a second, not every frame.
+  get marks() {
+    const t = this.game.time;
+    if (!this._marks || t - this._marksAt > 0.25 || t < this._marksAt) {
+      this._marksAt = t;
+      this._marks = marksFor(this.game.quests, [this.id], QUEST_ROLES.has(this.role) || this.role === 'story');
+    }
+    return this._marks;
   }
 
-  // The marker keeps its state (offer, talk, or turn-in); its shape identifies the quest type.
-  get markerKind() {
-    const log = this.game.quests;
-    return log.readyToTurnIn(this.id)[0]?.kind
-      ?? log.wantedQuest(this.id)?.kind
-      ?? (QUEST_ROLES.has(this.role) || this.role === 'story' ? log.available(this.id)[0]?.kind : null)
-      ?? null;
-  }
+  // The first of them as one character ('?', '…', '!'; null with none).
+  get marker() { return markerChar(this.marks); }
+  get markerKind() { return this.marks[0]?.kind ?? null; }
 
   // How solid the figure is (0..1): each figure has its own materials, so it fades on its own.
   setFade(k) {

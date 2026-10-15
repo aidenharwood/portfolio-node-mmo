@@ -13,6 +13,7 @@ import { Grass } from './render/Grass.js';
 import { WIND } from './render/Wind.js';
 import { qualityOf } from './render/Quality.js';
 import { ViewModel } from './render/ViewModel.js';
+import { marksFor, markerChar, toneOf } from './ui/questMarks.js';
 import { DevTools } from './dev/DevTools.js';
 import { Sfx } from './audio/Sfx.js';
 import { World } from './world/World.js';
@@ -1076,9 +1077,8 @@ class Game {
         kind: 'object', id: n.id, place, n, title: this.placeName(place), name: O.name,
         position: new THREE.Vector3(n.x, this.world.groundHeight(n.x, n.z), n.z), height: n.model === 'vaultdoor' ? 7 : 1.6,
       };
-      // (Something a quest wants used: the same '…' as someone it wants a word with — not a quest to take.)
-      Object.defineProperty(prop, 'marker', { get: () => (this.quests.wants(n.id) ? '…' : null) });
-      Object.defineProperty(prop, 'markerKind', { get: () => this.quests.wantedQuest(n.id)?.kind ?? null });
+      // (Something a quest wants used: the same '…' as someone it wants a word with — it gives none.)
+      this.markProp(prop, [n.id], false);
       return prop;
     }
     const P = PROPS[n.role];
@@ -1087,20 +1087,26 @@ class Game {
       name: n.role === 'gate' ? (n.gate === 'raid' ? 'Raid Gate' : 'Wardens\' Waygate') : P.name,
       position: new THREE.Vector3(n.x, this.world.groundHeight(n.x, n.z), n.z), height: n.role === 'gate' && place.type !== 'district' ? 5.4 : P.height,
     };
-    Object.defineProperty(prop, 'marker', { get: () => (n.role === 'board' ? this.boardMarker(n.id) : null) });
+    // A board answers for its three postings.
+    this.markProp(prop, n.role === 'board' ? [0, 1, 2].map((k) => `${n.id}#${k}`) : [], n.role === 'board');
     return prop;
   }
 
-  // '?' when a posting of the board's is done, '!' when one is waiting.
-  boardMarker(id) {
-    const log = this.quests;
-    let open = false;
-    for (let k = 0; k < 3; k++) {
-      const slot = `${id}#${k}`;
-      if (log.readyToTurnIn(slot).length) return '?';
-      if (!open && log.available(slot).length) open = true;
-    }
-    return open ? '!' : null;
+  // A prop's quest marks (ui/questMarks.js), as the folk's (entities/NPC.js): `ids` the quest log
+  // knows it by, `gives` whether it hands quests out.
+  markProp(prop, ids, gives) {
+    Object.defineProperty(prop, 'marks', {
+      get: () => {
+        if (!ids.length) return [];
+        if (!prop._marks || this.time - prop._marksAt > 0.25 || this.time < prop._marksAt) {
+          prop._marksAt = this.time;
+          prop._marks = marksFor(this.quests, ids, gives);
+        }
+        return prop._marks;
+      },
+    });
+    Object.defineProperty(prop, 'marker', { get: () => markerChar(prop.marks) });
+    Object.defineProperty(prop, 'markerKind', { get: () => prop.marks[0]?.kind ?? null });
   }
 
   placeName(p) { return p?.cityName ?? p?.name ?? HUB.name; }
@@ -1252,30 +1258,28 @@ class Game {
       }
       return best && { x: best.x, z: best.z, radius: best.radius ?? 3 };
     };
-    for (const id of ids) {
-      const q = this.quests.defs.get(id);
-      if (!q) continue;
+    const waypointOf = (id, q) => {
       if (this.quests.isComplete(id)) {
         const to = this.quests.returnId(q);
         const npc = to && this.world.npcById(to);
-        if (npc) return { x: npc.x, z: npc.z, radius: 2 };
-        continue;
+        if (npc) return { x: npc.x, z: npc.z, radius: 2, kind: 'turnin' };
+        return null;
       }
       const prog = this.quests.active[id];
       const o = this.quests.objectivesOf(id).find((ob, i) => prog[i] < (ob.count ?? 1));
-      if (!o) continue;
+      if (!o) return null;
       const open = (c) => !this.encounters.isCleared(c.id);
       // Where the story names it: someone to talk to, an object, a place to reach or hold.
       const at = (ref) => {
         const t = this.quests.ref(ref, q);
         return t && { x: t.x, z: t.z, radius: o.type === 'goto' || o.type === 'defend' || o.type === 'event' ? (o.r ?? t.r ?? 4) : 2 };
       };
-      if (o.type === 'talk' || o.type === 'choose') { const t = at(o.npc); if (t) return { ...t, kind: 'talk' }; continue; }
-      if (o.type === 'use') { const t = at(o.object); if (t) return { ...t, kind: 'use' }; continue; }
-      if (o.type === 'goto' || o.type === 'defend') { const t = at(o.at); if (t) return { ...t, kind: o.type }; continue; }
-      if (o.type === 'event') { const t = at(o.at); if (t) return { ...t, kind: 'defend' }; continue; }
+      if (o.type === 'talk' || o.type === 'choose') { const t = at(o.npc); if (t) return { ...t, kind: 'talk' }; return null; }
+      if (o.type === 'use') { const t = at(o.object); if (t) return { ...t, kind: 'use' }; return null; }
+      if (o.type === 'goto' || o.type === 'defend') { const t = at(o.at); if (t) return { ...t, kind: o.type }; return null; }
+      if (o.type === 'event') { const t = at(o.at); if (t) return { ...t, kind: 'defend' }; return null; }
       // A dungeon to beat: its way in.
-      if (o.type === 'dungeon') { const t = at(o.at); if (t) return { ...t, kind: 'goto' }; continue; }
+      if (o.type === 'dungeon') { const t = at(o.at); if (t) return { ...t, kind: 'goto' }; return null; }
       if (o.type === 'clear') {
         const c = this.world.poiById(o.camp) ?? this.world.poiById(this.quests.ref(o.camp, q)?.poi ?? '');
         if (c) return { x: c.x, z: c.z, radius: c.radius ?? 12, kind: 'clear' };
@@ -1299,9 +1303,22 @@ class Game {
       }
       const t = nearest(['camp'], open);
       if (t) return { ...t, kind: 'goto' };
+      return null;
+    };
+    // The first tracked quest with somewhere to go, marked as its quest is (ui/questMarks.js):
+    // the quest's tone, and whether it's someone to hand in to, a word wanted, or an objective.
+    for (const id of ids) {
+      const q = this.quests.defs.get(id);
+      if (!q) continue;
+      const w = waypointOf(id, q);
+      if (!w) continue;
+      const state = this.quests.isComplete(id) ? 'turnin' : w.kind === 'talk' || w.kind === 'use' ? 'talk' : 'objective';
+      return { ...w, quest: id, title: q.title, mark: { state, tone: toneOf(q.kind), kind: q.kind ?? null, n: 1 } };
     }
     const giver = this.npcs.find((n) => n.marker === '!');
-    if (giver && !Object.keys(this.quests.active).length) return { x: giver.position.x, z: giver.position.z, radius: 2 };
+    if (giver && !Object.keys(this.quests.active).length) {
+      return { x: giver.position.x, z: giver.position.z, radius: 2, kind: 'talk', mark: { ...giver.marks.find((m) => m.state === 'offer'), n: 1 } };
+    }
     return null;
   }
 

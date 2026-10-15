@@ -6,6 +6,7 @@
 //   Esc opens it (last tab) and closes it · I/Tab inventory · M map · L journal · P character ·
 //   N talents · O social · U guild · Q/E step through tabs.
 // Over the title screen it holds just Settings and Controls.
+import { toneOf } from './questMarks.js';
 import { esc, setHTML } from './cards.js';
 import { defaultPrefs } from '../core/Prefs.js';
 import { talentsHTML } from './TalentsUI.js';
@@ -460,21 +461,23 @@ export class GameMenu {
     const done = log.isComplete(id);
     const stages = log.stagesOf(q);
     const at = Math.min(log.stage[id] ?? 0, stages.length - 1);
-    const objectives = done ? [] : log.objectivesOf(id);
-    const completed = done ? objectives.length : objectives.reduce((n, o, i) => n + (prog[i] >= (o.count ?? 1) ? 1 : 0), 0);
-    const goals = done ? `<li class="done">${q.returnTo === null ? 'Done' : `Ready to hand in to ${esc(log.returnTo(q))}`}</li>`
-      : log.objectivesOf(id).map((o, i) => {
-        const n = o.count ?? 1;
-        return `<li class="${prog[i] >= n ? 'done' : ''}">${esc(log.fill(o.text, q))}${n > 1 ? ` <b>${Math.min(prog[i], n)}/${n}</b>` : ''}</li>`;
-      }).join('');
+    // Handing it in is a step of its own: the last one, live once everything before it is done.
+    const handIn = q.returnTo !== null;
+    const objectives = log.objectivesOf(id);
+    const total = objectives.length + (handIn ? 1 : 0);
+    const completed = objectives.reduce((n, o, i) => n + (prog[i] >= (o.count ?? 1) ? 1 : 0), 0);
+    const goals = objectives.map((o, i) => {
+      const n = o.count ?? 1;
+      return `<li class="${prog[i] >= n ? 'done' : ''}">${esc(log.fill(o.text, q))}${n > 1 ? ` <b>${Math.min(prog[i], n)}/${n}</b>` : ''}</li>`;
+    }).join('') + (handIn ? `<li class="handin qm-${toneOf(q.kind)} ${done ? '' : 'later'}">Hand in to ${esc(log.returnTo(q))}</li>` : '');
     const act = q.kind === 'story' ? ACTS.find((A) => A.act === q.act) : null;
-    const meta = [act && `${act.title}: ${act.sub}`, q.level && `Level ${q.level}`, stages.length > 1 && `Step ${at + 1} of ${stages.length}`,
-      !done && q.returnTo !== null && `Back to ${log.returnTo(q)}`].filter(Boolean).join(' · ');
-    const text = done ? '' : log.fill(stages[at]?.text ?? '', q);
+    const steps = stages.length + (handIn ? 1 : 0);
+    const meta = [act && `${act.title}: ${act.sub}`, q.level && `Level ${q.level}`, steps > 1 && `Step ${done && handIn ? steps : at + 1} of ${steps}`].filter(Boolean).join(' · ');
+    const text = done ? (handIn ? `Hand it in to ${log.returnTo(q)}.` : '') : log.fill(stages[at]?.text ?? '', q);
     const tracked = g.tracked === id;
     return `<article class="gm-quest ${done ? 'ready' : ''} ${tracked ? 'tracked' : ''}">
       <h4><span>${esc(q.title)}</span><button class="gm-btn" aria-pressed="${tracked}" data-act="track" data-v="${esc(id)}">${tracked ? '✓ Tracking' : 'Track quest'}</button></h4>
-      <small>${esc(meta)}</small>${text ? `<p>${esc(text)}</p>` : ''}<div class="gm-quest-progress"><span>${done ? 'Complete' : `${completed} of ${objectives.length} objectives`}</span><i><b style="width:${done ? 100 : objectives.length ? Math.round(completed / objectives.length * 100) : 0}%"></b></i></div><ul>${goals}</ul></article>`;
+      <small>${esc(meta)}</small>${text ? `<p>${esc(text)}</p>` : ''}<div class="gm-quest-progress"><span>${done ? (handIn ? 'Ready to hand in' : 'Complete') : `${completed} of ${total} objectives`}</span><i><b style="width:${total ? Math.round(completed / total * 100) : 100}%"></b></i></div><ul>${goals}</ul></article>`;
   }
 
   // Where the story goes next, when nothing of it is under way.

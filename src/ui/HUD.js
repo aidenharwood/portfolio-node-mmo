@@ -1,6 +1,7 @@
 // In-game overlay: vitals, gold, compass, zone name, quest tracker, boss bar, reticle + hit
 // markers, damage-direction arcs, low-health vignette, weapon card with magazine pips, weapon
 // slots, focused-loot card, interaction prompt, banners and toasts.
+import { markHtml, toneOf } from './questMarks.js';
 import { RARITY } from '../items/rarity.js';
 import { MANUFACTURERS } from '../items/manufacturers.js';
 import { ELEMENTS } from '../items/elements.js';
@@ -146,7 +147,7 @@ export class HUD {
       const card = { 0: 'N', 90: 'E', 180: 'S', 270: 'W', 45: 'NE', 135: 'SE', 225: 'SW', 315: 'NW' }[d];
       parts.push(card ? `<span class="cd ${d === 0 ? 'n' : ''}" data-b="${d}">${card}</span>` : `<i class="tick ${d % 45 === 0 ? 'major' : ''}" data-b="${d}"></i>`);
     }
-    parts.push('<i class="mk" data-mk="quest"></i><i class="mk custom" data-mk="custom"></i><i class="mk event" data-mk="event"></i>');
+    parts.push('<span class="mk-quest" data-mk="quest"></span><i class="mk custom" data-mk="custom"></i><i class="mk event" data-mk="event"></i>');
     // Party members (up to three others).
     for (let i = 0; i < 3; i++) parts.push(`<i class="mk party" data-mk="party${i}"></i>`);
     strip.innerHTML = parts.join('');
@@ -165,11 +166,16 @@ export class HUD {
         const t = it.mk === 'quest' ? qw : it.mk === 'custom' ? cm : it.mk === 'event' ? game.eventUI?.compassTarget() : mates[+it.mk.slice(5)];
         if (!t) { it.el.style.display = 'none'; continue; }
         it.el.style.display = '';
+        // The tracked quest's pip wears its mark, as on the waypoint and over heads (ui/questMarks.js).
+        if (it.mk === 'quest') {
+          const html = markHtml(t.mark ?? { state: 'objective', tone: 'story', n: 1 }, false);
+          if (it.html !== html) { it.html = html; it.el.innerHTML = html; }
+        }
         b = Math.atan2(t.x - p.x, -(t.z - p.z));
       }
       let x = wrap(b - heading) * COMPASS_PX;
       if (it.mk) x = Math.max(-200, Math.min(200, x));
-      it.el.style.transform = `translateX(${x.toFixed(1)}px)${it.el.classList.contains('cd') ? ' translateX(-50%)' : it.mk ? ' rotate(45deg)' : ''}`;
+      it.el.style.transform = `translateX(${x.toFixed(1)}px)${it.el.classList.contains('cd') || it.mk === 'quest' ? ' translateX(-50%)' : it.mk ? ' rotate(45deg)' : ''}`;
       it.el.style.opacity = Math.abs(x) > 230 ? 0 : 1;
     }
   }
@@ -253,8 +259,9 @@ export class HUD {
       if (!q) return '';
       const prog = log.active[id];
       const done = log.isComplete(id);
+      // Done: handing it in is the step now (a live one, not struck through like what's finished).
       const objectives = done
-        ? `<li class="done">${q.returnTo === null ? 'Done' : `Return to ${esc(log.returnTo(q))}`}</li>`
+        ? (q.returnTo === null ? '<li class="done">Done</li>' : `<li class="handin qm-${toneOf(q.kind)}">Hand in to ${esc(log.returnTo(q))}</li>`)
         : log.objectivesOf(id).map((o, i) => {
           const n = o.count ?? 1;
           return `<li class="${prog[i] >= n ? 'done' : ''}">${esc(log.fill(o.text, q))}${n > 1 ? ` ${Math.min(prog[i], n)}/${n}` : ''}</li>`;
