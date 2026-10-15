@@ -3,7 +3,8 @@
 // character's own rules as the server runs them (server/characters.js runOp, positions checked):
 // quests given, taken and handed in only where they should be; places reached and defences held
 // as the server reports them (rpg/questWatch.js); quest drops; objects used; choices that set
-// story flags; things refused out of order.
+// story flags; things refused out of order. Then every story flag against its registry
+// (tools/storyflags.mjs): one read but never set fails, one set but never read warns.
 // Run: node tools/questcheck.mjs [seed]
 import * as THREE from 'three';
 import { HeadlessWorld } from '../server/world.js';
@@ -16,6 +17,7 @@ import { STORY } from '../src/rpg/storyline.js';
 import { SIDE_CHAINS } from '../src/rpg/sidequests.js';
 import { reachedPlaces, defenceAt, heldObjectives, questDrops, eventCalled, eventObjectives } from '../src/rpg/questWatch.js';
 import { storyRef } from '../src/world/story.js';
+import { flagUses, flagProblems, storyFolk } from './storyflags.mjs';
 
 const seed = Number(process.argv[2] ?? 12345);
 const w = new HeadlessWorld(seed);
@@ -192,6 +194,40 @@ for (const v of villages) {
 const story = ['story_prologue', 'story_beacons', 'story_ironjaw', 'story_krell', 'story_act1', 'side_chain_1', 'side_chain_all'];
 const missing = story.filter((id) => core.achievements[id] === undefined);
 check(!missing.length, `the story's achievements earned along the way${missing.length ? ` (not: ${missing.join(', ')})` : ` (${story.length})`}`);
+
+// ---------------------------------------------------------------- story flags
+console.log('Story flags:');
+const names = (who) => [...who].join(', ');
+// Who sets or reads a flag, as the registry writes it.
+const quoted = (who) => `[${[...(who ?? [])].sort().map((s) => `'${s}'`).join(', ')}]`;
+// The check itself, on stand-ins that read flags nothing sets (a requirement, a line keyed with no
+// default, a side chain's offer, a bark, story folk, a raid gate) and a stage that sets one nothing
+// reads.
+const fake = flagProblems(flagUses(w, {
+  quests: [{ id: 'zz', needFlags: ['zz_need'], stages: [{ say: { warden: { zz_line: 'Yes.' } }, done: { flags: ['zz_done'] } }] }],
+  sideChains: { zz: { quests: [{ offer: { zz_side: 'Yes.', default: 'No.' } }] } },
+  barks: [{ npc: 'warden', when: { flag: 'zz_bark' } }],
+  folk: [{ who: 'zz:folk', when: { flag: 'zz_folk' } }],
+  instances: [{ id: 'zz', raid: true, needs: { flag: 'zz_gate' } }],
+  achievements: [],
+}), {});
+check(['zz_need', 'zz_line', 'zz_side', 'zz_bark', 'zz_folk', 'zz_gate'].every((f) => fake.unset.includes(f)) && fake.unread.includes('zz_done'),
+  'stand-ins: flags read but never set are caught, and one set but never read');
+check(storyFolk(w).some((f) => f.who === 'foundry:krell'), 'the world\'s story folk are looked at too (Krell, waiting at the Foundry)');
+const uses = flagUses(w);
+const flags = flagProblems(uses);
+check(!flags.unset.length, flags.unset.length
+  ? `read but never set: ${flags.unset.map((f) => `${f} (${names(uses.read.get(f))})`).join('; ')}`
+  : `every flag read is set somewhere (${names(uses.read.keys())})`);
+for (const f of flags.unread) console.log(`  ⚠ ${f} is set (${names(uses.set.get(f))}) but nothing reads it`);
+check(!flags.unregistered.length, flags.unregistered.length
+  ? `not in the registry (tools/storyflags.mjs): ${flags.unregistered.map((f) => `${f}, setBy ${quoted(uses.set.get(f))}, readBy ${quoted(uses.read.get(f))}`).join('; ')}`
+  : `all ${new Set([...uses.set.keys(), ...uses.read.keys()]).size} flags the game sets or reads are in the registry (tools/storyflags.mjs)`);
+const outOfDate = [
+  ...flags.stale.map((f) => `${f} (nothing sets or reads it)`),
+  ...flags.wrong.map(({ flag, field, want }) => `${flag} ${field} should be ${quoted(want)}`),
+];
+check(!outOfDate.length, outOfDate.length ? `registry out of date: ${outOfDate.join('; ')}` : 'and it names who sets and reads each one, as the game does');
 
 console.log(failed ? `questcheck: ${failed} failed` : 'questcheck: all good');
 process.exit(failed ? 1 : 0);

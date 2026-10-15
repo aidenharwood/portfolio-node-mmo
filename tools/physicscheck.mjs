@@ -7,10 +7,13 @@
 //   ragdolls   a dead body's joints keep their lengths, come to rest on the ground (and on a
 //              prop's top), and nothing of it ends up under the ground; a severed limb comes off
 //              where it was and is a ragdoll of its own
+//   scenery    the server's trees, rocks and cacti collide with the triangles a screen's do
 // Run: node tools/physicscheck.mjs
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { HeadlessWorld } from '../server/world.js';
+import { World } from '../src/world/World.js';
+import { CHUNK } from '../src/world/Chunks.js';
 import { generateDungeon } from '../src/world/DungeonGen.js';
 import { Interior } from '../src/world/Interior.js';
 import { DUNGEONS, pocketOrigin } from '../src/world/dungeons.js';
@@ -381,6 +384,80 @@ console.log('Ragdolls:');
       `${key}'s ${part} comes off where it was (${r.jump.toFixed(3)} m), flies as its own ragdoll of ${r.segments} piece(s)${jointed ? ` bending ${r.bent.toFixed(2)} rad at its joint` : ''}, lands (lowest ${r.low.toFixed(3)} m), lies still and goes`);
   }
   Math.random = random;
+}
+
+// ---------------------------------------------------------------- scenery parity
+// The server's world gives every tree, rock and cactus the triangles a screen's world gives it,
+// so enemies are stopped by the same trunk a player sees: a chunk of each biome with scenery,
+// scattered by the server and by a world with a screen's scenery sets, compared collider by
+// collider (within a centimetre). Last, because building a screen's sets makes textures and
+// materials, and the ragdolls above count on Math.random's draws being the same every run.
+console.log('Scenery:');
+{
+  const server = new HeadlessWorld(7);
+  const screen = new HeadlessWorld(7);
+  World.prototype.buildScenerySets.call(screen); // the sets a screen draws (and collides) with
+  const want = ['forest', 'snow', 'marsh', 'ash', 'mountain', 'desert', 'badlands', 'jungle', 'crystal', 'fungal'];
+  const found = new Map();
+  for (let ring = 2; ring < 160 && found.size < want.length; ring++) {
+    for (let i = -ring; i <= ring; i++) {
+      for (const [cx, cz] of [[i, -ring], [i, ring], [-ring, i], [ring, i]]) {
+        const biome = server.gen.biomeAt((cx + 0.5) * CHUNK, (cz + 0.5) * CHUNK);
+        if (want.includes(biome) && !found.has(biome)) found.set(biome, [cx, cz]);
+      }
+    }
+  }
+  check(found.size === want.length, `a chunk of every biome with scenery found (${[...found.keys()].join(', ')})`);
+  let total = 0;
+  let plain = 0;
+  let worst = 0;
+  const off = [];
+  let cactus = null;
+  for (const [biome, [cx, cz]] of found) {
+    server.loadChunk(cx, cz);
+    screen.loadChunk(cx, cz);
+    const a = server.chunks.get(`${cx},${cz}`).colliders;
+    const b = screen.chunks.get(`${cx},${cz}`).colliders;
+    if (a.length !== b.length) { off.push(`${biome}: ${a.length} colliders against ${b.length}`); continue; }
+    for (let i = 0; i < a.length; i++) {
+      total++;
+      if (!a[i].tris) { plain++; continue; }
+      if (!b[i].tris || a[i].tris.n !== b[i].tris.n || a[i].surface !== b[i].surface) { off.push(`${biome} #${i}`); continue; }
+      for (let k = 0; k < a[i].tris.v.length; k++) worst = Math.max(worst, Math.abs(a[i].tris.v[k] - b[i].tris.v[k]));
+    }
+  }
+  check(total > 50 && !plain, `the server's scenery colliders have their meshes' triangles (${total - plain} of ${total})`);
+  check(!off.length && worst < 0.01, `and the same ones as a screen's, collider by collider (worst ${worst.toFixed(4)} m apart)${off.length ? `: ${off.slice(0, 5).join('; ')}` : ''}`);
+
+  const cactusGeo = server.sets.cactus.body.geometry;
+  const [dx, dz] = found.get('desert') ?? [0, 0];
+  for (let k = 0; k < 25 && !cactus; k++) {
+    const cx = dx + (k % 5) - 2;
+    const cz = dz + Math.floor(k / 5) - 2;
+    server.loadChunk(cx, cz);
+    cactus = server.chunks.get(`${cx},${cz}`).colliders.find((c) => c.meshGeometry === cactusGeo) ?? null;
+  }
+
+  // A body walked at a cactus from all round is stopped by its trunk and arms, not a circle
+  // round all of it (the old 1.65 m).
+  if (check(!!cactus, 'a cactus to walk into')) {
+    const s = cactus.r / 1.65;
+    let nearest = Infinity;
+    let through = false;
+    for (let k = 0; k < 8; k++) {
+      const ang = (k / 8) * Math.PI * 2;
+      const p = new THREE.Vector3(cactus.x + Math.cos(ang) * 5, cactus.y, cactus.z + Math.sin(ang) * 5);
+      p.y = server.groundHeight(p.x, p.z);
+      for (let t = 0; t < 120; t++) {
+        server.move(p, (cactus.x - p.x) * 0.05, (cactus.z - p.z) * 0.05, RADIUS, STEP_UP, HEIGHT);
+        p.y = server.groundHeight(p.x, p.z);
+      }
+      const d = Math.hypot(p.x - cactus.x, p.z - cactus.z);
+      nearest = Math.min(nearest, d);
+      if (d < 0.3 * s) through = true;
+    }
+    check(nearest < (1.65 * s + RADIUS) - 0.3 && !through, `walking into a cactus stops at its trunk or an arm (closest ${nearest.toFixed(2)} m from its middle; its old circle held bodies ${(1.65 * s + RADIUS).toFixed(2)} m off)`);
+  }
 }
 
 console.log(failed ? `${failed} problem(s)` : 'physicscheck: ok');

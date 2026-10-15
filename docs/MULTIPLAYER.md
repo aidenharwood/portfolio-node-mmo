@@ -92,7 +92,13 @@ about 110 players. Gateways put players on them.
 - **One copy of a character.** A layer holds each of its characters in the presence table, saves
   them before letting go, and refreshes its hold. A layer that crashes loses its hold within 45 s,
   or straight away once it's gone from the layer list. So a character can't be loaded in two
-  places, or loaded before it's saved.
+  places, or loaded before it's saved. Saves only land while the layer still holds the
+  character: one that stalled long enough to lose them can't write its old copy over the new
+  layer's (it lets the player go unsaved instead).
+- **Hand-overs land whole.** A trade writes both characters in one transaction, a letter goes in
+  the same transaction as its sender without what it carries, and a claim marks the letter and
+  saves the claimer together. A layer dying part-way leaves all of it or none of it, never an item
+  in two places (`tools/persistcheck.mjs` crashes each one at every write).
 - **Rolling restarts.** A closing layer marks itself as draining (gateways stop sending players
   there), sends each party whole to another layer, saves everyone and lets them go. The party is
   put back together where it lands.
@@ -111,7 +117,7 @@ about 110 players. Gateways put players on them.
 | 2 | Server-run world at 20 Hz with area of interest | ✅ |
 | 2 | Hits judged on screen, validated by server; statuses on server | ✅ |
 | 2 | Shared kill credit, instanced loot, health scaling with players | ✅ |
-| 3 | Inventory, gold, XP, attributes, trader, quests, chests on the server | ✅ predicted and rolled ops, hash checks |
+| 3 | Inventory, gold, XP, talents, trader, quests, chests on the server | ✅ predicted and rolled ops, hash checks |
 | 3 | Movement validation with corrections; travel done by the server | ✅ one speed bank rather than a per-move envelope |
 | 3 | Rate limits and sanity checks on every message | ✅ |
 | 4 | Parties | ✅ except below |
@@ -124,7 +130,7 @@ about 110 players. Gateways put players on them.
 | 5 | Binary delta snapshots | 🟡 deltas and distance tiers, but JSON with compression rather than binary |
 | 5 | Per-region simulation in worker threads | 🟡 scaled out with layers (processes) instead; regions within a layer are still a [next step](DEPLOY.md#further-not-built) |
 | 5 | Database hot standby, or Postgres | ✅ Postgres for the cluster (SQLite stays for one process), nightly dumps; no standby |
-| 5 | Container image; TLS through a reverse proxy | ✅ Dockerfile, Compose with Caddy, and Kubernetes manifests with CI for the portfolio cluster (the image hasn't been built here: no Docker) |
+| 5 | Container image; TLS through a reverse proxy | ✅ Dockerfile, Compose with Caddy, and Kubernetes manifests (in `portfolio-helm-website`) with CI for the portfolio cluster; CI builds and pushes the image on every push to `main` |
 | 5 | Health checks, metrics, structured logs | ✅ |
 | 5 | Crash reporting | 🟡 caught and logged, not sent to an external service |
 | — | PvP areas | ➖ left out for now |
@@ -426,7 +432,9 @@ shares it. Offline single-player runs the same director for one player.
   who aren't in a party may land on different ones.
 - A layer that crashes (rather than closing) loses its parties and up to 30 seconds of its
   players' progress (characters are saved every 30 seconds and on leaving). Its players reconnect
-  to another layer by themselves.
+  to another layer by themselves. What's lost goes together: a chest's loot, its daily or weekly
+  lockout and any legendary in it are in the same character row, so a crash can lose the loot
+  with its lockout (the chest can be opened again) but never keep one without the other.
 - Each layer simulates its whole world on one core, so a layer holds ~110 players. See
   [DEPLOY.md](DEPLOY.md#capacity).
 
