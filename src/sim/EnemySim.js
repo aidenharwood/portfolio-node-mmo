@@ -351,6 +351,8 @@ export class EnemySim {
   // when it's in sight: `via` false) and how far it is by the way there. Outdoors, chasing or
   // going home, round whatever's in the straight line (openWay); null when nothing is.
   wayTo(target) {
+    // What can't move (a siege engine, a spore pod) has no way to go: it fires from where it is.
+    if (!this.type.speed) return null;
     if (!inPocket(this.position.x)) return this.state === 'chase' || this.state === 'return' ? this.openWay(target) : null;
     const it = this.sim.world.interiorAt(this.position.x, this.position.z);
     if (!it) return null;
