@@ -18,6 +18,8 @@ import { RARITY } from '../src/items/rarity.js';
 import { SimHost } from '../server/simhost.js';
 import { loadCharacter } from '../server/characters.js';
 import { eventCalled, eventObjectives, EVENT_CALL } from '../src/rpg/questWatch.js';
+import { roadRoute, RouteFollower } from '../src/sim/Routes.js';
+import { CITY_WALL } from '../src/world/places.js';
 
 const seed = Number(process.argv[2] ?? 12345);
 const world = new HeadlessWorld(seed);
@@ -119,6 +121,30 @@ const character = (p, level) => {
   return core;
 };
 const startAt = (site, type, level = null) => dir.start({ poi: site.p, type, level: level ?? site.p.level ?? site.region.level, race: EVENT_TYPES[type].race ?? site.region.race });
+
+// ---------------------------------------------------------------- routes (P-1)
+// A route from the roads between waystones, toward a settlement two or more regions off.
+console.log('Routes:');
+const routeSite = all.find(({ p, region }) => ['hamlet', 'settlement', 'town'].includes(p.type) && region.level >= 6 && roadRoute(world.gen, p));
+const route = routeSite && roadRoute(world.gen, routeSite.p);
+check(!!route, 'a road route to a settlement');
+check(route?.length >= 300 && route?.length <= 480, `its length is in band (${Math.round(route?.length)} m)`);
+check(route?.regions >= 2, `it crosses regions (${route?.regions})`);
+const [lx, lz] = route?.points.at(-1) ?? [Infinity, Infinity];
+check(Math.hypot(lx - routeSite?.p.x, lz - routeSite?.p.z) <= (routeSite?.p.r ?? 0) + 6, 'it ends at the settlement');
+const towns = world.gen.cities();
+check(!!route && route.points.every(([x, z]) => towns.every((c) => Math.hypot(c.x - routeSite.p.x, c.z - routeSite.p.z) < CITY_WALL || Math.hypot(c.x - x, c.z - z) > CITY_WALL + 10) && Math.hypot(x, z) > 60), 'it keeps out of the cities and the hub');
+// Walked at 1.5 m/s it arrives in length / speed.
+const walk = (pts, canStand) => { const f = new RouteFollower(pts, { speed: 1.5, canStand }); let t = 0; while (f.step(0.05) === 'moving' && t < 2000) t += 0.05; return { f, t }; };
+const w1 = route && walk(route.points);
+check(w1?.f.status === 'arrived' && Math.abs(w1.t - route.length / 1.5) < 1, `a follower arrives on time (${w1 ? mins(w1.t) : '-'})`);
+// A 12 m stretch it can't stand on is jumped; a 40 m one leaves it stuck where it began.
+const line = Array.from({ length: 81 }, (_, i) => [i * 2.5, 0]);
+const gap = (a, b) => (x) => x < a || x > b;
+const w2 = walk(line, gap(100, 112));
+check(w2.f.status === 'arrived' && w2.f.skipped === 1, 'a short gap is jumped');
+const w3 = walk(line, gap(100, 140));
+check(w3.f.status === 'stuck' && w3.f.x < 100, 'a long gap leaves it stuck, before the gap');
 
 // ---------------------------------------------------------------- the director
 console.log('The director:');
