@@ -295,6 +295,62 @@ export const STORY = [
     },
     rewards: { xp: 1600, gold: 560, armor: { minTier: 3 } },
   },
+  {
+    id: 'b6', kind: 'story', act: 2, level: 12, giver: 'city2:captain', requires: ['b5'], title: 'Voice in the Chitin',
+    offer: {
+      told_ashe: 'Ashe sent word down the masts — I know what the Array is now, and what the Wardens were. Doesn\'t change the job. The swarms have a leader: a Psion, out at {psionnest}, {psionnest:dir} of here. Kill it, and bring me what\'s left of it.',
+      default: 'The swarms have a leader. The masts can hear it — a Psion, out at {psionnest}, {psionnest:dir} of here, steering them like a hand on a rein. Kill it, and bring me what\'s left of it.',
+    },
+    stages: [
+      { text: 'Find the Psion\'s nest.', objectives: [{ type: 'goto', at: 'psionnest', count: 1, text: 'Reach {psionnest}' }] },
+      {
+        text: 'Kill the Hive Psion and take its chitin.',
+        objectives: [
+          { type: 'kill', tag: 'psion', count: 1, text: 'Kill the Hive Psion' },
+          { type: 'collect', from: { tag: 'psion' }, chance: 1, count: 1, text: 'Take the Psion\'s chitin' },
+        ],
+      },
+    ],
+    turnIn: 'Look at the grain of it. That\'s not a pattern, that\'s a map — tunnels. It was listening to the Array and passing the song on, down. The Brood Pits, {broodpits:dir} of here. That\'s where the song goes.',
+    setFlags: ['psion_slain'],
+    rewards: { xp: 1700, gold: 600, weapon: { minTier: 3 } },
+  },
+  {
+    id: 'b7', kind: 'story', act: 2, level: 13, giver: 'city2:captain', requires: ['b6'], title: 'Into the Brood Pits',
+    offer: 'The Pits go down further than anyone\'s walked. There\'s something at the bottom the brood calls Matron. Go down, and end it.',
+    stages: [
+      { text: 'Reach {broodpits}.', objectives: [{ type: 'goto', at: 'broodpits', count: 1, text: 'Reach {broodpits}' }] },
+      { text: 'Go down through the Brood Pits and kill the Brood Matron.', objectives: [{ type: 'dungeon', d: 'brood', count: 1, text: 'Clear the Brood Pits' }] },
+    ],
+    turnIn: 'You came back up. Not everyone who\'s gone into those tunnels can say that. What did you see at the bottom?',
+    rewards: { xp: 1850, gold: 640, armor: { minTier: 3 } },
+  },
+  {
+    id: 'b8', kind: 'story', act: 2, level: 14, giver: 'city2:captain', requires: ['b7'], title: 'What the Matron Knew',
+    offer: 'There\'s a node by the mouth of the Pits — the brood grew it, like a root, toward the Array. If the Matron heard the call, that thing carried it. Read it.',
+    stages: [
+      { text: 'Read the nest-node at {broodpits}.', objectives: [{ type: 'use', object: 'broodpits:node', count: 1, text: 'Read the nest-node' }] },
+      {
+        text: 'Tell Captain Okonta what the node showed.', objectives: [{ type: 'talk', npc: 'city2:captain', count: 1, text: 'Report to Captain Okonta' }],
+        say: { 'city2:captain': 'Deeper. The call doesn\'t stop at the Matron — it goes on down, to something bigger. A mother of mothers. And every hour that dish sings, it wakes a little more. Then we stop the singing. Tonight.' },
+      },
+    ],
+    turnIn: 'I\'ll put every blade Farcall has on the road to the Array. You go in first.',
+    setFlags: ['matron_read'],
+    rewards: { xp: 2000, gold: 680, weapon: { minTier: 3 } },
+  },
+  {
+    id: 'b9', kind: 'story', act: 2, level: 15, giver: 'city2:captain', requires: ['b8'], returnTo: 'city1:warden', title: 'Silence the Array',
+    offer: 'The lullaby\'s gone. What\'s left is the call, and it won\'t turn back — I\'ve had the mast crews try. So we break it. Get to the transmitter under the dish and destroy it. We\'ll hold as long as we can.',
+    stages: [
+      { text: 'Return to {array}.', objectives: [{ type: 'goto', at: 'array', count: 1, text: 'Reach {array}' }] },
+      { text: 'The whole brood is answering the call. Hold {array}.', objectives: [{ type: 'defend', at: 'array', race: 'hive', waves: 3, count: 1, text: 'Hold {array}' }] },
+      { text: 'Destroy the transmitter.', objectives: [{ type: 'use', object: 'array:transmitter', count: 1, text: 'Destroy the Array\'s transmitter' }], done: { moment: 'deathpulse' } },
+    ],
+    turnIn: 'Every waystone between here and Farcall flashed red at once — the whole city saw it. Whatever you broke out there, sleeper, something heard it break.',
+    setFlags: ['array_destroyed'],
+    rewards: { xp: 2200, gold: 720, armor: { minTier: 3 } },
+  },
 ];
 
 // Short scenes, played on screen when a quest asks (ui/Moments.js): a few shots, each a camera
@@ -359,6 +415,12 @@ export const MOMENTS = {
     at: 'array', title: ['The Farcall Array', ''], shots: [
       { from: [6, 4, 9], lift: 2.5, t: 5, line: ['', 'Warden sigils, welded onto Maker machinery — old, and deliberate.'] },
       { from: [-14, 12, 18], lift: 4, t: 6, line: ['The Pilgrim', 'They built a lullaby. You woke it screaming.'] },
+    ],
+  },
+  deathpulse: {
+    at: 'array', title: ['The Array Falls Silent', ''], shots: [
+      { from: [-10, 9, 14], lift: 4, t: 5, line: ['', 'Down the network, waystone after waystone flickers red.'] },
+      { from: [24, 18, 30], lift: 6, t: 6, line: ['', 'And far off, in the highlands, something made of metal answers.'] },
     ],
   },
   act1end: {

@@ -219,6 +219,8 @@ check(quests.flags.krell_captured && !quests.flags.krell_freed && quests.flags.t
 check(quests.flags.act2_started && quests.flags.hamlets_cleared, 'Act II under way: Farcall reached, the quiet hamlets answered');
 check(quests.completed.has('b3'), 'the surge on the quiet hamlet held (b3, a public event the quest called)');
 check(quests.flags.array_found, 'the Farcall Array found, Warden marks on Maker work');
+check(quests.flags.psion_slain && quests.flags.matron_read && quests.flags.array_destroyed, 'the Psion slain, the Matron\'s nest read, the Array destroyed');
+check((core.records.dungeons.brood ?? []).some((n) => n > 0), 'the Brood Pits beaten along the way (the dungeon step)');
 check(!!quests.flags.told_ashe !== !!quests.flags.kept_wardens_secret, `Ysolde's confession: one choice made (${quests.flags.told_ashe ? 'told Ashe' : quests.flags.kept_wardens_secret ? 'kept it' : 'neither'})`);
 {
   // A character who finished Act I before Act II existed: Ashe has the next step for them.
