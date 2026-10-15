@@ -12,6 +12,34 @@ import { C, HEARTH, FORGE, LAMP, RUNE, CARGO } from './palette.js';
 const TAU = Math.PI * 2;
 const VOID = 0x0a0c12;
 const SEAL = 0x9a6aff;
+const WARDEN = 0x3a6a4a; // the Wardens' green (world/Towns.js)
+const SIGIL = 0xf0c75e;  // the order's gold sigil
+const CALL = 0xff3a5a;   // the Farcall Array calling the Hive
+
+// A rod from local point a to b.
+const _a = new THREE.Vector3();
+const _d = new THREE.Vector3();
+const _q = new THREE.Quaternion();
+const _e = new THREE.Euler();
+const UP = new THREE.Vector3(0, 1, 0);
+function rod(g, a, b, r, color, outline = 0.01) {
+  _a.fromArray(a);
+  _d.fromArray(b).sub(_a);
+  const len = _d.length();
+  _e.setFromQuaternion(_q.setFromUnitVectors(UP, _d.normalize()));
+  piece(g, G.cyl(r, r, len, 6), color, { pos: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2], rot: [_e.x, _e.y, _e.z], outline });
+}
+
+// A Warden plate welded onto Maker work: green steel with the gold sigil, a bead of weld round
+// its edge. Faces local +z, centred at (x, y, z).
+function wardenPlate(g, x, y, z, wd, ht) {
+  piece(g, G.box(wd, ht, 0.08), WARDEN, { pos: [x, y, z], outline: 0.012 });
+  piece(g, G.octa(Math.min(wd, ht) * 0.22), SIGIL, { pos: [x, y + ht * 0.06, z + 0.06], scale: [1, 1.25, 0.3], outline: 0.006 });
+  for (const s of [-1, 1]) {
+    piece(g, G.box(wd + 0.1, 0.07, 0.12), C.metal, { pos: [x, y + s * ht / 2, z], outline: 0 });
+    piece(g, G.box(0.07, ht + 0.1, 0.12), C.metal, { pos: [x + s * wd / 2, y, z], outline: 0 });
+  }
+}
 
 // A group standing at a world point on the ground, turned to `ry` (its +z faces bearing ry).
 function at(w, x, z, ry = 0, lift = 0) {
@@ -167,6 +195,51 @@ export const OBJECT_MODELS = {
     }
     for (const lx of [-3.8, 3.8]) for (const lz of [-2.6, -0.6]) wcol(w, wa, lx, lz, 1.4, 5);
     for (const lx of [-1.6, 0, 1.6]) wcol(w, wa, lx, -3.2, 1.3, 5);
+    return 0;
+  },
+
+  // One of the Farcall Array's consoles: a Maker slab of black stone, its face cut with runes, and
+  // a Warden panel welded over the top. Screaming red while the Array calls; dark once you've
+  // powered it down.
+  arrayconsole(w, p, n, g, wa) {
+    piece(g, G.box(1.5, 1.0, 0.9), C.obsidian, { pos: [0, 0.5, 0], outline: 0.03 });
+    for (const x of [-0.5, 0, 0.5]) piece(g, G.box(0.06, 0.6, 0.04), RUNE, { pos: [x, 0.45, 0.46], glow: true, outline: 0 });
+    piece(g, G.box(1.4, 0.1, 0.8), WARDEN, { pos: [0, 1.08, 0.06], rot: [-0.45, 0, 0], outline: 0.02 });
+    piece(g, G.octa(0.14), SIGIL, { pos: [0.52, 1.17, -0.2], rot: [-0.45, 0, 0], scale: [1, 0.3, 1.2], outline: 0.004 });
+    for (const s of [-1, 1]) piece(g, G.box(0.06, 0.12, 0.85), C.metal, { pos: [s * 0.72, 1.06, 0.06], rot: [-0.45, 0, 0], outline: 0 });
+    piece(g, G.box(0.5, 0.9, 0.3), C.steel, { pos: [0, 1.2, -0.55], outline: 0.015 });
+    const { on, off } = parts(w, n.id, (onG, offG) => {
+      piece(offG, G.box(1.0, 0.04, 0.55), CALL, { pos: [-0.12, 1.15, 0.1], rot: [-0.45, 0, 0], glow: true, outline: 0 });
+      piece(offG, G.sphere(0.09, 8, 6), CALL, { pos: [0, 1.75, -0.55], glow: true, outline: 0 });
+      piece(onG, G.box(1.0, 0.04, 0.55), 0x1a2430, { pos: [-0.12, 1.15, 0.1], rot: [-0.45, 0, 0], outline: 0 });
+      piece(onG, G.sphere(0.09, 8, 6), 0x7aff9a, { pos: [0, 1.75, -0.55], glow: true, outline: 0 });
+    });
+    place(on, wa);
+    place(off, wa);
+    return 0.85;
+  },
+
+  // The Farcall Array's transmitter: a Maker emitter column under the dish, braced with Warden
+  // bands, a crystal at its head pulsing the call. Once you've destroyed it: the crystal shattered
+  // on the stones, the column's head split and dark.
+  transmitter(w, p, n, g, wa) {
+    piece(g, G.box(2.8, 0.4, 2.8), C.stoneDark, { pos: [0, 0.2, 0], outline: 0.03 });
+    piece(g, G.box(2.0, 0.4, 2.0), C.obsidian, { pos: [0, 0.6, 0], outline: 0.03 });
+    piece(g, G.cyl(0.6, 0.85, 4.2, 8), C.obsidian, { pos: [0, 2.9, 0], outline: 0.04 });
+    for (let k = 0; k < 4; k++) piece(g, G.box(0.06, 3.2, 0.04), RUNE, { pos: [Math.sin(k * TAU / 4 + 0.4) * 0.72, 2.8, Math.cos(k * TAU / 4 + 0.4) * 0.72], rot: [0, k * TAU / 4 + 0.4, 0], glow: true, outline: 0 });
+    for (const y of [1.6, 3.6]) piece(g, G.cyl(0.84 - (y - 1.6) * 0.06, 0.84 - (y - 1.6) * 0.06, 0.3, 8), WARDEN, { pos: [0, y, 0], outline: 0.012 });
+    wardenPlate(g, 0, 2.6, 0.82, 0.9, 1.2);
+    const { on, off } = parts(w, n.id, (onG, offG) => {
+      piece(offG, G.cyl(0.4, 0.6, 0.5, 8), C.obsidian, { pos: [0, 5.25, 0], outline: 0.03 });
+      piece(offG, G.octa(0.55), CALL, { pos: [0, 6.2, 0], scale: [1, 1.7, 1], glow: true, outline: 0.012 });
+      for (const [r, y] of [[1.0, 6.0], [1.5, 6.5]]) piece(offG, G.torus(r, 0.04, TAU, 4, 24), CALL, { pos: [0, y, 0], rot: [Math.PI / 2, 0, 0], glow: true, outline: 0 });
+      piece(onG, G.cyl(0.45, 0.45, 0.1, 8), VOID, { pos: [0, 5.02, 0], outline: 0 });
+      for (let k = 0; k < 6; k++) piece(onG, G.octa(0.18 + (k % 3) * 0.08), k % 2 ? 0x5a2a34 : C.obsidian, { pos: [Math.sin(k * 1.9) * (1.3 + k * 0.15), 0.55, Math.cos(k * 1.9) * (1.3 + k * 0.15)], rot: [k, k * 2, 0.4], scale: [1, 1.6, 1], outline: 0.008 });
+      piece(onG, G.box(0.7, 0.5, 0.12), C.metalDark, { pos: [0.6, 0.65, 1.3], rot: [0.2, 0.5, 1.1], outline: 0.01 });
+    });
+    place(on, wa);
+    place(off, wa);
+    wcol(w, wa, 0, 0, 1.25, 5);
     return 0;
   },
 
@@ -345,6 +418,103 @@ export const STORY_BUILDERS = {
     for (let k = 0; k < 4; k++) {
       const [x, y, z] = local(g, p.x + (rnd() - 0.5) * p.r, p.z + (rnd() - 0.5) * p.r, w);
       piece(g, G.cyl(0.08, 0.06, 1.4, 6), C.bone, { pos: [x, y + 0.1, z], rot: [Math.PI / 2, rnd() * 3, 0], outline: 0.01 });
+    }
+    objectProps(w, p, g, g.position);
+    flatten(g);
+    w.finish(g);
+  },
+
+  // The Farcall Array (Act II): the Maker listening station the first Wardens re-tuned to sing the
+  // Hive asleep. A great dish on a lattice of black Maker stone at the back, rune-cut pylons either
+  // side, cables out to the consoles; over all of it, plates of Warden green welded on with the
+  // order's gold sigil. Local +z faces Farcall (the way in); the stone apron in the middle is open
+  // ground, the place to hold.
+  array(w, p) {
+    const g = siteGroup(w, p);
+    const rnd = w.rnd;
+    const cs = Math.cos(p.rot);
+    const sn = Math.sin(p.rot);
+    const W = (lx, lz) => [p.x + cs * lx + sn * lz, p.z - sn * lx + cs * lz];
+    // A sub-group on the ground at a local point, turned with the place (plus `ry`).
+    const put = (lx, lz, ry = 0) => {
+      const [x, z] = W(lx, lz);
+      const h = at(w, x, z, p.rot + ry);
+      h.position.sub(g.position);
+      g.add(h);
+      return h;
+    };
+    const col = (lx, lz, r, h) => w.addCollider(...W(lx, lz), r, h);
+    // The apron: Maker stone, a ring of runes round the ground to hold.
+    const apron = put(0, 0);
+    piece(apron, G.cyl(10, 10.4, 0.14, 36), C.stoneDark, { pos: [0, 0.03, 0], outline: 0 });
+    piece(apron, G.torus(9.2, 0.07, TAU, 4, 48), RUNE, { pos: [0, 0.12, 0], rot: [Math.PI / 2, 0, 0], glow: true, outline: 0 });
+    for (let k = 0; k < 8; k++) piece(apron, G.box(0.08, 0.04, 1.4), RUNE, { pos: [Math.sin(k * TAU / 8) * 8, 0.12, Math.cos(k * TAU / 8) * 8], rot: [0, k * TAU / 8, 0], glow: true, outline: 0 });
+
+    // The dish on its lattice, at the back.
+    const T = put(0, -11.5);
+    const H = 9;
+    for (const [x, z] of [[-2.6, -2.6], [2.6, -2.6], [-2.6, 2.6], [2.6, 2.6]]) {
+      piece(T, G.box(0.6, H, 0.6), C.obsidian, { pos: [x, H / 2, z], outline: 0.035 });
+      piece(T, G.box(0.05, H * 0.8, 0.05), RUNE, { pos: [x + Math.sign(x) * 0.32, H / 2, z], glow: true, outline: 0 });
+      col(x, -11.5 + z, 0.45, H);
+    }
+    for (const y of [2.6, 5.4]) {
+      for (const [a, b] of [[[-2.6, y, 2.6], [2.6, y + 2.4, 2.6]], [[2.6, y, -2.6], [-2.6, y + 2.4, -2.6]], [[-2.6, y, -2.6], [-2.6, y + 2.4, 2.6]], [[2.6, y, 2.6], [2.6, y + 2.4, -2.6]]]) rod(T, a, b, 0.12, C.metalDark);
+    }
+    piece(T, G.box(6.4, 0.5, 6.4), C.obsidian, { pos: [0, H, 0], outline: 0.04 });
+    piece(T, G.cyl(1.1, 1.5, 1.8, 10), C.steel, { pos: [0, H + 1.1, 0], outline: 0.03 });
+    const dish = new THREE.Group();
+    dish.position.set(0, H + 3.8, 0);
+    dish.rotation.set(-0.7, 0, 0);
+    T.add(dish);
+    piece(dish, G.dome(8, 32, 8, 0.32), C.hab, { rot: [Math.PI, 0, 0], scale: [1, 0.55, 1], outline: 0.06 });
+    piece(dish, G.torus(6.8, 0.16, TAU, 4, 44), C.metal, { pos: [0, -2.34, 0], rot: [Math.PI / 2, 0, 0], outline: 0.02 }); // on the bowl's lip
+    for (let i = 0; i < 3; i++) {
+      const a = (i / 3) * TAU;
+      rod(dish, [Math.cos(a) * 5.5, -2, Math.sin(a) * 5.5], [0, 3.2, 0], 0.1, C.metal);
+    }
+    piece(dish, G.cone(0.6, 1.4, 8), C.obsidian, { pos: [0, 3.5, 0], rot: [Math.PI, 0, 0], outline: 0.02 });
+    piece(dish, G.sphere(0.24, 8, 6), CALL, { pos: [0, 4.3, 0], glow: true, outline: 0 });
+    // The Wardens' work on it: plates on the front legs and the platform's lip.
+    for (const s of [-1, 1]) wardenPlate(T, s * 2.6, 3.4, 2.95, 1.3, 2.0);
+    wardenPlate(T, 0, H, 3.25, 2.4, 0.9);
+
+    // Rune-cut pylons either side, each banded with a welded plate.
+    for (const s of [-1, 1]) {
+      const y = put(s * 9, -4.5, -s * 0.5);
+      piece(y, G.box(1.7, 6.4, 1.3), C.obsidian, { pos: [0, 3.2, 0], rot: [0, 0, s * 0.03], outline: 0.04 });
+      for (let k = 0; k < 3; k++) piece(y, G.box(0.07, 1.1, 0.04), RUNE, { pos: [-0.4 + k * 0.4, 4.4 - (k % 2) * 0.8, 0.66], glow: true, outline: 0 });
+      piece(y, G.cone(0.95, 1.2, 4), C.obsidian, { pos: [0, 7, 0], rot: [0, Math.PI / 4, 0], outline: 0.03 });
+      wardenPlate(y, 0, 2.2, 0.68, 1.5, 1.4);
+      col(s * 9, -4.5, 1.15, 6.4);
+    }
+
+    // Cables from the consoles back to the works; Warden lamps at the way in.
+    const [cl, cr] = [W(-4.8, 5.1), W(4.8, 5.1)];
+    for (const [cx, cz] of [cl, cr]) {
+      const lx = cs * (cx - p.x) - sn * (cz - p.z);
+      const lz = sn * (cx - p.x) + cs * (cz - p.z);
+      const c = put(0, 0);
+      piece(c, G.tube([[lx, 0.15, lz - 0.6], [lx * 0.6, 0.12, -2], [lx * 0.2, 0.12, -6], [Math.sign(lx) * 2.4, 0.15, -9]], 0.11, 14, 5), 0x2a2e36, { outline: 0.01 });
+    }
+    for (const s of [-1, 1]) {
+      const l = put(s * 6.5, 11.5);
+      piece(l, G.cyl(0.08, 0.1, 4, 6), C.metalDark, { pos: [0, 2, 0], outline: 0.01 });
+      piece(l, G.box(0.6, 0.35, 0.3), LAMP, { pos: [0, 4, 0], glow: true, outline: 0.01 });
+      piece(l, G.box(0.5, 1.2, 0.04), WARDEN, { pos: [0, 2.8, 0.1], outline: 0.008 });
+      col(s * 6.5, 11.5, 0.15, 4);
+    }
+    // The old Warden line round its back: barricades of Maker stone and steel, broken in places.
+    for (let k = 0; k < 7; k++) {
+      const a = Math.PI * 0.55 + k * (Math.PI * 0.9 / 6);
+      if (k === 3) continue; // a gap behind the dish
+      const lx = Math.sin(a) * 15;
+      const lz = Math.cos(a) * 15;
+      const b = put(lx, lz, a); // its length along the ring, its face (-z) to the apron
+      const wd = 2.4 + rnd() * 0.8;
+      piece(b, G.box(wd, 1.1, 0.6), k % 2 ? C.stoneDark : C.steel, { pos: [0, 0.55, 0], rot: [0, 0, (rnd() - 0.5) * 0.12], outline: 0.025 });
+      if (k % 2) piece(b, G.box(wd * 0.6, 0.6, 0.08), WARDEN, { pos: [0, 0.7, -0.34], outline: 0.008 });
+      for (const t of [-1, 0, 1]) col(lx + Math.cos(a) * t * (wd / 2 - 0.4), lz - Math.sin(a) * t * (wd / 2 - 0.4), 0.45, 1.1);
     }
     objectProps(w, p, g, g.position);
     flatten(g);

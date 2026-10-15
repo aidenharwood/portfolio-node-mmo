@@ -25,9 +25,12 @@ export const STORY_PLACES = {
   relicdig: { name: 'Warden Relic Dig', from: 'city1', turn: 2.3, dist: CITY_WALL + 90, r: 14, flat: [8, 14], act: 1 },
   // Act II's dungeon (gameplay phase 5), out past Farcall.
   broodpits: { name: 'The Brood Pits', from: 'city2', turn: 2.2, dist: CITY_WALL + 180, r: 14, flat: [10, 16], act: 2 },
+  // Act II: the Maker listening station the first Wardens re-tuned to hush the Hive, out on open
+  // ground past Farcall's masts; it faces the city (`face`), the way the player comes in.
+  array: { name: 'The Farcall Array', from: 'city2', turn: -2.6, dist: CITY_WALL + 170, r: 16, flat: [10, 18], act: 2, face: 'city2' },
 };
 // (New places go on the end: each draws from the seed in turn, so the earlier ones stay put.)
-const ORDER = ['foundry', 'outpost', 'vault', 'beacon1', 'beacon2', 'relicdig', 'pilgrim', 'broodpits'];
+const ORDER = ['foundry', 'outpost', 'vault', 'beacon1', 'beacon2', 'relicdig', 'pilgrim', 'broodpits', 'array'];
 
 // Story folk with names of their own (looks fixed; world/settlements.js dresses them).
 export const STORY_FOLK = {
@@ -94,7 +97,8 @@ export function storyPlaces(gen) {
     }
     best ??= { x: tx, z: tz, s: Infinity };
     const [rx, rz] = cellAt(gen, best.x, best.z);
-    const toCity = Math.atan2(city.x - best.x, city.z - best.z);
+    const look = S.face ? anchor[S.face] : city;
+    const toCity = Math.atan2(look.x - best.x, look.z - best.z);
     out[key] = {
       key, rx, rz, x: best.x, z: best.z, r: S.r, name: S.name, act: S.act, h: Math.max(gen.baseHeight(best.x, best.z), -0.4),
       level: Math.max(1, Math.round(1 + Math.hypot(best.x, best.z) / 130)), rot: key === 'pilgrim' ? main + 0.4 : toCity,
@@ -139,6 +143,16 @@ export function storyIn(gen, rx, rz) {
     } else if (P.key === 'broodpits') {
       poi = { ...base, type: 'story', kind: 'broodpits', id: `p:${key}:broodpits`, r: P.r, tag: 'sbp' };
       poi.npcs = [folkFor(poi, rng, 0, 'object', P.rot, 3, { object: 'broodpits:mouth', model: 'broodmouth', facing: P.rot + Math.PI })];
+    } else if (P.key === 'array') {
+      // The open apron in the middle is the ground to hold (`defend at: 'array'`); two consoles
+      // the Wardens welded onto the Maker works on its city side (b4 powers down the first), the
+      // transmitter under the dish (b9 destroys it).
+      poi = { ...base, type: 'story', kind: 'array', id: `p:${key}:array`, r: P.r, tag: 'sa' };
+      poi.npcs = [
+        folkFor(poi, rng, 0, 'object', P.rot - 0.75, 7, { object: 'array:console', model: 'arrayconsole' }),
+        folkFor(poi, rng, 1, 'object', P.rot + Math.PI, 6.5, { object: 'array:transmitter', model: 'transmitter', facing: P.rot }),
+        folkFor(poi, rng, 2, 'object', P.rot + 0.75, 7, { object: 'array:console2', model: 'arrayconsole' }),
+      ];
     } else if (P.key === 'relicdig') {
       poi = { ...base, type: 'story', kind: 'relicdig', id: `p:${key}:relicdig`, r: P.r, tag: 'sr' };
       poi.npcs = [folkFor(poi, rng, 0, 'story', P.rot, 4, { folk: 'chief' })];

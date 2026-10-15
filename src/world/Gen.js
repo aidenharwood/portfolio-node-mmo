@@ -115,7 +115,7 @@ export const LANDMARKS = {
   },
   array: {
     biomes: { highland: 1.2, meadow: 0.9, snow: 1, desert: 0.8, badlands: 0.6, mountain: 0.4 }, r: 13, pad: true, slope: 0.3, chest: [-5, 6],
-    name: (r) => `${pick(r, ['Deep Sky', 'Listening', 'Echo', 'Vigil', 'Long Range', 'Farcall'])} Array`,
+    name: (r) => `${pick(r, ['Deep Sky', 'Listening', 'Echo', 'Vigil', 'Long Range', 'Far Sky'])} Array`,
   },
   arcology: {
     biomes: { marsh: 1.4, jungle: 1.2, forest: 0.8, meadow: 0.6, fungal: 0.6 }, r: 18, slope: 0.4, chest: [0, 0],
@@ -838,7 +838,7 @@ export class WorldGen {
       else if (p.kind === 'vault') {
         pad(p.x, p.z, p.r, p.h, 8, true);
         pad(p.x, p.z, 7, p.h - 3.5, 4, true);
-      } else if (p.type === 'story') pad(p.x, p.z, p.r, p.h, 6, p.kind === 'relicdig');
+      } else if (p.type === 'story') pad(p.x, p.z, p.r, p.h, 6, p.kind === 'relicdig' || (p.kind === 'array' && 'stone'));
       else pad(p.x, p.z, p.r * 0.85, p.h, 10, true);
     }
 
@@ -876,7 +876,7 @@ export class WorldGen {
           region.pois.push(d);
           pad(d.x, d.z, d.r - 4, p.h, 3, 'stone');
         }
-        region.pois.push({ type: 'citywall', id: `yw:${key}`, x: p.x, z: p.z, wall: p.wall, h: p.h, quarters: p.quarters, name: p.name });
+        region.pois.push({ type: 'citywall', id: `yw:${key}`, x: p.x, z: p.z, wall: p.wall, h: p.h, quarters: p.quarters, name: p.name, act: p.act });
       }
     }
     return region;
