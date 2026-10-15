@@ -3,7 +3,8 @@
 // with exactly the trees, rocks, tents and walls players see. Instead of streaming around one
 // camera it keeps what's around every player: chunk scenery colliders near anyone, and the
 // colliders of points of interest (camps, forts, towers...) a little further out.
-import { World, sceneryGeometries } from '../src/world/World.js';
+import { World } from '../src/world/World.js';
+import { sceneryModel } from '../src/world/scenery/models.js';
 import { Chunk, CHUNK } from '../src/world/Chunks.js';
 import { inPocket } from '../src/world/dungeons.js';
 import { KIT } from '../src/world/build/kit.js';
@@ -20,7 +21,7 @@ const ARRIVAL_BUDGET_MS = 15; // ...while someone who just arrived waits on thei
 const ckey = (cx, cz) => `${cx},${cz}`;
 const TILE = 32;           // grid vertices per side of a cached tile of heights (64 m)
 const MAX_TILES = 4096;    // ~34 MB of heights, then the cache starts over
-let SCENERY_SETS = null;   // the scenery's geometry, for colliders (see buildScenerySets)
+const SCENERY_SETS = {};   // the scenery's collision triangles, by set (see buildScenerySets)
 
 export class HeadlessWorld extends World {
   constructor(seed) {
@@ -34,11 +35,13 @@ export class HeadlessWorld extends World {
   // Nothing to light, flood or draw.
   setupLighting() { this.sun = { position: { set() {} }, target: { position: { set() {} } } }; }
   buildWater() { this.water = { position: { set() {} } }; }
-  // Scenery sets with only the geometry, so trees, rocks and cacti collide with the same
-  // triangles a screen's do rather than a circle round all of them. Built once and shared by
-  // every world in the process (nothing changes them).
+  // Scenery sets with only their collision triangles (world/scenery/: a tree's trunk, a whole
+  // rock), so trees, rocks and cacti collide with the same triangles a screen's do rather than a
+  // circle round all of them. Each built when first scattered, and shared by every world in the
+  // process (nothing changes them).
   buildScenerySets() {
-    this.sets = (SCENERY_SETS ??= Object.fromEntries(Object.entries(sceneryGeometries()).map(([k, geometry]) => [k, { body: { geometry } }])));
+    this.sets = SCENERY_SETS;
+    this.setFor = (k) => (SCENERY_SETS[k] ??= { hit: sceneryModel(k, { draw: false }).hit });
   }
   packScenery() { this.sceneryDirty = false; }
   // A place's pieces aren't merged into meshes here (only its colliders matter to the server).
