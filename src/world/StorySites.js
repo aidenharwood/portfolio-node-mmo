@@ -518,7 +518,9 @@ export const STORY_BUILDERS = {
       w.addCollider(x, z, 0.25, 4.2);
     }
     for (let k = 0; k < 3; k++) {
-      const [x3, y3, z3] = local(g, p.x + (rnd() - 0.5) * p.r, p.z + (rnd() - 0.5) * p.r * 0.6, w);
+      // Off to the sides, never in front of the hatch.
+      const [sx, sz] = out(p.x, p.z, p.rot + (k % 2 ? 1 : -1) * (1.1 + rnd() * 0.6), 4 + rnd() * 3);
+      const [x3, y3, z3] = local(g, sx, sz, w);
       piece(g, G.box(1.2 + rnd(), 0.4, 0.8), 0xd8dde4, { pos: [x3, y3 + 0.2, z3], rot: [rnd() * 0.4, rnd() * 3, rnd() * 0.4], outline: 0.015 });
     }
     objectProps(w, p, g, g.position);
