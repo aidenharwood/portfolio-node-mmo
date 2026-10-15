@@ -178,6 +178,7 @@ export class EnemyLayer {
       this.sim.freezeAI = !!g.dev?.flags.freezeAI;
       this.dungeons?.tick(dt);
       this.sim.update(dt);
+      g.dev?.tickBosses(dt);
     } else if (this.replicas) {
       // Shown a little in the past; events play when the render time reaches them, in step with
       // the enemies they come from (stale ones — a tab in the background — are dropped).

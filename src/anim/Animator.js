@@ -1,7 +1,8 @@
 // Procedural animation for the jointed rigs in models/Characters.js.
 //   locomotion  — gait cycle with planted feet (leg IK onto the terrain), hip bob/sway/twist,
 //                 counter-rotating shoulders, arm swing, lean into acceleration, bank into turns
-//   traversal   — jump tuck/fall, flips, corkscrews, slides, dashes, air dashes, mantles, slams, deaths
+//   traversal   — jump tuck/fall, flips, corkscrews, slides, dashes, air dashes, wall scrambles,
+//                 mantles (keyframed: reach, pull, press, step through), slams, deaths
 //   upper body  — weapon-arm poses (model space, with elbow + wrist), off-hand IK grips, look-at
 // Owners fill an AnimState each frame (makeAnimState) and call update(); channels run through
 // springs so state changes blend instead of popping.
@@ -18,6 +19,44 @@ const smoothstep = (a, b, x) => {
 };
 const ease = (t) => t * t * (3 - 2 * t);
 const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+const frac = (x) => x - Math.floor(x);
+
+// Catmull-Rom through keyframes [[t, ...values]] at time t (values into `out`).
+function keyed(keys, t, out) {
+  const n = keys.length;
+  let i = 0;
+  while (i < n - 2 && t > keys[i + 1][0]) i++;
+  const p0 = keys[Math.max(0, i - 1)], p1 = keys[i], p2 = keys[i + 1], p3 = keys[Math.min(n - 1, i + 2)];
+  const u = clamp((t - p1[0]) / (p2[0] - p1[0]), 0, 1);
+  const u2 = u * u;
+  const u3 = u2 * u;
+  for (let j = 1; j < p1.length; j++) {
+    out[j - 1] = 0.5 * (2 * p1[j] + (p2[j] - p0[j]) * u + (2 * p0[j] - 5 * p1[j] + 4 * p2[j] - p3[j]) * u2
+      + (3 * p1[j] - p0[j] - 3 * p2[j] + p3[j]) * u3);
+  }
+  return out;
+}
+
+// The clamber, by its progress (0..1). Over in under half a second — quicker than the springs
+// move — so the body, legs and free arm follow these keys directly, blended in and out at the ends.
+// Body [t, hip drop (× hip height), hip pitch, forward lean]: chest to the ledge, the hips tucking
+// as the knees come up and the shoulders go over the hands, then rising over the lead foot.
+const MANTLE_BODY = [[0, 0, 0, 0], [0.25, 0.04, 0.1, 0.3], [0.55, 0.16, 0.35, 0.7], [0.8, 0.1, 0.12, 0.3], [1, 0, 0, 0]];
+// Feet, hips-local [t, depth below the hip (× leg), reach forward (× leg), toe pitch]: the lead
+// knee drives up onto the ledge and the foot plants under you; the trail leg scrabbles at the
+// wall, pushes off and swings through.
+const MANTLE_FEET = [
+  [[0, 0.85, 0.15, 0.4], [0.25, 0.55, 0.45, -0.3], [0.55, 0.38, 0.32, 0.2], [0.8, 0.75, 0.12, 0.1], [1, 0.95, 0.03, 0]],
+  [[0, 0.9, -0.1, 0.6], [0.3, 0.93, 0.05, 0.9], [0.55, 0.85, -0.2, 0.9], [0.8, 0.55, 0.25, 0.3], [1, 0.93, 0.06, 0]],
+];
+// Free arm [t, x, z, bend]: up for the lip, pull (elbow driving down), press down with the arm
+// locked as the body passes over the hand, let go.
+const MANTLE_OFF = [[0, -0.6, 0.3, 0.6], [0.2, -2.55, 0.28, 0.25], [0.48, -1.2, 0.35, 1.5], [0.7, -0.25, 0.3, 0.3], [1, 0.06, 0.12, 0.3]];
+// How much of the clamber's keyed pose shows: blended in from the jump and out to the stance.
+const mantleW = (t) => smoothstep(0, 0.15, t) * (1 - smoothstep(0.85, 1, t));
+const _mk = [0, 0, 0];
+const _mf = [0, 0, 0];
+const _ma = [0, 0, 0];
 
 const AXIS = new THREE.Vector3(0, -1, 0);
 const KNEE_BEND = new THREE.Vector3(0, 0, -1);
@@ -107,11 +146,11 @@ const _h = [0, 0];
 
 export function makeAnimState() {
   return {
-    mode: 'ground',        // ground | air | slide | dash | airdash | mantle | slam | dead | stagger
+    mode: 'ground',        // ground | air | slide | dash | airdash | scramble | mantle | slam | dead | stagger
     vx: 0, vz: 0, vy: 0, facing: 0, grounded: true,
     brokenLegs: [],
     sprint: false,
-    t: 0,                  // 0..1 progress for timed modes (dash, mantle, dead)
+    t: 0,                  // 0..1 progress for timed modes (dash, mantle, dead); scramble: stride count
     dashX: 0, dashZ: 1,    // dash direction, model space
     ground: null,          // (x, z) => world height for foot placement; null = flat
     pose: [0.9, -0.4, 0],  // weapon arm: forearm/weapon direction, model-space Euler (YXZ)
@@ -332,6 +371,9 @@ export class Animator {
     const dashX = s.dashX ?? 0;
     const dashZ = s.dashZ ?? 1;
     const dashE = mode === 'dash' ? Math.sin(Math.PI * Math.min(1, clamp(s.t, 0, 1) * 1.15)) : 0;
+    // Clamber: its keyed body pose (zero at both ends, so it starts and finishes without a pop).
+    const mantle = mode === 'mantle';
+    const mk = mantle ? keyed(MANTLE_BODY, clamp(s.t, 0, 1), _mk) : null;
 
     // ---- gait: stride is limited by leg reach at the current hip drop, so planted feet never skate
     const drop = L * (0.06 + 0.08 * run + 0.06 * sprint);
@@ -400,7 +442,7 @@ export class Animator {
     let base = d.hipY - drop + lowFoot * groundW - s.hunch * 0.06 - (s.crouch ?? 0) * L * 0.17 - L * collapse;
     if (mode === 'slide') base = d.hipY * 0.55;
     else if (mode === 'dead') base = lerp(d.hipY, d.hipY * 0.14, ease(clamp(s.t * 1.4, 0, 1)));
-    else if (mode === 'mantle') base = d.hipY * 0.92;
+    else if (mode === 'scramble') base = d.hipY * 0.96;
     const baseY = sp.base.step(base, dt);
     // How high the hips are carried (springs, no bob), for the first-person eye — which keeps only
     // a quarter of the gait's running dip (a full one sinks the view whenever you break into a run).
@@ -410,7 +452,7 @@ export class Animator {
     const bob = bobAmp * Math.cos(TAU * 2 * (this.phase - D / 2));
     const breathe = Math.sin(this.time * 2.1) * 0.006 * (1 - move);
     const sway = sp.hipX.step(L * 0.03 * Math.sin(TAU * this.phase) * move * (1 - run) * groundW, dt);
-    r.hips.position.set(sway, baseY + bob + breathe - d.hipY * 0.13 * dashE, 0);
+    r.hips.position.set(sway, baseY + bob + breathe - d.hipY * 0.13 * dashE - (mk ? d.hipY * mk[0] : 0), 0);
 
     // Pelvis twist follows the legs; strafing turns the hips toward travel, shoulders stay on aim.
     const gaitLeg = brokenLeft ? _target[1] : _target[0];
@@ -427,6 +469,7 @@ export class Animator {
     else if (mode === 'dash') hipPitch += 0.18 * dashZ * dashE;
     else if (mode === 'airdash') hipPitch = 0.65;
     else if (mode === 'slam') hipPitch = 0.3;
+    else if (mantle) hipPitch += mk[1];
     _e.set(hipPitch, hipYaw, hipRoll, 'YXZ');
     r.hips.quaternion.setFromEuler(_e);
 
@@ -459,12 +502,13 @@ export class Animator {
     if (mode === 'air') lean = s.hunch + (s.vy > 0 ? -0.06 : 0.08) - (s.glide ? 0.1 : 0);
     else if (mode === 'slide') lean = -0.32 + s.strike * 0.3;
     else if (mode === 'airdash') lean = 0.25;
-    else if (mode === 'mantle') lean = 0.5 * Math.sin(Math.PI * clamp(s.t, 0, 1)) + s.hunch;
+    else if (mantle) lean = s.hunch;
+    else if (mode === 'scramble') lean = s.hunch + 0.22; // chest in to the wall
     else if (mode === 'slam') lean = 0.35;
     else if (mode === 'stagger') lean = -0.35;
     else if (mode === 'dead') lean = -0.25;
     lean -= s.flinch * 0.35;
-    const leanS = sp.lean.step(lean, dt) + 0.34 * dashZ * dashE;
+    const leanS = sp.lean.step(lean, dt) + 0.34 * dashZ * dashE + (mk ? mk[2] : 0);
     const bankTarget = mode === 'dead' ? 0 : clamp(-yawRate * Math.max(speed, 2) * 0.03, -0.32, 0.32) * (s.grounded ? 1 : 0.5);
     const bank = sp.bank.step(bankTarget, dt) - 0.3 * dashX * dashE;
     if (s.twistSnap) sp.twist.snap(s.twist);
@@ -513,6 +557,7 @@ export class Animator {
     const special = this.specialFeet(s, mode, L);
     let specialW;
     if (mode === 'dash') sp.special.snap(specialW = dashE);
+    else if (mantle) sp.special.snap(specialW = mantleW(clamp(s.t, 0, 1)));
     else specialW = sp.special.step(special ? 1 : 0, dt);
     if (specialW > 0.001) {
       for (let i = 0; i < 2; i++) {
@@ -708,7 +753,7 @@ export class Animator {
   }
 
   // Off arm forward kinematics: counter-swing with the legs, pumping when running, balance in the
-  // air, reaching on mantles, raised for slams. Writes upper/fore rotations.
+  // air, hand over hand up walls, keyed through clambers, raised for slams. Writes upper/fore rotations.
   offArmFK(s, mode, nL, move, run, groundW, fall, dt, flip = 0) {
     const a = this.rig.armL;
     const sp = this.sp;
@@ -734,9 +779,12 @@ export class Animator {
     } else if (mode === 'airdash') {
       x = 0.95; z = 0.35; bend = 0.2;
     } else if (mode === 'mantle') {
-      const t = clamp(s.t, 0, 1);
-      x = t < 0.45 ? -2.7 : lerp(-2.7, -0.6, (t - 0.45) / 0.55);
-      z = 0.2; bend = t < 0.45 ? 0.3 : 0.9;
+      keyed(MANTLE_OFF, clamp(s.t, 0, 1), _ma);
+      x = _ma[0]; z = _ma[1]; bend = _ma[2];
+    } else if (mode === 'scramble') {
+      // Hand over hand, opposite the right arm: reach high up the wall, pull down to the chest.
+      const pull = 0.5 - 0.5 * Math.cos(TAU * (s.t + 0.5));
+      x = lerp(-2.6, -1.0, pull); z = 0.3; bend = lerp(0.25, 1.5, pull);
     } else if (mode === 'slam') {
       x = -2.4; z = 0.35; bend = 0.6;
     } else if (mode === 'dead') {
@@ -747,10 +795,14 @@ export class Animator {
     // Gait swing is already continuous and fast, so on foot it drives the arm directly; pose
     // changes (jumps, slides, dashes, mantles) ease through springs — and the hand-over between
     // the two is itself blended, so coming out of a dash doesn't snap the arm.
-    const direct = sp.armDirect.step(mode === 'ground' && s.grounded && flip <= 0 ? 1 : 0, dt);
-    const sx = sp.armX.step(x, dt);
-    const sz = sp.armZ.step(z, dt);
-    const sb = sp.armBend.step(bend, dt);
+    // Clambers and scrambles are quick: the springs run faster through them, and the clamber's
+    // keys show directly while it's under way.
+    let direct = sp.armDirect.step(mode === 'ground' && s.grounded && flip <= 0 ? 1 : 0, dt);
+    if (mode === 'mantle') direct = Math.max(direct, mantleW(clamp(s.t, 0, 1)));
+    const ft = mode === 'mantle' || mode === 'scramble' ? dt * 3 : dt;
+    const sx = sp.armX.step(x, ft);
+    const sz = sp.armZ.step(z, ft);
+    const sb = sp.armBend.step(bend, ft);
     x = lerp(sx, x, direct);
     z = lerp(sz, z, direct);
     bend = lerp(sb, bend, direct);
@@ -795,9 +847,28 @@ export class Animator {
         P[0] = P[1] = 0.9;
         return T;
       case 'mantle':
-        hipsLocal(0, d.hipX, -d.hipDrop - L * 0.5, L * 0.32);
-        hipsLocal(1, -d.hipX, -d.hipDrop - L * 0.8, L * 0.02);
-        P[0] = 0.2; P[1] = 0.6;
+        for (let i = 0; i < 2; i++) {
+          const k = keyed(MANTLE_FEET[i], clamp(s.t, 0, 1), _mf);
+          hipsLocal(i, (i ? -1 : 1) * d.hipX, -d.hipDrop - L * k[0], L * k[1]);
+          P[i] = k[2];
+        }
+        return T;
+      case 'scramble':
+        // Running up the wall: each foot plants high, sole to the wall, and is pushed down it as you
+        // climb (rolling onto its toes), then the knee drives back up for the next step.
+        for (let i = 0; i < 2; i++) {
+          const ph = frac(s.t + i * 0.5);
+          let y, z, pitch;
+          if (ph < 0.5) {
+            const k = ph / 0.5;
+            y = lerp(0.42, 0.8, k); z = 0.45; pitch = lerp(-1.1, 0.4, k);
+          } else {
+            const k = ease((ph - 0.5) / 0.5);
+            y = lerp(0.8, 0.42, k); z = 0.45 - 0.25 * Math.sin(Math.PI * k); pitch = lerp(0.4, -1.1, k);
+          }
+          hipsLocal(i, (i ? -1 : 1) * d.hipX, -d.hipDrop - L * y, L * z);
+          P[i] = pitch;
+        }
         return T;
       case 'slam':
         for (let i = 0; i < 2; i++) hipsLocal(i, (i ? -1 : 1) * d.hipX * 1.25, -d.hipDrop - L * 0.5, L * 0.3);

@@ -61,6 +61,8 @@ GAMEPLAY_PLAN §12 still lists these as unconfirmed defaults, and the story draf
 | 7 | **Lockouts for a small realm:** weekly raid chests per tier, daily dungeon chests. | Make them settings, not constants, and consider reduced rewards on repeat clears rather than none. |
 | 8 | The remaining §12 defaults (no death penalty, cap 30, raid size 12, keys X/G/T). | Confirm them and delete the "(default)" tags. |
 
+Decision 1 is being answered one act at a time (WORK_PLAN's DEC-1a to DEC-1c), each before that act is designed. Act II's part is being settled now, in its own session, together with the Act II beat sheet.
+
 ---
 
 ## 4. Recommended order
@@ -78,6 +80,8 @@ GAMEPLAY_PLAN offers 6b or 8a as the next step. I'd take 8a: it only needs the H
 
 **Parallel track:** the improvements in section 6 slot between steps. The small ones (rebinding, nameplate invite, telemetry) fit alongside Act II. Tier mechanics and dungeon variety should land before step 3, so Acts III and IV benefit.
 
+**Parallel sessions.** Several Claude sessions now work through the plan at once, one lane each, and WORK_PLAN §5 keeps a lanes table of who is doing what. As of 2026-10-14, step 0 is in progress in one session, and Act II's story bible and beat sheet in another. Story design isn't blocked by code, so it runs ahead of the steps that need it.
+
 ---
 
 ## 5. Remaining content
@@ -87,7 +91,7 @@ GAMEPLAY_PLAN offers 6b or 8a as the next step. I'd take 8a: it only needs the H
 - **Collider parity (S–M).** The client's trees, rocks and cacti have mesh-shaped colliders, while the server's headless world uses wider circles (up to 1.65 m for a cactus, against a 0.45 m circle before). Enemies get pushed off scenery further than players see. GAMEPLAY_PLAN suggests building the same hulls from the geometry on the server without drawing them. Also add a client/server parity assertion to `tools/physicscheck.mjs`. The suite went red once because the headless world lacked meshes, and a parity check stops that class of break.
 - **CI and deploy check (S).** DEPLOY.md says to "push to `master`", but the repo's branch is `main`. **(check)** the workflow trigger. MULTIPLAYER.md also notes the Docker image hadn't been built in the dev environment, so confirm a CI-built image has actually run, including `npm run test:cluster`.
 - **Persistence audit (S).** Characters save every 30 s, and a crashed layer loses up to that much. Confirm **(check)** that trade completion, mail claims, chest claims, weekly and daily lockouts (`settings.lockouts`) and legendary drops are written through immediately. Then a crash inside the window can't duplicate an item or refresh a lockout. Events, overrun settlements and ground loot are memory-only by design, which is fine.
-- **Doc fixes (S).** MULTIPLAYER.md's Phase 3 text still says "attributes" (talents replaced them). DEPLOY.md's smoke-test line is shorter than what the test now does. GAMEPLAY_PLAN §1 keeps the original power-curve table for reference and could move to an appendix. The README is a systems encyclopaedia of several thousand words; split it into a short README (what it is, how to run it, a screenshot or two, the live link) and `docs/SYSTEMS.md`.
+- **Doc fixes (S).** MULTIPLAYER.md's Phase 3 text still says "attributes" (talents replaced them). DEPLOY.md's smoke-test line is shorter than what the test now does. GAMEPLAY_PLAN §1 keeps the original power-curve table for reference and could move to an appendix. The README is a systems encyclopaedia of several thousand words and could be split into a short README (what it is, how to run it, a screenshot or two, the live link) and `docs/SYSTEMS.md`. That split is parked (WORK_PLAN S-5) until you say so, because it rewrites your README.
 
 ### 5.1 Act II — The Brood, levels 8–16 (L)
 

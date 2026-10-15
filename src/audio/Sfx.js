@@ -6,7 +6,7 @@
 //   magic    spell charge bed, per-spell casts, element tints, rune hums, arcane blasts
 //   world    surface impacts, ricochets, casing tinkles, explosions by kind, arrow whizz
 //   movement footsteps from the animator's foot plants (by surface), jumps, thruster double jumps,
-//            landings by height, slides, bullet jumps, dashes, rolls, mantles, slams, and wind /
+//            landings by height, slides, bullet jumps, dashes, rolls, mantles, wall scrambles, slams, and wind /
 //            slide / glide / charge beds driven by the player's state every frame
 import * as THREE from 'three';
 import { Engine } from './Engine.js';
@@ -270,6 +270,15 @@ export class Sfx {
     E.burst(v.in, t + 0.04, { color: 'pink', filter: 'bandpass', f: 1300, q: 1, dur: 0.03, attack: 0.0005, peak: 0.5 });
     E.whoosh(v.in, t + 0.05, 0.3, 800, { peakAt: 0.5, q: 0.8, peak: 0.3 });
     this.footstep('hard', 0.45);
+  }
+
+  // A foot slapping a wall on the run up it, with a scuff of the sole.
+  scrambleStep() {
+    const E = this.E;
+    const v = E.voice({ gain: 0.5, wet: 0.05, dur: 0.25 });
+    if (!v) return;
+    E.burst(v.in, v.t + 0.02, { color: 'pink', filter: 'bandpass', f: 2200, q: 1.2, dur: 0.05, attack: 0.002, peak: 0.25 });
+    this.footstep('hard', 0.4);
   }
 
   // Ground slam dive: a rising whistle into the impact (the explosion supplies the boom).

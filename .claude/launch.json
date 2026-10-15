@@ -6,6 +6,12 @@
       "runtimeExecutable": "python",
       "runtimeArgs": ["serve.py", "5173"],
       "port": 5173
+    },
+    {
+      "name": "game-walker",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-c", "import os,sys,runpy; os.chdir('../portfolio-node-mmo-walker'); sys.argv=['serve.py',os.environ.get('PORT','5174')]; runpy.run_path('serve.py', run_name='__main__')"],
+      "port": 5174
     }
   ]
 }

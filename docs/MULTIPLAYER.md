@@ -435,8 +435,10 @@ shares it. Offline single-player runs the same director for one player.
   ignore damage. Server-side checks on health would close that gap.
 - Loot on the ground, camp respawn timers, public events and overrun settlements live in server
   memory. They start fresh after a restart. Ground loot expires after a few minutes anyway.
-- The dev tools act on your own screen only when online (god mode, noclip, spawning, forging). The
-  server corrects movement and reloads the character when the copies disagree.
+- The dev tools are offline play's alone: the client loads them only for single-player and drops
+  them (every cheat off) before going online, and a production server neither ships nor serves
+  `src/dev/`. That keeps the stock client honest; a modified one could still ignore damage (above)
+  — the server corrects movement and reloads the character when the copies disagree.
 - Players on different layers don't see each other. Parties come together on one layer; friends
   who aren't in a party may land on different ones.
 - A layer that crashes (rather than closing) loses its parties and up to 30 seconds of its

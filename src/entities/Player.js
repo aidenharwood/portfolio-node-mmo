@@ -1,5 +1,5 @@
 // The player: movement-shooter traversal (jump, double jump, sprint, slide, dash, air dash,
-// clamber, ground slam) and a combat layer that switches on the equipped weapon's class.
+// wall scramble, clamber, ground slam) and a combat layer that switches on the equipped weapon's class.
 //   melee  — buffered combo chains (auto-facing nearby foes) + whirlwind on RMB
 //   ranged — fires at the reticle; hold RMB to aim down sights; R reloads; spread blooms per shot
 //   magic  — casts at the reticle; hold LMB to charge a stronger cast; RMB aims
@@ -24,13 +24,21 @@ import { Animator, makeAnimState } from '../anim/Animator.js';
 import { CapeCloth } from '../anim/Cloth.js';
 import { WEIGHT, CARRY, SPRINT_CARRY, GUN_HOLD, sampleSwing, sampleSpin, toHold } from '../anim/WeaponMotion.js';
 
-// Free arm poses (one-handed guns and casters, and mantles/slams): forearm direction in
+// Free arm poses (one-handed guns and casters, and mantles/scrambles/slams): forearm direction in
 // model space (Euler YXZ) plus elbow bend. Melee and two-handed guns use weapon-centric holds
 // (anim/WeaponMotion.js) instead.
 const REST = { melee: [1.0, -0.35, 0], ranged: [0.5, -0.35, 0], magic: [0.55, -0.3, 0] };
 const REST_ELBOW = { melee: 0.45, ranged: 1.3, magic: 0.7 };
 const RELOAD = [0.9, 0.35, 0.35];
-const MANTLE_POSE = [-1.6, 0, 0];
+// Clamber, weapon arm, by progress: [t, forearm x, y, z, elbow] — up for the lip, pull, press
+// down on the ledge with the arm locked, then back toward rest as the legs come through.
+const MANTLE_ARM = [
+  [0, -0.4, -0.2, 0, 1.0],
+  [0.22, -1.3, -0.1, 0, 0.3],
+  [0.5, -0.25, -0.25, 0, 1.6],
+  [0.72, 1.15, -0.3, 0, 0.25],
+  [1, 0.9, -0.35, 0, 0.5],
+];
 export const HELD_GUN_SCALE = 0.85;
 const EYE_HEIGHT = 1.92; // standing, models/Human.js
 const BASE_FOV = 55;
@@ -46,7 +54,10 @@ export const MOVE = {
   bulletJump: { speed: 17, lift: 3, boost: 2.5 }, glide: { sink: 0.5, sinkGrow: 1.3, catch: 9, maxTime: 1.8 }, shiftTap: 0.18,
   maxCarry: 36, airTurn: 2.6, airDrag: 0.04, airBrake: 9, groundBleed: 2.2,
   airDash: 15, airDashTime: 0.22, stepUp: 0.5,
-  reachGround: 2.3, reachAir: 2.0, mantleTime: 0.34, coyote: 0.12,
+  reachGround: 2.3, reachAir: 2.0, mantleTime: 0.4, mantleRise: 0.06, coyote: 0.12,
+  // Wall scramble: a few running steps up a wall too tall to clamber (speed easing to `end` over
+  // `time`), `stride` steps a second per foot; Space mid-scramble kicks off it at `kick`.
+  scramble: { speed: 8.5, end: 1.5, time: 0.6, stride: 2.2, kick: 8, cost: 15 },
   slamSpeed: 34, slamMinHeight: 1.4,
   cost: { doubleJump: 14, airDash: 18 },
 };
@@ -63,6 +74,8 @@ const _dir = new THREE.Vector3();
 const _u = new THREE.Vector3();
 const _push = new THREE.Vector3();
 const _slope = { x: 0, z: 0 };
+const _wallAt = new THREE.Vector3();
+const _keys = [0, 0, 0, 0];
 const _v = new THREE.Vector3();
 const _pose = [0, 0, 0];
 const UP = new THREE.Vector3(0, 1, 0);
@@ -70,6 +83,21 @@ const UP = new THREE.Vector3(0, 1, 0);
 const lerp = (a, b, t) => a + (b - a) * t;
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const smooth01 = (t) => t * t * (3 - 2 * t);
+// Catmull-Rom through keyframes [[t, ...values]] at time t (values into `out`).
+function keyed(keys, t, out) {
+  const n = keys.length;
+  let i = 0;
+  while (i < n - 2 && t > keys[i + 1][0]) i++;
+  const p0 = keys[Math.max(0, i - 1)], p1 = keys[i], p2 = keys[i + 1], p3 = keys[Math.min(n - 1, i + 2)];
+  const u = clamp((t - p1[0]) / (p2[0] - p1[0]), 0, 1);
+  const u2 = u * u;
+  const u3 = u2 * u;
+  for (let j = 1; j < p1.length; j++) {
+    out[j - 1] = 0.5 * (2 * p1[j] + (p2[j] - p0[j]) * u + (2 * p0[j] - 5 * p1[j] + 4 * p2[j] - p3[j]) * u2
+      + (3 * p1[j] - p0[j] - 3 * p2[j] + p3[j]) * u3);
+  }
+  return out;
+}
 const _grip = { obj: null, local: new THREE.Vector3() };
 const _hold = { at: new THREE.Vector3(), rot: [0, 0, 0], twist: 0, lean: 0 };
 const _rest = { at: new THREE.Vector3(), rot: [0, 0, 0], twist: 0, lean: 0 };
@@ -124,6 +152,9 @@ export class Player extends Character {
     this.sprintBlock = 0;
     this.airPeak = 0;
     this.mantle = null;
+    this.scramble = null;      // { dir, step } while running up a wall
+    this.scrambleUsed = false; // one a jump (a kick-off earns another, on a different wall)
+    this.lastWall = null;      // the wall last kicked off (the way we faced it)
     this.slideDir = new THREE.Vector3();
     this.slideSpeed = 0;
     this.fovKick = 0;
@@ -392,7 +423,7 @@ export class Player extends Character {
       case 'slide': this.updateSlide(dt); break;
       case 'airdash': this.updateAirDash(); break;
       case 'slam': this.velocity.multiplyScalar(Math.exp(-4 * dt)); break;
-      case 'mantle': break;
+      case 'mantle': case 'scramble': break;
       case 'hurt':
         this.velocity.multiplyScalar(Math.exp(-10 * dt));
         if (this.stateTime > 0.3) this.setState('move');
@@ -400,7 +431,7 @@ export class Player extends Character {
     }
     this.integrate(dt);
     const planar = Math.hypot(this.velocity.x, this.velocity.z);
-    const kick = Math.min(18, Math.max(0, planar - 7) * 0.65) + (this.bulletJumpT > 0 ? 5 : 0) + (this.state === 'airdash' ? 4 : 0) + (this.state === 'dodge' ? 2 : 0);
+    const kick = Math.min(18, Math.max(0, planar - 7) * 0.65) + (this.state === 'scramble' ? 3 : 0) + (this.bulletJumpT > 0 ? 5 : 0) + (this.state === 'airdash' ? 4 : 0) + (this.state === 'dodge' ? 2 : 0);
     this.fovKick += (kick - this.fovKick) * (1 - Math.exp(-6 * dt));
     this.animate(dt);
     this.strikeContact(dt);
@@ -437,8 +468,11 @@ export class Player extends Character {
     const base = this.sprinting ? MOVE.sprint : MOVE.walk;
     const speed = base * slow * this.speedMultiplier() * (1 + this.game.stats.moveSpeed + this.abilities.moveBonus) * (wading ? 0.6 : 1);
     _dir.copy(this.moveIntent).multiplyScalar(speed);
-    if (this.grounded) this.steerGround(_dir, speed, dt);
-    else this.steerAir(_dir, speed, dt);
+    if (this.grounded) {
+      this.steerGround(_dir, speed, dt);
+      this.scrambleUsed = false;
+      this.lastWall = null;
+    } else this.steerAir(_dir, speed, dt);
     // First person: the body always faces where you look.
     if (this.firstPerson || ((this.isAiming || this.charge > 0) && !this.sprinting)) this.turnSmooth(this.cameraYaw ?? this.facing, 22, dt);
     else if (this.moveIntent.lengthSq() > 0.01) this.turnSmooth(Math.atan2(this.moveIntent.x, this.moveIntent.z), 14, dt);
@@ -446,6 +480,8 @@ export class Player extends Character {
     if (this.jumpQueued > 0) { this.tryJump(); if (this.state !== 'move') return; }
     if (this.crouchHeld && this.grounded && Math.hypot(this.velocity.x, this.velocity.z) > 3) { this.startSlide(); return; }
     if (!this.grounded && this.vy < 4 && this.moveIntent.lengthSq() > 0.2 && this.tryMantle(MOVE.reachAir)) return;
+    // Holding Space into a wall too tall to clamber runs you up it.
+    if (!this.grounded && this.jumpHeld && this.vy > -4 && this.tryScramble()) return;
     if (this.buffer === 'dodge') { this.dodgeAction(); return; }
     if (this.wantsSlam()) { this.startSlam(); return; }
     const w = this.weapon;
@@ -885,6 +921,7 @@ export class Player extends Character {
     if (this.grounded || this.coyote > 0) {
       // Only vault on a jump press when the ledge is too tall to simply hop (keeps momentum flowing).
       if (this.tryMantle(MOVE.reachGround, 1.3)) return;
+      if (this.tryScramble()) return;
       this.vy = MOVE.jump;
       this.grounded = false;
       this.coyote = 0;
@@ -893,6 +930,7 @@ export class Player extends Character {
       this.game.audio.jump();
       return;
     }
+    if (this.tryScramble()) return;
     if (this.jumpsLeft > 0 && this.stamina >= MOVE.cost.doubleJump) {
       this.jumpsLeft--;
       this.stamina -= MOVE.cost.doubleJump;
@@ -910,9 +948,9 @@ export class Player extends Character {
   }
 
   // Clamber onto a ledge in front (terrain step, rock, crate, wall, platform) within `reach` of the feet.
-  tryMantle(reach, minRise = 0.6) {
+  tryMantle(reach, minRise = 0.6, dir = null) {
     const p = this.position;
-    _dir.copy(this.moveIntent);
+    _dir.copy(dir ?? this.moveIntent);
     if (_dir.lengthSq() < 0.01) this.forward(_dir);
     _dir.setY(0).normalize();
     const world = this.game.world;
@@ -927,7 +965,8 @@ export class Player extends Character {
       const tx = px + _dir.x * 0.2;
       const tz = pz + _dir.z * 0.2;
       if (world.supportHeight(tx, tz, top + 0.3) < top - 0.4) continue;
-      this.mantle = { from: p.clone(), to: new THREE.Vector3(tx, top, tz), dur: MOVE.mantleTime + rise * 0.04 };
+      this.mantle = { from: p.clone(), to: new THREE.Vector3(tx, top, tz), dur: MOVE.mantleTime + rise * MOVE.mantleRise };
+      this.scramble = null;
       this.facing = Math.atan2(_dir.x, _dir.z);
       this.vy = 0;
       this.velocity.set(0, 0, 0);
@@ -943,10 +982,11 @@ export class Player extends Character {
     const k = Math.min(1, this.stateTime / m.dur);
     const p = this.position;
     // Up, then over — on eased curves that overlap, so the climb is one smooth arc with no change
-    // of pace partway (in first person you ride it).
+    // of pace partway (in first person you ride it). The hands take the weight a beat before the
+    // body lifts, and it carries on over once the shoulders are past the lip.
     const ease = (a, b) => { const t = clamp((k - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
-    p.y = m.from.y + (m.to.y + 0.05 - m.from.y) * ease(0, 0.6);
-    const across = ease(0.22, 1);
+    p.y = m.from.y + (m.to.y + 0.05 - m.from.y) * ease(0.08, 0.62);
+    const across = ease(0.3, 1);
     p.x = m.from.x + (m.to.x - m.from.x) * across;
     p.z = m.from.z + (m.to.z - m.from.z) * across;
     if (k >= 1) {
@@ -956,8 +996,105 @@ export class Player extends Character {
       this.mantle = null;
       this.forward(_fwd);
       this.velocity.copy(_fwd).multiplyScalar(2);
+      this.animator.land(4); // the knees take the weight as you stand
       this.setState('move');
     }
+  }
+
+  // Is there a wall (a collider's side, or a terrain cliff) just ahead along `dir` at height y?
+  wallAhead(dir, y, gap = 0.35) {
+    const px = this.position.x + dir.x * (this.radius + gap);
+    const pz = this.position.z + dir.z * (this.radius + gap);
+    const world = this.game.world;
+    return world.groundHeight(px, pz) > y || world.blocks(_wallAt.set(px, y, pz));
+  }
+
+  // Wall scramble: run a few steps up a wall too tall to clamber, then clamber over the top if it
+  // comes within reach. Once a jump; kicking off a wall (Space mid-scramble) earns one more, on
+  // another wall.
+  tryScramble() {
+    if (this.scrambleUsed || this.stamina < MOVE.scramble.cost || this.moveIntent.lengthSq() < 0.2) return false;
+    _dir.copy(this.moveIntent).setY(0).normalize();
+    if (this.lastWall && _dir.dot(this.lastWall) > 0.3) return false;
+    const y = this.position.y;
+    if (!this.wallAhead(_dir, y + 0.9) || !this.wallAhead(_dir, y + 1.7)) return false;
+    this.scramble = { dir: _dir.clone(), step: 0 };
+    this.scrambleUsed = true;
+    this.stamina -= MOVE.scramble.cost;
+    this.staminaDelay = 0.6;
+    this.facing = Math.atan2(_dir.x, _dir.z);
+    this.velocity.set(0, 0, 0);
+    this.vy = MOVE.scramble.speed;
+    this.grounded = false;
+    this.coyote = 0;
+    this.jumpQueued = 0;
+    this.jumpCut = false;
+    this.flipT = 0;
+    this.bulletJumpT = 0;
+    this.setState('scramble');
+    this.game.audio.scrambleStep();
+    return true;
+  }
+
+  updateScramble(dt) {
+    const S = MOVE.scramble;
+    const c = this.scramble;
+    const p = this.position;
+    const world = this.game.world;
+    // The top within reach: over it.
+    if (this.tryMantle(MOVE.reachAir, 0.25, c.dir)) return;
+    if (this.jumpQueued > 0) { this.wallKick(); return; }
+    const k = Math.min(1, this.stateTime / S.time);
+    const away = this.moveIntent.dot(c.dir) < -0.2;
+    const topped = !this.wallAhead(c.dir, p.y + 0.9, 0.5);
+    if (k >= 1 || away || topped) { this.endScramble(topped); return; }
+    // Kept against the wall (from a jump's distance the gap closes), climbing.
+    const ox = p.x;
+    const oz = p.z;
+    world.move(p, c.dir.x * 3 * dt, c.dir.z * 3 * dt, this.radius, 0, this.height);
+    if (world.groundHeight(p.x, p.z) > p.y + 0.05) { p.x = ox; p.z = oz; }
+    this.vy = lerp(S.speed, S.end, k);
+    const oy = p.y;
+    p.y += this.vy * dt;
+    const ceil = world.headroom(p.x, p.z, oy + this.height - 0.05);
+    if (p.y + this.height > ceil) {
+      p.y = Math.max(oy, ceil - this.height);
+      this.endScramble(false);
+      return;
+    }
+    // A footfall each half stride.
+    const step = Math.floor(this.stateTime * S.stride * 2);
+    if (step !== c.step) {
+      c.step = step;
+      this.game.audio.scrambleStep();
+    }
+  }
+
+  // Off the wall: topped out (a hop forward onto it) or out of steps (dropping back off it).
+  endScramble(topped) {
+    const c = this.scramble;
+    this.scramble = null;
+    const push = topped ? 3 : -1.5;
+    this.velocity.set(c.dir.x * push, 0, c.dir.z * push);
+    if (!topped) this.vy = Math.min(this.vy, 0);
+    this.airPeak = this.position.y;
+    this.setState('move');
+  }
+
+  // Space mid-scramble: a back-flipping kick away from the wall.
+  wallKick() {
+    const c = this.scramble;
+    this.scramble = null;
+    this.jumpQueued = 0;
+    this.lastWall = c.dir;
+    this.scrambleUsed = false;
+    this.vy = MOVE.jump * 0.9;
+    this.velocity.set(-c.dir.x * MOVE.scramble.kick, 0, -c.dir.z * MOVE.scramble.kick);
+    this.airPeak = this.position.y;
+    this.flipT = 0.001;
+    this.jumpCut = false;
+    this.game.audio.doubleJump();
+    this.setState('move');
   }
 
   // Hold-to-slide: momentum is physical — slopes pull you downhill, friction is low on the flat,
@@ -1222,8 +1359,9 @@ export class Player extends Character {
   integrate(dt) {
     const world = this.game.world;
     const p = this.position;
-    if (this.state === 'mantle') {
-      this.updateMantleMotion();
+    if (this.state === 'mantle' || this.state === 'scramble') {
+      if (this.state === 'mantle') this.updateMantleMotion();
+      else this.updateScramble(dt);
       this.root.rotation.y = this.facing;
       return;
     }
@@ -1417,6 +1555,7 @@ export class Player extends Character {
     this.velocity.set(0, 0, 0);
     this.vy = 0;
     this.mantle = null;
+    this.scramble = null;
     this.abilities.clear();
     this.setState('move');
   }
@@ -1495,20 +1634,35 @@ export class Player extends Character {
     else if (st === 'slide') s.mode = 'slide';
     else if (st === 'airdash') s.mode = 'airdash';
     else if (st === 'mantle') { s.mode = 'mantle'; s.t = this.mantle ? this.stateTime / this.mantle.dur : 1; }
+    else if (st === 'scramble') { s.mode = 'scramble'; s.t = this.stateTime * MOVE.scramble.stride; }
     else if (st === 'slam') s.mode = 'slam';
     else s.mode = this.grounded ? 'ground' : 'air';
 
     // ---- weapon: a weapon-centric hold (grip position + direction, chest space) whenever the
-    // body is steady; free arm poses for mantles, slams and death.
+    // body is steady; free arm poses for mantles, scrambles, slams and death.
     const grip = this.weaponModel?.userData.grip2;
     const twoHanded = !!grip && grip.when === 'always';
     // Mid-flip the gun doesn't chase the camera (the arms would wrap round the tumbling body).
     const aiming = this.alive && !!w && (this.isAiming || this.charge > 0) && !(this.flipT > 0 || s.corkscrew > 0);
-    const steady = this.alive && st !== 'mantle' && st !== 'slam' && st !== 'airdash';
+    const steady = this.alive && st !== 'mantle' && st !== 'scramble' && st !== 'slam' && st !== 'airdash';
     let pose = REST[cls];
     let elbow = REST_ELBOW[cls];
     let hold = null;
-    if (st === 'mantle') { pose = MANTLE_POSE; elbow = 0.3; }
+    if (st === 'mantle') {
+      // A beat behind the off hand, so the two don't move as one.
+      keyed(MANTLE_ARM, clamp(s.t - 0.03, 0, 1), _keys);
+      pose = _pose;
+      _pose[0] = _keys[0]; _pose[1] = _keys[1]; _pose[2] = _keys[2];
+      elbow = _keys[3];
+      s.poseRate = 40;
+    } else if (st === 'scramble') {
+      // Hand over hand up the wall, opposite the right foot: reach high, pull down to the chest.
+      const pull = 0.5 - 0.5 * Math.cos(Math.PI * 2 * s.t);
+      pose = _pose;
+      _pose[0] = lerp(-1.55, -0.35, pull); _pose[1] = -0.15; _pose[2] = 0;
+      elbow = lerp(0.3, 1.5, pull);
+      s.poseRate = 40;
+    }
     else if (st === 'slam') { pose = RAISED; elbow = 0.4; }
     else if (!steady) elbow = 1.4;
     else if (cls === 'melee' || (w?.type === 'staff' && !aiming)) {
