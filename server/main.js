@@ -42,6 +42,8 @@ if (ROLE !== 'all' && !DATABASE_URL) throw new Error(`ROLE=${ROLE} needs DATABAS
 
 // Only the client is served: never the server code, the database or anything else in the folder.
 const PUBLIC = ['index.html', 'style.css', 'manifest.webmanifest', 'icon.svg', 'src/', ...(DEV ? ['tools/'] : [])];
+// ...and in production not the dev tools either (they're offline play's: src/main.js loadDev).
+const HIDDEN = DEV ? [] : ['src/dev/'];
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
   '.json': 'application/json', '.png': 'image/png', '.jpg': 'image/jpeg', '.svg': 'image/svg+xml',
@@ -81,7 +83,8 @@ async function serveStatic(req, res, url) {
   if (rel === '') rel = 'index.html';
   const file = path.resolve(ROOT, rel);
   const inside = file.startsWith(ROOT + path.sep);
-  const allowed = inside && PUBLIC.some((p) => (p.endsWith('/') ? rel.startsWith(p) : rel === p));
+  const real = path.relative(ROOT, file).split(path.sep).join('/');
+  const allowed = inside && PUBLIC.some((p) => (p.endsWith('/') ? real.startsWith(p) : real === p)) && !HIDDEN.some((p) => real.toLowerCase().startsWith(p));
   if (!allowed) { res.writeHead(404).end('Not found'); return; }
   let info;
   try { info = await stat(file); } catch { res.writeHead(404).end('Not found'); return; }

@@ -14,7 +14,6 @@ import { WIND } from './render/Wind.js';
 import { qualityOf } from './render/Quality.js';
 import { ViewModel } from './render/ViewModel.js';
 import { marksFor, markerChar, toneOf } from './ui/questMarks.js';
-import { DevTools } from './dev/DevTools.js';
 import { Sfx } from './audio/Sfx.js';
 import { World } from './world/World.js';
 import { NPCS } from './world/mapData.js';
@@ -177,7 +176,8 @@ class Game {
     this.aim = new Aim();
     this.thumbs = new Thumbnails();
     this.hud = new HUD(this.thumbs);
-    this.dev = new DevTools(this);
+    // Dev tools (dev/DevTools.js): loaded only for offline play (loadDev), never online.
+    this.dev = null;
     this.labels = new WorldLabels(document.getElementById('labels'), this.camera);
     this.minimap = new Minimap(document.getElementById('minimap'));
     this.inventoryUI = new InventoryUI(this, document.getElementById('inventory'));
@@ -273,6 +273,8 @@ class Game {
     this.net.probe().then((mode) => {
       if (mode === 'online') this.useOnline();
       else if (this.state === 'title' && this.titleMenu.page === 'main') this.titleMenu.render();
+      // (Online but already playing single-player: still offline, dev tools and all.)
+      if (!this.onlineMode) this.loadDev();
     }).finally(() => this.bootDone());
     this.frame = this.frame.bind(this);
     requestAnimationFrame(this.frame);
@@ -515,6 +517,7 @@ class Game {
     // (Already playing single-player — the realm's answer came late: stay offline, saves and all.)
     if (this.state !== 'title') return;
     this.onlineMode = true;
+    this.dropDev();
     if (this.world.seed !== this.net.status.seed) this.newGame(null, { seed: this.net.status.seed, preview: true });
     this.titleMenu.openOnline();
   }
@@ -522,6 +525,7 @@ class Game {
   // Back to single-player: the local save (or a fresh game) and the offline menu.
   useOffline() {
     this.onlineMode = false;
+    this.loadDev();
     try {
       this.newGame(readSave());
     } catch (err) {
@@ -529,6 +533,22 @@ class Game {
       this.newGame(null);
     }
     this.titleMenu.open('main');
+  }
+
+  // The dev tools are offline play's alone: their code is fetched only once the game knows it's
+  // playing single-player (a production server doesn't serve it at all — server/main.js), and
+  // they're dropped, every cheat off, before anything goes online.
+  loadDev() {
+    if (this.dev || this.devLoading || this.onlineMode || this.net.inWorld) return;
+    this.devLoading = import('./dev/DevTools.js')
+      .then(({ DevTools }) => { if (!this.onlineMode && !this.net.inWorld) this.dev = new DevTools(this); })
+      .catch(() => { /* not served here: no dev tools */ })
+      .finally(() => { this.devLoading = null; });
+  }
+
+  dropDev() {
+    this.dev?.destroy();
+    this.dev = null;
   }
 
   // Shows an appearance choice on the title-screen hero (character list and creator).
@@ -822,9 +842,9 @@ class Game {
   frame() {
     requestAnimationFrame(this.frame);
     try {
-      this.dev.beginFrame();
+      this.dev?.beginFrame();
       this.step();
-      this.dev.update();
+      this.dev?.update();
     } catch (err) {
       this.reportError(err);
     } finally {
@@ -846,7 +866,7 @@ class Game {
     const realDt = Math.min(this.clock.getDelta(), 1 / 20) * (this.timeScale ?? 1);
     // The dev panel ('dev') keeps the world running (unless paused) but takes no player input.
     // Menus don't stop the world: under one the character just gets no input.
-    const running = (this.state === 'playing' || this.state === 'menu' || this.state === 'dead' || this.state === 'dev') && !this.dev.paused;
+    const running = (this.state === 'playing' || this.state === 'menu' || this.state === 'dead' || this.state === 'dev') && !this.dev?.paused;
 
     if (running) {
       this.player.readInput(this.state === 'playing' && !this.moments.active ? this.input : IDLE_INPUT, this.rig);

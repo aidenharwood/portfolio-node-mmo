@@ -44,6 +44,7 @@ const CONTROLS = [
     ['Bullet jump', 'Space while sliding'],
     ['Glide', 'Hold RMB in the air'],
     ['Clamber', 'Walk or jump into a ledge'],
+    ['Wall scramble · kick off', 'Space into a tall wall · Space again on it'],
     ['Camera zoom', 'Mouse wheel'],
     ['First / third person', 'V'],
   ]],
@@ -64,7 +65,7 @@ const CONTROLS = [
     ['Character · talents · inventory · journal', 'P · N · I or Tab · L'],
     ['Map · social · guild', 'M · O · U (online)'],
     ['Chat (online)', 'Enter · / for commands'],
-    ['Dev tools · perf overlay', '` or F1 · F3'],
+    ['Dev tools · perf overlay (offline)', '` or F1 · F3'],
   ]],
   ['Touch', [
     ['Move · sprint', 'Left thumb anywhere on the left (the stick follows it) · hold it right out'],

@@ -1,6 +1,8 @@
-// In-game developer tools.
-//   `  (Backquote) or F1 — dev panel: player cheats, teleports, spawners, loot forge, render
-//                         toggles, time controls, save tools, a JS console and the error log.
+// In-game developer tools (offline only: main.js loads this module when the game plays
+// single-player, and drops it before going online; a production server doesn't serve it).
+//   `  (Backquote) or F1 — dev panel: player cheats, teleports, spawners (bosses and raid fights
+//                         too), loot forge, render toggles, time controls, save tools, a JS
+//                         console and the error log.
 //   F3               — performance overlay (fps, frame time, draw calls, triangles, memory, entities).
 // While the panel is open the game keeps simulating (unless paused) but ignores player input.
 import * as THREE from 'three';
@@ -20,6 +22,7 @@ import { clearSave } from '../core/Save.js';
 import { typing } from '../core/Input.js';
 import { DUNGEONS } from '../world/dungeons.js';
 import { RAIDS, instanceDef } from '../world/raids.js';
+import { BossScript } from '../sim/BossScript.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 
 const _physicsWorldPosition = new THREE.Vector3();
@@ -40,7 +43,7 @@ const SOUNDS = {
   'Bolt (shock)': (a, g) => a.cast(fake(g, 'wand', 'shock'), false), 'Orb (fire, charged)': (a, g) => a.cast(fake(g, 'staff', 'fire'), true), 'Chain': (a, g) => a.cast(fake(g, 'orb'), false),
   'Footsteps': (a, g) => ['grass', 'gravel', 'hard', 'snow', 'mud', 'water'].forEach((s, i) => setTimeout(() => a.footstep(s, 0.7), i * 280)),
   'Jump': (a) => a.jump(), 'Double jump': (a) => a.doubleJump(), 'Land (high)': (a) => a.land(9), 'Bullet jump': (a) => a.bulletJump(), 'Air dash': (a) => a.airDash(),
-  'Dash': (a) => a.dash(), 'Mantle': (a) => a.mantle(), 'Slam dive': (a) => a.slamDive(), 'Hurt': (a) => a.playerHurt(0.2), 'Kill': (a, g) => a.kill(ahead(g, 5), false),
+  'Dash': (a) => a.dash(), 'Mantle': (a) => a.mantle(), 'Scramble step': (a) => a.scrambleStep(), 'Slam dive': (a) => a.slamDive(), 'Hurt': (a) => a.playerHurt(0.2), 'Kill': (a, g) => a.kill(ahead(g, 5), false),
   'Arrow whizz': (a, g) => a.whiz(ahead(g, 1)), 'Heavy stomp step': (a, g) => a.stomp(ahead(g, 4), 1.2),
   'Razorhound howl': (a, g) => a.howl(ahead(g, 12)), 'Behemoth call': (a, g) => a.howl(ahead(g, 12), true), 'Thunderhorn roar': (a, g) => a.roar(ahead(g, 6), 2.4),
   'Crawler screech': (a, g) => a.screech(ahead(g, 5)), 'Psi cast': (a, g) => a.enemyCast(ahead(g, 6), 'psi', 0.8), 'Sentry charge': (a, g) => a.enemyCast(ahead(g, 6), 'energy', 0.5),
@@ -54,6 +57,27 @@ function fake(g, type, element = 'none') {
 function ahead(g, d) {
   const p = g.player;
   return p.position.clone().add(new THREE.Vector3(Math.sin(p.facing) * d, 1, Math.cos(p.facing) * d));
+}
+
+// Bosses to spawn (dev Spawn tab): each faction's boss, each dungeon's boss and mini-boss by name
+// at the dungeon's level, and each raid encounter — its bosses together, their scripts running.
+// `units`: [{ type, variant?, name?, script?, at? }] as world/raids.js writes an encounter's.
+const BOSS_ARENA = 40;  // metres across: a raid fight's ground round the reticle (a raid arena's size)
+function bossList() {
+  const list = [];
+  for (const [k, t] of Object.entries(ENEMY_TYPES)) {
+    if (t.boss && !t.raid) list.push({ group: 'Faction bosses', label: t.name, units: [{ type: k }], level: null });
+  }
+  for (const d of Object.values(DUNGEONS)) {
+    if (d.boss) list.push({ group: 'Dungeon bosses', label: `${d.boss.name ?? ENEMY_TYPES[d.boss.type].name} — ${d.name}`, units: [{ type: d.boss.type, name: d.boss.name }], level: d.level + 1 });
+  }
+  for (const d of Object.values(DUNGEONS)) {
+    if (d.mini) list.push({ group: 'Dungeon mini-bosses', label: `${d.mini.name} — ${d.name}`, units: [{ type: d.mini.type, name: d.mini.name, mini: true }], level: d.level });
+  }
+  for (const r of Object.values(RAIDS)) {
+    for (const enc of r.encounters ?? []) list.push({ group: `Raid — ${r.name}`, label: `${enc.name} (scripted)`, units: enc.units, level: r.level, raid: enc });
+  }
+  return list;
 }
 
 export class DevTools {
@@ -88,7 +112,8 @@ export class DevTools {
     this.badge.onclick = () => { this.tab = 'Errors'; this.show(); };
     document.body.appendChild(this.badge);
 
-    window.addEventListener('keydown', (e) => {
+    this.fights = [];
+    this.onKey = (e) => {
       if (typing(e) && e.code === 'Backquote') return;
       if (e.code === 'Backquote' || e.code === 'F1') {
         e.preventDefault();
@@ -102,11 +127,45 @@ export class DevTools {
         e.stopImmediatePropagation();
         this.hide();
       }
-    });
-    window.addEventListener('error', (e) => game.reportError(e.error ?? e.message));
-    window.addEventListener('unhandledrejection', (e) => game.reportError(e.reason));
+    };
+    this.onWindowError = (e) => game.reportError(e.error ?? e.message);
+    this.onRejection = (e) => game.reportError(e.reason);
+    window.addEventListener('keydown', this.onKey);
+    window.addEventListener('error', this.onWindowError);
+    window.addEventListener('unhandledrejection', this.onRejection);
     // Keystrokes typed into the panel shouldn't drive the player.
     this.el.addEventListener('keydown', (e) => { if (e.code !== 'Backquote' && e.code !== 'F1') e.stopPropagation(); });
+    if (game.errors?.length) this.onError();
+  }
+
+  // Gone (the game is going online): every cheat off, the panel, overlays and helpers removed.
+  destroy() {
+    const g = this.game;
+    if (this.isOpen) this.hide();
+    for (const k of Object.keys(this.flags)) this.flags[k] = false;
+    g.player.god = false;
+    g.player.noclip = false;
+    this.paused = false;
+    g.timeScale = 1;
+    this.dungeons = false;
+    for (const f of this.fights) this.endFight(f);
+    this.fights = [];
+    for (const name of Object.keys(this.helpers)) this.toggleHelper(name, false);
+    if (this.renderFlags) {
+      const pr = g.prefs;
+      for (const [id, on] of [['outlines', pr.outlines], ['hatching', pr.hatching], ['fog', true], ['shadows', pr.shadows], ['speedfx', true]]) {
+        if (this.renderFlags[id] !== on) this.setRender(id, on);
+      }
+      g.outlinesOverride = undefined;
+      g.applyPrefs();
+    }
+    window.removeEventListener('keydown', this.onKey);
+    window.removeEventListener('error', this.onWindowError);
+    window.removeEventListener('unhandledrejection', this.onRejection);
+    this.el.remove();
+    this.perf.remove();
+    this.badge.remove();
+    this.renderer.info.autoReset = true;
   }
 
   // ------------------------------------------------------------ open / close
@@ -143,6 +202,8 @@ export class DevTools {
   }
 
   update() {
+    // (Never online: main.js drops the tools first, and this makes sure.)
+    if (this.game.onlineMode || this.game.net.inWorld) { this.game.dropDev(); return; }
     const now = performance.now();
     const dtMs = now - this.last;
     this.last = now;
@@ -252,6 +313,105 @@ export class DevTools {
       if (this.flags.freezeAI) e.state = 'idle';
     }
     g.hud.toast(`Spawned ${count} × ${name} (Lv ${level})`);
+  }
+
+  // Boss `i` of bossList() at the reticle, at `level` (blank: its own level). A raid encounter
+  // comes with its scripts (sim/BossScript.js) on a dev arena round the reticle: pulled when one
+  // of its bosses is, health set for whoever's on that ground, reset if everyone leaves or dies.
+  spawnBoss(i, level) {
+    const g = this.game;
+    const sim = g.enemyLayer.sim;
+    const B = bossList()[i];
+    if (!B || !sim) return;
+    level = level || B.level || g.stats.level;
+    const at = g.aim.point.clone();
+    if (!B.raid) {
+      const u = B.units[0];
+      const e = g.spawnEnemy(u.type, at.setY(g.world.groundHeight(at.x, at.z)), {
+        level, name: u.name ?? null, ...(u.mini ? { elite: true, champion: true } : {}),
+      });
+      if (this.flags.freezeAI && e) e.state = 'idle';
+      g.hud.toast(`Spawned ${u.name ?? ENEMY_TYPES[u.type].name} (Lv ${level})`);
+      return;
+    }
+    const S = BOSS_ARENA;
+    const A = { x0: at.x - S / 2, z0: at.z - S / 2, x1: at.x + S / 2, z1: at.z + S / 2, cx: at.x, cz: at.z, bx: at.x, bz: at.z + S / 2 - 4, y: at.y };
+    const fight = { def: B.raid, state: 'idle', scripts: [], empty: 0, arena: A };
+    const inArena = (p) => p.position.x >= A.x0 && p.position.x <= A.x1 && p.position.z >= A.z0 && p.position.z <= A.z1;
+    fight.ctx = {
+      sim, arena: A,
+      players: () => sim.players.filter((p) => p.alive && !p.decoy && inArena(p)),
+      bosses: () => fight.scripts.map((s) => s.boss).filter((b) => b.alive),
+      emit: (ev) => sim.emit(ev),
+      say: (text, big = false) => (big ? g.hud.banner(text) : g.hud.toast(text)),
+    };
+    for (const u of B.units) {
+      const [ax, az] = u.at ?? [0.5, 0.7];
+      const e = sim.spawnEnemy(u.type, new THREE.Vector3(A.x0 + ax * S, 0, A.z0 + az * S), { level, variant: u.variant ?? null });
+      const s = new BossScript(fight.ctx, e, u.script);
+      s.scale(1);
+      fight.scripts.push(s);
+    }
+    this.fights.push(fight);
+    g.hud.toast(`Spawned ${B.raid.name} (Lv ${level}) — its fight covers ${S} m round the reticle`);
+  }
+
+  // The dev raid fights, each sim tick (entities/EnemyLayer.js), as sim/RaidRun.js runs a raid's.
+  tickBosses(dt) {
+    for (const f of [...this.fights]) {
+      const scripts = f.scripts;
+      if (scripts.every((s) => !s.boss.alive || s.boss.gone)) {
+        this.endFight(f);
+        this.fights.splice(this.fights.indexOf(f), 1);
+        if (scripts.some((s) => !s.boss.gone)) this.game.hud.banner(`${f.def.name} has fallen`);
+        continue;
+      }
+      const here = f.ctx.players();
+      if (f.state === 'idle') {
+        if (!scripts.some((s) => s.boss.alive && s.boss.engaged)) continue;
+        f.state = 'fight';
+        f.empty = 0;
+        const foe = here[0] ?? null;
+        for (const s of scripts) {
+          // (One killed before the pull stays down: the rest fight on without it.)
+          s.fallen = !s.boss.alive;
+          if (s.fallen) continue;
+          s.begin(Math.max(1, here.length));
+          if (!s.boss.engaged && foe) s.boss.aggro(true, foe);
+        }
+        this.game.hud.banner(f.def.name, 'Dev fight');
+        continue;
+      }
+      for (const s of scripts) s.update(dt);
+      for (const s of scripts) {
+        if (s.boss.alive || s.fallen) continue;
+        s.fallen = true;
+        s.end();
+        const left = scripts.filter((x) => x.boss.alive);
+        if (left.length && f.def.rally) {
+          for (const x of left) x.rally(f.def.rally.by ?? 1.3);
+          f.ctx.say(f.def.rally.say ?? `${s.boss.displayName} falls — the others fight harder!`, true);
+        }
+      }
+      // Everyone down or off the ground a while: a wipe — the bosses go back to full and wait.
+      f.empty = here.length ? 0 : f.empty + dt;
+      if (f.empty > 3) {
+        f.state = 'idle';
+        for (const s of scripts) {
+          s.end();
+          const b = s.boss;
+          if (!b.alive) continue;
+          b.threat.clear();
+          b.hp = b.maxHp;
+          if (b.engaged) b.leash();
+        }
+        this.game.hud.toast(`${f.def.name} resets`);
+      }
+    }
+  }
+
+  endFight(f) {
+    for (const s of f.scripts) s.end();
   }
 
   // A warband of `key`'s race at the reticle (offline: the local sim's roaming packs).
@@ -514,13 +674,21 @@ export class DevTools {
         <div class="grid2">${chk('freezeAI', 'Freeze enemy AI', f.freezeAI)}<label class="chk"><input type="checkbox" data-act="pause" ${this.paused ? 'checked' : ''}> Pause simulation</label></div>
         <div class="row"><span>Time scale</span><input type="range" id="dev-time" min="0.05" max="2" step="0.05" value="${g.timeScale ?? 1}"><b id="dev-time-v">${(g.timeScale ?? 1).toFixed(2)}×</b></div>`;
     } else if (this.tab === 'Spawn') {
+      const groups = [];
+      bossList().forEach((b, i) => {
+        const last = groups[groups.length - 1];
+        if (last?.[0] === b.group) last[1].push([b, i]);
+        else groups.push([b.group, [[b, i]]]);
+      });
       body = `
         <div class="row"><select id="dev-enemy">${Object.entries(ENEMY_TYPES).map(([k, v]) => `<optgroup label="${esc(v.name)}"><option value="${k}">${esc(v.name)}</option>${Object.entries(v.variants ?? {}).map(([vk, vv]) => `<option value="${k}:${vk}">${esc(vv.name)} (Lv ${vv.minLevel}+)</option>`).join('')}</optgroup>`).join('')}</select>
           Lv <input type="number" id="dev-elvl" value="${g.stats.level}" min="1" max="60"> × <input type="number" id="dev-count" value="1" min="1" max="20">
           <select id="dev-elite"><option value="">Normal</option><option value="elite">Elite</option><option value="champion">Champion</option></select>
           <select id="dev-affix"><option value="">Random affixes</option>${AFFIX_IDS.map((id) => `<option value="${id}">${AFFIXES[id].name}</option>`).join('')}<option value="horde">A whole warband</option></select></div>
         <div class="row"><button data-act="spawn">Spawn at reticle</button></div>
-        <p class="note">Enemies spawn where the reticle points (${g.aim.distance.toFixed(0)} m).</p>`;
+        <div class="row"><select id="dev-boss">${groups.map(([name, list]) => `<optgroup label="${esc(name)}">${list.map(([b, i]) => `<option value="${i}" ${i === this.bossPick ? 'selected' : ''}>${esc(b.label)}${b.level ? ` (Lv ${b.level})` : ''}</option>`).join('')}</optgroup>`).join('')}</select>
+          Lv <input type="number" id="dev-blvl" placeholder="own" min="1" max="60" value="${this.bossLevel || ''}"><button data-act="spawn-boss">Spawn boss at reticle</button></div>
+        <p class="note">Enemies spawn where the reticle points (${g.aim.distance.toFixed(0)} m). A boss's level left blank is its dungeon's or raid's (a faction boss's: yours). A raid encounter runs its script — phases, marks, adds, shields, enrage — on the ${BOSS_ARENA} m round where it was spawned${this.fights.length ? ` (${this.fights.length} running)` : ''}.</p>`;
     } else if (this.tab === 'Loot') {
       const kinds = [['weapon', 'Random weapon'], ...Object.entries(WEAPON_TYPES).map(([k, v]) => [k, `${v.label} (${v.cls})`]), ...ARMOR_SLOT_IDS.map((s) => [`armor:${s}`, `Armour: ${s}`])];
       body = `
@@ -646,6 +814,11 @@ export class DevTools {
       case 'clear-loot': for (const d of [...g.drops]) g.removeDrop(d); break;
       case 'pause': this.paused = el.checked; return;
       case 'mute': g.setPref('muted', el.checked); return;
+      case 'spawn-boss':
+        this.bossPick = +$('#dev-boss').value;
+        this.bossLevel = +$('#dev-blvl').value;
+        this.spawnBoss(this.bossPick, this.bossLevel);
+        break;
       case 'spawn': this.spawn($('#dev-enemy').value, +$('#dev-elvl').value, +$('#dev-count').value, $('#dev-elite').value, $('#dev-affix').value); break;
       case 'forge-drop': this.forge($('#dev-kind').value, $('#dev-rarity').value, +$('#dev-ilvl').value, 'drop', $('#dev-set').value); break;
       case 'forge-pack': this.forge($('#dev-kind').value, $('#dev-rarity').value, +$('#dev-ilvl').value, 'pack', $('#dev-set').value); break;

@@ -146,7 +146,7 @@ export class AbilityKit {
     }
     const left = this.cooldownLeft(id);
     if (left > 0) { g.hud.toast(`${ABILITIES[id].name}: ${Math.ceil(left)} s`); this.flash = 0.3; return false; }
-    if (!p.alive || p.state === 'mantle' || p.state === 'leap' || p.state === 'grapple' || g.state !== 'playing') return false;
+    if (!p.alive || p.state === 'mantle' || p.state === 'scramble' || p.state === 'leap' || p.state === 'grapple' || g.state !== 'playing') return false;
     const at = this[id]();
     if (at === false) return false;
     this.cooldowns[id] = cooldownOf(id, this.upgrades);

@@ -12,15 +12,15 @@
 ## 1. How to use this file
 
 1. Read sections 1–5 before any work. For a task, read only that task plus the GAMEPLAY_PLAN sections it names.
-2. **Pick the task.** Follow the sequence in section 5. A task is eligible only if every ID in `depends` is `done` and every `DEC-` in `needs` is `decided` (or its gate is met).
-3. Set the task's `- status:` line to `doing` before starting. Work on one task at a time.
+2. **Pick the task.** Find your lane in section 5 and take its next task. A new session takes a task from the "Free to claim" row, or asks the user to start a new lane. A task is eligible only if every ID in `depends` is `done`, every `DEC-` in `needs` is `decided` (or its gate is met), and no other lane lists it under "Doing" or "Then".
+3. **Claim it** before starting: set the task's `- status:` line to `doing`, add an `- owner:` line under it naming your session (its id from the session list), and put the task in your lane's row in section 5. Work on one task at a time.
 4. As acceptance items become true, change `- [ ]` to `- [x]`. Items tagged `(user)` can only be ticked by the user.
 5. When the work is finished:
    - set `done` if everything is ticked and no `(user)` item remains;
    - set `review` if any `(user)` item remains (a server restart, a playtest, a CI run to confirm);
    - set `blocked` with a one-line reason if you cannot continue.
 6. **Append** to the task's `- notes:` (dated, never rewrite history) and add a line to the progress log (section 11).
-7. Update "Next up" (section 10).
+7. Update your lane's row in section 5.
 8. If this file disagrees with the code, trust the code. Fix the file and log the correction.
 9. New ideas go in the backlog (section 12). Don't do them unasked.
 
@@ -31,7 +31,7 @@ Grep-friendly conventions: tasks are `### ID Title` headings, and status is the 
 | Status | Meaning |
 | --- | --- |
 | `todo` | Not started. |
-| `doing` | In progress (at most one at a time). |
+| `doing` | In progress, with an `- owner:` line naming the session (at most one per lane). |
 | `review` | Built and checked; waiting on the user (restart, playtest, confirmation). |
 | `blocked` | Can't continue; the reason is in notes. |
 | `done` | Finished and confirmed. |
@@ -53,6 +53,15 @@ These come from how the project already works (see GAMEPLAY_PLAN §2 and the REA
 - **Decisions.** If a task `needs` an `open` decision, ask the user one concise question and record the answer in section 4. If the user says "use your defaults", record each suggested value as the answer.
 - **Keep it playable.** Every task leaves the game running and `npm test` green.
 - **No scope creep.** Don't refactor unrelated code or restyle the HUD.
+
+### Several sessions at once
+
+More than one Claude session can work through this plan at the same time, one lane each (section 5).
+
+- **This file is shared.** Change it with small exact replacements (the Edit tool), never by rewriting the whole file. Re-read a block just before changing it, because another session may have changed it since.
+- **Touch only what's yours:** the task blocks you claimed, your lane's row in section 5, the decisions your lane is settling, and new lines at the end of the progress log. If something else needs changing, tell the user or the session that owns it.
+- **Code lanes don't share a checkout.** If another lane is already changing code in this checkout, work in your own git worktree and branch. Even then, keep your updates to this plan in the main checkout's copy (`docs/WORK_PLAN.md` at the repo's main folder), where the other lanes read it, and leave your worktree's copy alone so your branch merges without conflicts here. A lane that only edits docs or settles design can share the checkout.
+- **Commit only your own files** in a shared checkout (`git commit -- <paths>`), never `git add -A`.
 
 ### Standard definition of done
 
@@ -84,11 +93,37 @@ Applies to every task unless it says otherwise:
 
 Status is `open` or `decided`. Claude records the answer, never invents it. "Suggested" is a proposal only.
 
-### DEC-1 Story bible
+DEC-1 (the story bible) is split by act, so each act's part can be settled when that act is designed.
+
+### DEC-1a Story bible: Act II
+- status: decided
+- owner: `local_6ee40182` (Story lane)
+- needs from user: the facts Act II rests on: what opening the Sunken Vault did, why the Array calls the Hive, and what Ysolde knew and why she kept quiet.
+- blocks: DEC-9
+- answer (2026-10-14, user): full text in [the Act II story spec](superpowers/specs/2026-10-14-act-ii-story-design.md) §2.
+  - The first Wardens re-tuned a Maker station at Farcall, the Array, to broadcast a lullaby that keeps the Hive (Pilgrim cargo) dormant. They sealed its controls in the Sunken Vault.
+  - The seal was a dead-man's switch. Opening it in Act I flipped the Array from hush to call, so the player caused Act II.
+  - The Wardens were founded to guard the seals, but that purpose has been forgotten. Maren and Ashe don't know it. Ysolde is the last keeper of the history, and she let the player go anyway.
+  - The Pilgrim's voice knew about the seals and held back. Act II seeds doubt about it, not villainy.
+  - Destroying the Array sends a death-pulse up the network, and the Synths wake (the Act III seed).
+
+### DEC-1b Story bible: Act III
+- status: decided
+- needs from user: what the Synths' "true orders" are.
+- suggested: one page, written before Act III's tasks begin.
+- blocks: DEC-10, B-2, B-3, B-4
+- answer (2026-10-15, user): full text in [the Act III story spec](superpowers/specs/2026-10-15-act-iii-story-design.md) §2.
+  - The Synths are the Maker network's immune system. Their order is to keep the network sealed against any mind that isn't a Maker. They are the Makers' guardians, not the colony's machines.
+  - The death-pulse woke them and showed them the intrusion: the Pilgrim's mind, waking through the player. They hunt the player as its *carrier*, and war-walkers march on settlements whose waystones the player has woken.
+  - The Pilgrim pleads its case. That adds doubt without settling it.
+  - The Fallen Titan's core shows an earlier intrusion, so the Pilgrim isn't the first. Who it was is left for DEC-1c.
+  - The Colossus foundry forges a cage for the carrier's voice. The act's choice is to let it finish (`pilgrim_caged`) or destroy it (`pilgrim_shielded`).
+
+### DEC-1c Story bible: Act IV
 - status: open
-- needs from user: what the Synths' "true orders" are, what the Makers are, what each of the three endings means (shut it down, take it, wake the Makers).
-- suggested: one page per act, written before that act's tasks begin.
-- blocks: B-2, B-3, B-4, C-1, C-2, C-6
+- needs from user: what the Makers are, and what each of the three endings means (shut it down, take it, wake the Makers).
+- suggested: one page, written before Act IV's tasks begin.
+- blocks: DEC-11, C-1, C-2, C-6
 - answer:
 
 ### DEC-2 Where the ending choice happens
@@ -104,10 +139,10 @@ Status is `open` or `decided`. Claude records the answer, never invents it. "Sug
 - answer:
 
 ### DEC-4 Raid gate rule once the story opens it
-- status: open
+- status: decided
 - suggested: a story flag on any raid member opens the gate for the group (so someone further behind isn't locked out), and the level-14 floor is dropped.
 - blocks: A-3
-- answer:
+- answer (2026-10-15, user): yes, as suggested. A story flag on any raid member opens the gate for the whole group, and the level-14 floor is dropped.
 
 ### DEC-5 Nightmare numbers
 - status: open
@@ -137,14 +172,15 @@ Status is `open` or `decided`. Claude records the answer, never invents it. "Sug
 - answer:
 
 ### DEC-9 Act II beat sheet approved
-- status: open
+- status: decided
+- owner: `local_6ee40182` (Story lane)
 - blocks: A-5, A-6, A-7
-- answer:
+- answer (2026-10-14, user): the beat sheet under "Act II — The Brood" in section 7, from [the Act II story spec](superpowers/specs/2026-10-14-act-ii-story-design.md) §3–4. It has one choice, at quest 5: `told_ashe` or `kept_wardens_secret`. The Array's fate at quest 9 is fixed.
 
 ### DEC-10 Act III beat sheet approved
-- status: open
+- status: decided
 - blocks: B-1, B-2, B-3, B-4, B-5
-- answer:
+- answer (2026-10-15, user): the beat sheet under "Act III — Iron Heart" in section 7, from [the Act III story spec](superpowers/specs/2026-10-15-act-iii-story-design.md) §3–5. There are 12 quests (c1–c12). The one choice is at quest 12: cage or shield the Pilgrim. The new giver is Foundrywright Isa Brannock (`city3:engineer`). Build order is tech first: P-1 and P-2 come before any Act III quest code.
 
 ### DEC-11 Act IV beat sheet approved
 - status: open
@@ -153,9 +189,24 @@ Status is `open` or `decided`. Claude records the answer, never invents it. "Sug
 
 ---
 
-## 5. Sequence
+## 5. Lanes and sequence
 
-Follow this order. `depends` is the safety net if the order is changed.
+### Lanes
+
+Several sessions can work at once, one lane each. Each lane's owner updates only its own row. A new session takes a task from "Free to claim", or asks the user to start a new lane.
+
+| Lane | Owner | Doing | Then |
+| --- | --- | --- | --- |
+| Engine | `local_3d40571d` (stabilise session) | — (S-1 to S-4 in `review`, on branches `s-1-collider-parity`, `s-2-deploy-verification`, `s-3-persistence`, `s-4-doc-fixes`) | G-6 |
+| Story | `local_6ee40182` (Act II story session) | A-5, A-6, A-7 in `review` (Act II merged to local `main` as 9e151bc, not pushed; waiting on restart, playtest and the user's read of the lines) | A-8, A-9; DEC-1b and DEC-10 (Act III) when the user wants |
+| Act II tech | `local_65f79a66` (A-1 session, own worktree) | — (A-1 `done`) | — |
+| Free to claim | — | — | A-2; A-4 once S-1 is `done` |
+
+Story design runs ahead of the code that needs it. It isn't blocked by the Engine lane, and an act's bible and beat sheet should be settled before that act's quest tasks (A-5, B-1, C-1) come up below. None of the free tasks touch the files S-1 is changing (`world/World.js`, `server/world.js`, `tools/physicscheck.mjs`).
+
+### Overall order
+
+Follow this order within and across lanes. `depends` is the safety net if the order is changed.
 
 1. **Stabilise:** S-1, S-2, S-3, S-4.
 2. **Telemetry early:** G-6 (so later tuning uses real data).
@@ -173,7 +224,8 @@ Follow this order. `depends` is the safety net if the order is changed.
 ## 6. Tasks — stabilise
 
 ### S-1 Server and client collider parity
-- status: todo
+- status: review
+- owner: `local_3d40571d` (Engine lane)
 - size: S–M
 - depends: —
 - why: the server uses wider circle colliders for trees, rocks and cacti than the client's mesh hulls, so enemies get pushed off scenery further than players see. The test suite went red once because the headless world has no meshes.
@@ -182,40 +234,57 @@ Follow this order. `depends` is the safety net if the order is changed.
   - Build the same hulls on the server from the scenery's geometry, without drawing anything (GAMEPLAY_PLAN §11 suggests this).
   - Add a client-versus-server parity assertion so this class of break fails in `npm test`.
 - acceptance:
-  - [ ] For a fixed seed, server and client collider footprints for trees, rocks and cacti match within a stated tolerance.
-  - [ ] `tools/physicscheck.mjs` asserts parity and fails if the headless world drifts.
-  - [ ] `tools/hordecheck.mjs` and `tools/loadsim.mjs` still pass; the new ms per tick at 150 stand-in players is recorded in notes (the baseline was 8.6 ms).
-  - [ ] Standard DoD.
+  - [x] For a fixed seed, server and client collider footprints for trees, rocks and cacti match within a stated tolerance.
+  - [x] `tools/physicscheck.mjs` asserts parity and fails if the headless world drifts.
+  - [x] `tools/hordecheck.mjs` and `tools/loadsim.mjs` still pass; the new ms per tick at 150 stand-in players is recorded in notes (the baseline was 8.6 ms).
+  - [x] Standard DoD.
   - [ ] (user) server restarted and a few minutes spent fighting a camp in a forest.
 - notes:
+  - 2026-10-14: cause was `HeadlessWorld.buildScenerySets()` setting `this.sets = {}`, so `scatterChunk`'s `push()` returned no mesh data and the server fell back to the wide circles. Now `World.js` exports `sceneryGeometries()` (the geometry from `sceneryTypes()`, nothing drawn), the server builds its sets from it once per process (shared by every headless world), and both hosts add chunk colliders through one method, `World.addSceneryColliders(ch)`, so the server also gets the client's `surface` per collider (it was defaulting to `stone`).
+  - 2026-10-14: parity check (last section of `physicscheck.mjs`): seed 7, one chunk each of forest, snow, marsh, ash, mountain, desert, badlands, jungle, crystal and fungal; 205 colliders, all with triangles, compared to a world built with the client's own scenery sets, same count, surface and vertices within 1 cm (measured 0.0000 m). A body walked into a cactus from 8 directions stops 0.79 m from its middle; the old circle held it 2.11 m off.
+  - 2026-10-14: the section runs last because building the client's sets creates the toon gradient texture early, and three.js draws `Math.random` for every UUID. The ragdoll section seeds `Math.random`, so one fewer draw shifted every kick and a juggernaut/queen ended 0.11–0.12 off against the 0.10 limit. See backlog.
+  - 2026-10-14: loadsim 150 (this machine, two runs each): before 10.83 / 11.51 ms a tick (sim 8.32 / 8.92), after 11.60 / 11.39 ms (sim 9.05 / 8.89). Within run-to-run noise; under the 12.5 ms budget. `npm test` green.
+  - 2026-10-14: changes the sim's build hash (`src/world/World.js`): the server on 8080 needs a restart (not done by Claude).
 
 ### S-2 CI trigger and deploy verification
-- status: todo
+- status: review
+- owner: `local_3d40571d` (Engine lane)
 - size: S
 - depends: —
 - why: DEPLOY.md says the first build comes from pushing to `master`, but the repo's branch is `main`. MULTIPLAYER.md also says the Docker image wasn't built in the dev environment.
 - start: `.github/workflows/deploy.yaml`, `deploy/k8s/templates/cel-blade/`, `Dockerfile`, `docker-compose.yml`
 - acceptance:
-  - [ ] The workflow's trigger matches the real default branch, or DEPLOY.md is corrected. **(check)** the actual trigger first.
-  - [ ] The test job runs `npm test` and the cluster smoke test.
+  - [x] The workflow's trigger matches the real default branch, or DEPLOY.md is corrected. **(check)** the actual trigger first.
+  - [x] The test job runs `npm test` and the cluster smoke test.
   - [ ] (user) a CI run has built and pushed the image and the realm runs from it.
 - notes:
+  - 2026-10-14: checked, the premise was stale: `deploy.yaml` already triggers on `main` (push), pull requests (tests only) and by hand, and its test job runs the syntax check, `npm test` and `npm run test:cluster` against Postgres. No workflow change.
+  - 2026-10-14: evidence for the (user) item: run 38616473602 (push to `main`, 2026-10-14 18:35 UTC) passed all three jobs (tests, build and push to GHCR, Helm chart update), and `https://celblade.aidenharwood.uk/` answers 200. Not checked: which image tag the pods are running (needs cluster access).
+  - 2026-10-14: real break found: `docker-compose.yml` mounts `./deploy/Caddyfile`, deleted with the rest of `deploy/` in 54d35a9. Restored. `deploy/k8s/` is gone for good: the manifests now live only in `portfolio-helm-website/templates/cel-blade/` (with a new `secret.portfolio-cel-blade.yaml` that generates the secret). DEPLOY.md and MULTIPLAYER.md:127 corrected, including `master` → `main` (S-4's `master` item is covered).
+  - 2026-10-14: commit 5919f71 on branch `s-2-deploy-verification` (worktree `../portfolio-node-mmo-s2`), not pushed or merged.
+  - 2026-10-14: risk outside this repo, not changed: the chart's secret uses Helm `lookup`, which returns nothing when rendered without cluster access (as Argo CD renders). If so, each sync generates a new Postgres password and internal key. Worth checking in `portfolio-helm-website`.
 
 ### S-3 Persistence audit
-- status: todo
+- status: review
+- owner: `local_3d40571d` (Engine lane)
 - size: S
 - depends: —
 - why: characters save every 30 s and a crashed layer loses up to that much. A crash inside that window must not duplicate an item or refresh a lockout.
 - start: `server/characters.js`, `server/store.js`, `server/trade.js`, `server/social.js` (mail), `settings.lockouts`
 - scope: **(check)** whether these are written through immediately: trade completion, mail attachment claims, chest claims (dungeon, raid, event), the weekly and daily lockouts, and legendary drops.
 - acceptance:
-  - [ ] A check (extend the smoke test, or add `tools/persistcheck.mjs`) kills a layer between an op and the next save and asserts there is no duplication and no lockout reset.
-  - [ ] Anything not written through is fixed, or the gap is documented in MULTIPLAYER.md's known limits.
-  - [ ] Standard DoD.
+  - [x] A check (extend the smoke test, or add `tools/persistcheck.mjs`) kills a layer between an op and the next save and asserts there is no duplication and no lockout reset.
+  - [x] Anything not written through is fixed, or the gap is documented in MULTIPLAYER.md's known limits.
+  - [x] Standard DoD.
 - notes:
+  - 2026-10-14: audit. Trade saved its two sides separately (one landing alone duplicated items); mail send inserted the letter before saving the sender (duplicated); mail claim marked the letter before saving the claimer (lost the item). Chests (dungeon, raid, event), lockouts and legendary drops are only saved on the 30 s timer but sit in the one character row with their loot, so they're lost or kept together (documented in MULTIPLAYER.md's known limits). Also found, not on the list: saves weren't checked against presence, so a layer that stalled past 45 s and lost a character could later write its old copy over the new layer's.
+  - 2026-10-14: fix (user approved the design): `Store.saveCharacters` / `postMail` / `claimMailInto`, each one transaction; `Realm.saveTogether` queues them behind the characters' earlier saves and, if one fails, lets the players go unsaved (`dropUnsaved`) so they reload as stored. `Store.saveCharacter` now takes the layer and writes only while that layer holds the character's presence (true in standalone too: presence is claimed there as well).
+  - 2026-10-14: the check is cut-point injection rather than killing a process (user approved): `tools/persistcheck.mjs`, in `npm test`, crashes the store at each write of a trade, a letter sent and a letter claimed and reads back with a fresh store; plus a chest with its lockout, and a stale layer's save refused. It fails on the old code (trade, send, claim and stale layer) and passes now. `npm test` green; a smoke run with the server's log dumped showed no player let go unsaved.
+  - 2026-10-14: not run here: `npm run test:cluster` (needs Postgres; CI runs it). Commit 2454e9b on branch `s-3-persistence` (worktree `../portfolio-node-mmo-s3`), not pushed. Server code only (no build-hash change), but the server on 8080 needs a restart to pick it up.
 
 ### S-4 Doc fixes
-- status: todo
+- status: review
+- owner: `local_3d40571d` (Engine lane)
 - size: S
 - depends: S-2
 - scope:
@@ -226,8 +295,12 @@ Follow this order. `depends` is the safety net if the order is changed.
   - Apply DEC-8 once decided (remove the "(default)" tags).
   - Link this plan from the README's dev section.
 - acceptance:
-  - [ ] Each item above is done or logged as intentionally skipped.
+  - [x] Each item above is done or logged as intentionally skipped.
 - notes:
+  - 2026-10-14: done: MULTIPLAYER.md:114 says talents; DEPLOY.md's `npm test` comment lists every check then the smoke test; GAMEPLAY_PLAN §1's status refreshed (the old red-suite note gone, Act II and the stabilise pass under way, "Next" points at the lanes table) and the original power-curve table and "Other gaps" moved unchanged to Appendix A; README's dev tools link ROADMAP.md and WORK_PLAN.md.
+  - 2026-10-14: covered elsewhere: DEPLOY.md's `master` was fixed in S-2.
+  - 2026-10-14: skipped: DEC-8 is still `open` (the user hasn't answered), so §12 is unchanged. When it's answered, note that the five `(default)` tags in GAMEPLAY_PLAN are on other choices (event votes, overrun not saved, raid scaling, weekly lockouts), not DEC-8's four items, which sit in §12 marked `[yes]`.
+  - 2026-10-14: started while S-2 (its `depends`) is in `review`, not `done`: docs only, and S-2's doc edits are on their own branch. Commit 4f8e298 on `s-4-doc-fixes` (worktree `../portfolio-node-mmo-s4`, cut from `main` at 68a666c), not pushed. Merges cleanly with each of S-1, S-2 and S-3; S-1 and S-3 conflict with each other on README's dev-tools line (both add to it), so the second of those to merge needs that line combined.
 
 ### S-5 README split
 - status: parked
@@ -246,38 +319,46 @@ Follow this order. `depends` is the safety net if the order is changed.
 
 ### Act II — The Brood (levels 8–16)
 
-**Beat sheet (proposed — gate DEC-9).** Objective types are ones the quest system already has.
+**Beat sheet (approved — DEC-9, 2026-10-14).** The detail (givers, levels, moments, flags, Act I payoffs) is in [the Act II story spec](superpowers/specs/2026-10-14-act-ii-story-design.md). Objective types are ones the quest system already has, plus A-2's event hook and A-6's dungeon clear.
 
-1. **The Road to Farcall** (goto, talk): Ashe's handoff from New Meridian; Farcall's hub opens.
-2. **Gone Quiet** (goto, use, kill): three hamlets stopped answering; spore pods are rooted outside.
-3. **Hold the Line** (event hook, defend): a quest-started Hive Surge on a named settlement; taking part counts.
-4. **Ysolde's Confession** (talk, choose): the Hive came on the Pilgrim. The choice sets flags that Acts III and IV read.
-5. **The Farcall Array** (goto, use, defend): a new story place that is calling the Hive. Power it down in stages while holding.
-6. **Voice in the Chitin** (kill a named foe, collect): a captured Psion; the drop gives the Pits' coordinates.
+1. **The Road to Farcall** (talk, goto): Ashe sends the player to Farcall, which has gone silent. Farcall's hub opens, and its Warden captain (name open) becomes the local giver.
+2. **Gone Quiet** (goto, use, kill): three hamlets stopped answering, with spore pods rooted outside. The masts "started singing wrong".
+3. **Hold the Line** (event hook): a quest-started Hive Surge on a named settlement. Taking part counts.
+4. **The Farcall Array** (goto, use, defend): follow the swarms and power down the first console while holding. Warden sigils sit on Maker machinery (moment `array`).
+5. **Ysolde's Confession** (talk, choose): the Wardens' forgotten founding. The choice is `told_ashe` or `kept_wardens_secret`, which Acts III and IV read.
+6. **Voice in the Chitin** (kill a named foe, collect): a Hive Psion directing the swarms. Its chitin gives the Pits' coordinates.
 7. **Into the Brood Pits** (dungeon): the existing dungeon, to the Brood Matron.
-8. **What the Matron Knew** (talk, use): the nest's location.
-9. **Silence the Array** (defend, use): destroy the transmitter under waves.
-10. **Marshal the Wardens** (talk): the war table, which introduces raid groups.
+8. **What the Matron Knew** (talk, use): the Array's call feeds the Brood Mother's nest.
+9. **Silence the Array** (defend, use): destroy the transmitter under waves. Moment `deathpulse`: the Synths stir. Its fate is fixed; there is no choice.
+10. **Marshal the Wardens** (talk): the war table, which introduces raid groups. It varies with the quest-5 choice.
 11. **The Gate Opens** (goto): a flag opens the Brood Mother raid gate.
-12. **Report to Ashe** (talk, choose, moment): the act closes and plants Act III (the Synths stirring).
+12. **Report to Ashe** (talk, moment): the act closes (`act2end`) and plants Act III.
 
 The story must be completable without the raid: it ends at the gate opening, and Act III must not require a raid clear.
 
 ### A-1 Story flag registry and check
-- status: todo
+- status: done
+- owner: `local_65f79a66` (Act II tech lane)
 - size: S–M
 - depends: —
 - why: Prologue and Act I flags drive dialogue today, and Acts II–IV add many more.
 - start: `rpg/storyline.js`, `rpg/Quests.js`, `world/story.js` (`storyRef`), `tools/questcheck.mjs`
 - scope: one registry (a data file or a doc section) listing each flag with who sets it and who reads it, and a `questcheck` step that fails on a flag read but never set, and warns on one set but never read.
 - acceptance:
-  - [ ] Every existing flag is registered.
-  - [ ] `questcheck` fails on an unset-but-read flag (prove it with a deliberate break, then revert).
-  - [ ] Standard DoD.
+  - [x] Every existing flag is registered.
+  - [x] `questcheck` fails on an unset-but-read flag (prove it with a deliberate break, then revert).
+  - [x] Standard DoD.
+  - [x] (user) merge branch `claude/hopeful-lumiere-c6c3dc` (commit 05070dd), then set `done`.
 - notes:
+  - 2026-10-14: the registry is `tools/storyflags.mjs` (`STORY_FLAGS`), in `tools/` so it doesn't change the build hash: no restart needed. It has 14 flags (2 Prologue, 12 Act I), each with `means`, `setBy` and `readBy`, plus the `used:<object id>` family, which is documented but not checked.
+  - 2026-10-14: questcheck's new "Story flags" section finds setters and readers the way the game uses them: `setFlags`, `needFlags`, flag-keyed lines (`offer`, `turnIn`, `progress`, a stage's `text`/`say`, objective `text`), a stage's `done.flags` and `choices`, side chains (as `makeSide` copies them), `when.flag` on barks and story folk, `needs.flag` on dungeons and raids, and achievements' `flag(c, '…')`. It fails on a flag read but never set, an unregistered flag, or an entry whose `setBy`/`readBy` differs (the message prints the array to paste). It warns on a flag set but never read: 8 today (`heard_pilgrim`, `pilgrim_awake`, `ironjaw_named`, `met_ashe`, `key_half`, `has_pass`, `trusted_ysolde`, `kept_secret`). Stand-ins prove each kind of reader is found.
+  - 2026-10-14: deliberate break: a7's offer key `krell_captured` → `krell_capture` failed 3 checks (exit 1), while the rest of questcheck passed because the line silently fell back to its default. Reverted; `npm test` green.
+  - 2026-10-14: for A-3, A-5 onward: register each new flag in the same commit as the quest, gate or achievement that sets or reads it. Labels are listed in the file's header (a raid gate is `raid <id>`, Krell's planned condition `folk <place>:krell`). A new kind of reader (say flag-keyed choice replies, or `when.notFlag`) needs `flagUses` extended too.
+  - 2026-10-14: README's dev-tools line was edited (questcheck). S-1 and S-3 also edit that line, so expect a small merge conflict there.
 
 ### A-2 Quest-to-event hook
-- status: todo
+- status: review
+- owner: A-2 session (started by `local_6ee40182`; worktree `pensive-greider-708eeb`, branch `a2-quest-event-hook`)
 - size: M
 - depends: —
 - why: Hive Surges are random public events, and a story quest can't wait on randomness (GAMEPLAY_PLAN §10 wants Act II's surges to be public events, not one-off quest waves).
@@ -288,25 +369,38 @@ The story must be completable without the raid: it ends at the gate opening, and
   - Decide how story events interact with the director's spacing and cooldown rules. **(check)** and record in notes.
   - Works online (the server watches) and offline.
 - acceptance:
-  - [ ] `tools/eventcheck.mjs` covers a quest-started surge: started, joined by two stand-in players, won, step advanced for both.
-  - [ ] A lost or abandoned story event leaves the step re-attemptable.
-  - [ ] The protocol is documented if `wev` changes.
-  - [ ] Standard DoD.
+  - [x] `tools/eventcheck.mjs` covers a quest-started surge: started, joined by two stand-in players, won, step advanced for both.
+  - [x] A lost or abandoned story event leaves the step re-attemptable.
+  - [x] The protocol is documented if `wev` changes.
+  - [x] Standard DoD.
   - [ ] (user) server restarted.
 - notes:
+  - 2026-10-15: on branch `a2-quest-event-hook` (commit 057b474). **Objective shape (the Story lane uses this for b3):** `{ type: 'event', event: 'surge', at: 'quiet1', count: 1, text: 'Hold {quiet1}' }`. `event` is an `EVENT_TYPES` key other than `retake` (surge and siege need a hamlet, settlement or town; anomaly needs a landmark or ruin) and defaults to `surge`. `at` is any `storyRef` that resolves to a place with a `poi` id, so `quiet1` works.
+  - How it runs: every second the quest watch (`rpg/questWatch.js eventCalled`; server/simhost.js tick, and main.js offline) checks whether someone on such a step is within the place's radius + `EVENT_CALL` (80 m). If so, it calls `WorldEvents.startStory(site, type)`. The event is a normal public event with `story` and `locked` set: its tier is Normal, votes are refused, `wev` carries `lk: 1` and no `v`, and EventUI shows no vote. When it's won, `eventObjectives(quests, ev)` sends the server op `evwon { id, i }` to each participant who reached the 60-point chest threshold (`ev.result.people`), so the step moves on separately for each player. Any won event of the same kind at the same place counts, including a random one.
+  - **Spacing (the check):** a story start ignores the director's quiet time, its 600 m gap, the cap on running events and the site's rest. It never runs two events at one site: if one is already running there, that one is the event, whoever started it. An overrun place refuses until it's free. A story event does count as a running event for the random director, and it sets the site's rest and players' quiet time like any other, so random events don't pile on right after it.
+  - **Lost or abandoned:** a lost event (pylons down, or nobody within 200 m for 45 s) pays nothing and moves no step on. The place is overrun and a Retake starts as usual. Once it's retaken, or the garrison moves on after 15 min, the step calls its surge again. A participant who won with under 60 points still has the step, and gets a new surge once the finished one is cleared away (15 s).
+  - Headless: questcheck's `playStage` handles `event` steps. It goes to the place, calls `eventCalled` and gives `evwon` for each `[id, i]` from `eventObjectives(quests, { type, site: { id } })`. With this branch merged, b3 needs nothing more there.
+  - Restart: the sim, rpg and server code changed (build hash), so the server on 8080 needs a restart once this is merged.
+  - 2026-10-15: merged to main as PR #8, after merging the latest main into the branch (`npm test` green there). It stays in `review` until the user ticks "server restarted".
 
 ### A-3 Story-flag raid gate
-- status: todo
+- status: done
+- owner: A-2 session (started by `local_6ee40182`; worktree `pensive-greider-708eeb`, branch `a-3-raid-gate`)
 - size: S–M
 - depends: A-1
 - needs: DEC-4
 - start: `world/raids.js`, `server/raidgroups.js`, the city gate yard
 - scope: replace the level-14 gate with the rule from DEC-4; when refused, say why.
 - acceptance:
-  - [ ] `tools/raidcheck.mjs` covers: flag set opens, flag unset refuses with a reason, and the group rule from DEC-4.
-  - [ ] Existing characters past the old gate level aren't locked out of a raid they could enter before. **(check)** and decide a migration rule with the user if they are.
-  - [ ] Standard DoD.
+  - [x] `tools/raidcheck.mjs` covers: flag set opens, flag unset refuses with a reason, and the group rule from DEC-4.
+  - [x] Existing characters past the old gate level aren't locked out of a raid they could enter before. **(check)** and decide a migration rule with the user if they are. Checked: they are locked out. The user decided (2026-10-15) that the gate "should remain closed until players can actually progress to the raid via story", so there's no migration and no stand-in.
+  - [x] Standard DoD.
 - notes:
+  - 2026-10-15: on branch `a-3-raid-gate` (commit c2edfc8), cut from A-1's branch `claude/hopeful-lumiere-c6c3dc`, so merge A-1 first. The Brood Mother has `needs: { flag: 'broodgate_open' }` (the flag name is from the Act II spec §6) and no `minLevel`. `Dungeons.enter` opens a raid when the character or any of `who.mates` has the flag. `who.mates` is the story flags of the rest of their raid group, else their party, among those online (server/simhost.js `matesFlags`). Offline it's just the player's own flag.
+  - A refusal says the gate is sealed and that the story opens it, or someone in your raid group or party who has it (`sealedText`). The gate's list shows "· sealed". From inside a group it still lets you try, because the server decides.
+  - **For A-7:** nothing sets `broodgate_open` yet. It's in A-1's registry as `pending`, so questcheck warns instead of failing. When quest 11 "The Gate Opens" sets it (`setFlags: ['broodgate_open']`), questcheck fails until `pending` is removed and `setBy` filled in (`tools/storyflags.mjs`). Until then the raid is closed to everyone except dev mode.
+  - Restart: the sim, world and server code changed, so the server on 8080 needs a restart once this is merged. After that restart, characters who were in the raid before can't get back in until A-7 ships (the user's call, above).
+  - 2026-10-15: merged to main as PR #7, after merging the latest main into the branch (`npm test` green there).
 
 ### A-4 Farcall Array story place and Farcall dressing
 - status: todo
@@ -322,20 +416,26 @@ The story must be completable without the raid: it ends at the gate opening, and
 - notes:
 
 ### A-5 Quests II-1 to II-4
-- status: todo
+- status: review
+- owner: `local_6ee40182` (Story lane), branch `act-ii-story` in worktree `../portfolio-node-mmo-act2`
 - size: M
 - depends: A-1
 - needs: DEC-9
 - scope: quests 1–4 of the beat sheet with their stages, lines, barks, moments, flags (registered in A-1) and map markers. Quest 3 uses A-2.
 - acceptance:
-  - [ ] `tools/questcheck.mjs` plays quests 1–4 through the character's rules as the server runs them, including the choice and its flags, and nothing is taken or handed in out of order.
+  - [x] `tools/questcheck.mjs` plays quests 1–4 through the character's rules as the server runs them, including the choice and its flags, and nothing is taken or handed in out of order.
   - [ ] Moments are skippable and don't block server ops.
   - [ ] Journal, tracker, compass, minimap and map show the new steps.
   - [ ] Standard DoD.
 - notes:
+  - 2026-10-14: plan `docs/superpowers/plans/2026-10-14-act-ii-story.md` (Tasks 1–9). Done on `act-ii-story`, all `npm test` green: Act II in ACTS; Captain Vey Okonta (`city2:captain`, user's choice, a new story folk in Farcall's heart — no rng draw, so the districts don't move); story places `sporefield` (3 pods, Krell if `krell_freed`) and `psionnest` (a hive camp led by a named Psion, tag `psion`; `campUnits` gives a non-stronghold camp with `boss.type` that boss); `broodpits:node`; refs `quiet1`–`quiet3`; a `dungeon` objective (`{ type: 'dungeon', d }`, moved on by `dclear`); `giverName` names story folk; quests b1–b2.
+  - 2026-10-14: quest 3 (b3) waits on A-2, quest 4 (b4) on A-4. Flags aren't registered yet: A-1 isn't done (the plan lists them). The new lines are proposals for the user to read.
+  - 2026-10-15: merged `origin/main` (A-1, A-2, A-3) and A-4's branch `claude/inspiring-swartz-350358` (fe7ef51) into `act-ii-story`; ORDER is `…broodpits, array, sporefield, psionnest`, so A-4's Array keeps its tested spot. All Act II quests b1–b12 built (see A-6, A-7); every flag registered in `tools/storyflags.mjs`.
+  - 2026-10-15: whole-branch review (fresh reviewer): fixed b2 being unfinishable on most seeds (the Spore Field is now a Hive nest camp, with a real `sporepod` model and prompt), the dungeon step's waypoint, and the journal's "Act II comes later" line. Each fix has a check that failed first. Unchecked here: moments and the compass/map in a real client (not played in a browser).
 
 ### A-6 Quests II-5 to II-9
-- status: todo
+- status: review
+- owner: `local_6ee40182` (Story lane), branch `act-ii-story`
 - size: M
 - depends: A-2, A-4, A-5
 - needs: DEC-9
@@ -343,22 +443,25 @@ The story must be completable without the raid: it ends at the gate opening, and
   - **(check)** whether the `clear` objective supports dungeons. If not, add a dungeon-clear objective driven by the server's `dclear` message.
   - Quest drops are rolled into the kill's reward.
 - acceptance:
-  - [ ] `questcheck` plays quests 5–9, including a dungeon clear.
-  - [ ] `questWatch` handles the Array's `reach` and `defended` states on the server.
+  - [x] `questcheck` plays quests 5–9, including a dungeon clear.
+  - [x] `questWatch` handles the Array's `reach` and `defended` states on the server.
   - [ ] Standard DoD.
 - notes:
+  - 2026-10-15: b5–b9 on `act-ii-story`. `clear` doesn't cover dungeons, so there's a new `dungeon` objective (`{ type: 'dungeon', d, at }`, moved on by `dclear`; `at` is its way in for the waypoint). b6's Psion is the boss of the `psionnest` camp (tag `psion`); b8 reads `broodpits:node`. b4 uses `array:console` (A-4's `array:console2` is unused). DoD gaps: no captures or F3 check, not played in a client.
 
 ### A-7 Quests II-10 to II-12 and the act close
-- status: todo
+- status: review
+- owner: `local_6ee40182` (Story lane), branch `act-ii-story`
 - size: S–M
 - depends: A-3, A-6
 - needs: DEC-9
 - scope: the war-table raid-group introduction, the gate opening, Ashe's report, the Act III seed moment, and titles.
 - acceptance:
-  - [ ] `questcheck` plays Act II start to finish, including the gate flag and both Act II choices.
-  - [ ] Act II doesn't require a raid clear.
+  - [x] `questcheck` plays Act II start to finish, including the gate flag and the Act II choice (one choice since DEC-9). It plays all 8 combinations of the a6, a8 and b5 choices.
+  - [x] Act II doesn't require a raid clear.
   - [ ] Standard DoD.
 - notes:
+  - 2026-10-15: b10–b12 on `act-ii-story`. b11 sets `broodgate_open` (its `pending` mark removed) at the new ref `city1:raidgate`. b12 plays `act2end`. Not done: titles, which are left to A-8 with the achievements. The journal now says "Act III comes in a later update" once Act II is done.
 
 ### A-8 Act II achievements, titles and codex lore
 - status: todo
@@ -464,14 +567,22 @@ The story must be completable without the raid: it ends at the gate opening, and
 
 ### Act III — Iron Heart (levels 16–24)
 
-**Beat sheet (proposed — gate DEC-10).**
+**Beat sheet (approved — DEC-10, 2026-10-15).** The detail (givers, objectives, flags, Act II payoffs, people) is in [the Act III story spec](superpowers/specs/2026-10-15-act-iii-story-design.md). The user chose tech first: P-1 and P-2 are built before B-1.
 
-1. Ironreach, and the first war-walker sightings.
-2. A Synth emissary and a choice (parley or destroy); the Synths' true orders come out (DEC-1).
-3. The Fallen Titan: retrieve a control core. The "kneeling titan mech" landmark is the likely base **(check)**.
-4. The Foundry Below: a Synth-theme dungeon.
-5. The Colossus foundry: the existing Colossus as boss.
-6. The act closes by reading Act II's flags back to the player.
+1. **The Highland Road** (talk, goto): Ashe sends you to Ironreach (`act3`), where you meet Foundrywright Isa Brannock.
+2. **Iron Footsteps** (goto, kill): Synth scouts scan the waystones you've woken.
+3. **The Walker** (event hook): a quest-called war-walker (P-2).
+4. **Words from the Stone** (goto, use, talk): the emissary's order is to surrender the carrier (`emissary`, `synth_orders_known`).
+5. **What the Voice Wants** (talk): Ysolde and the Pilgrim's plea. Reads `told_ashe` / `kept_wardens_secret`.
+6. **The Fallen Titan** (goto, kill, use): pull the control core (`titan_core_taken`).
+7. **Reading the Core** (use, defend): the core shows an earlier intrusion.
+8. **The Foundry Below** (dungeon clear): B-3 (`foundry_below_cleared`).
+9. **Plans for a Cage** (collect, talk): the cage (`cage_found`).
+10. **Iron Muster** (talk, `city3:warden`): Tal. Reads `told_ashe` / `kept_wardens_secret`.
+11. **The Colossus Foundry** (kill named foe): B-4 (`colossus_fallen`).
+12. **Iron Heart** (choose, moment): cage (`pilgrim_caged`) or shield (`pilgrim_shielded`) the Pilgrim. `act3end`, then `act3_done`.
+
+Task split: B-1 is beats 1–5, B-2 beats 6–7, B-3 beat 8, B-4 beat 11, and B-5 beats 9, 10 and 12 plus the act's close.
 
 ### B-1 Ironreach hub and opening quests
 - status: todo
@@ -488,7 +599,7 @@ The story must be completable without the raid: it ends at the gate opening, and
 - status: todo
 - size: M
 - depends: B-1
-- needs: DEC-1, DEC-10
+- needs: DEC-1b, DEC-10
 - scope: beat 3 and the place.
 - acceptance:
   - [ ] Placement, `poicheck` and `buildcheck` as in A-4.
@@ -500,7 +611,7 @@ The story must be completable without the raid: it ends at the gate opening, and
 - status: todo
 - size: L
 - depends: B-1, G-2
-- needs: DEC-1, DEC-10
+- needs: DEC-1b, DEC-10
 - start: `world/dungeons.js`, `world/DungeonGen.js`, `sim/Dungeons.js`, `tools/dungeoncheck.mjs`
 - scope: a Synth-theme dungeon with a structural twist from G-2 (not the standard route), open-world copy and private runs at all tiers, a reward chest, achievements.
 - acceptance:
@@ -545,7 +656,7 @@ The story must be completable without the raid: it ends at the gate opening, and
 - status: todo
 - size: M
 - depends: B-5
-- needs: DEC-1, DEC-11
+- needs: DEC-1c, DEC-11
 - scope: Anchorage's story dressing, the Ring story place and its quests.
 - acceptance:
   - [ ] Placement, `poicheck` and `buildcheck` as in A-4; `questcheck` plays them.
@@ -556,7 +667,7 @@ The story must be completable without the raid: it ends at the gate opening, and
 - status: todo
 - size: L
 - depends: C-1, G-2
-- needs: DEC-1, DEC-11
+- needs: DEC-1c, DEC-11
 - scope: a Maker-theme dungeon with a structural twist, all tiers, a reward chest and achievements.
 - acceptance:
   - [ ] `dungeoncheck` as in B-3.
@@ -836,9 +947,7 @@ Don't start these unless a trigger fires. Trigger: a layer's p95 tick time creep
 
 ## 10. Next up
 
-**Next up:** S-1
-
-(Claude: update this line after each task, and note any task that was skipped or reordered.)
+Moved to the lanes table in section 5: each lane's "Doing" and "Then" columns say what's next. Note any task that was skipped or reordered in the progress log.
 
 ---
 
@@ -847,11 +956,28 @@ Don't start these unless a trigger fires. Trigger: a layer's p95 tick time creep
 Append-only. Newest last. Format: `YYYY-MM-DD — ID — what changed — checks run — what the user needs to do`.
 
 - 2026-10-14 — (plan) — created from ROADMAP.md; no work started — none — decide DEC-1 to DEC-11 as tasks reach them.
+- 2026-10-14 — (plan) — set up for several sessions at once: lanes table in §5 (replaces §10's single "Next up"), `- owner:` lines, shared-file rules in §2, DEC-1 split into DEC-1a–1c. S-1 (Engine lane) and Act II's story (Story lane) were already under way in their own sessions — none (docs only) — nothing.
+- 2026-10-14 — S-1 — server's headless world builds the scenery geometry and gives trees, rocks and cacti the client's mesh triangles (and surfaces); parity section added to `physicscheck.mjs`; GAMEPLAY_PLAN's known issue and README updated — `npm test` green, loadsim 150 within noise (11.4–11.6 ms vs 10.8–11.5 ms) — restart the server on 8080 and fight a camp in a forest, then set S-1 `done`.
+- 2026-10-14 — S-1 — committed as 290c9f8 on branch `s-1-collider-parity` (worktree `../portfolio-node-mmo-s1`, cut from `main` at e4aa665), moved out of the shared checkout — `physicscheck` re-run in the worktree — merge or PR the branch.
+- 2026-10-14 — S-2 — CI already right (trigger `main`, `npm test` and cluster test); restored `deploy/Caddyfile` for Compose; DEPLOY.md and MULTIPLAYER.md now point at `portfolio-helm-website` for the manifests and secret, `master` → `main`; commit 5919f71 on `s-2-deploy-verification` — stale-reference grep and Compose mount check; CI run 38616473602 green — confirm the pods run the latest image, check the chart's `lookup` secret under Argo CD, merge or PR the branch.
+- 2026-10-14 — DEC-1a, DEC-9 — Act II's story bible and beat sheet decided with the user and written up in `docs/superpowers/specs/2026-10-14-act-ii-story-design.md`; the §7 beat sheet replaced. A-7's "both Act II choices" should read "the Act II choice" (one choice), left for whoever claims A-7. The spec also asks A-4 to drop "Farcall" from `world/Gen.js:118`'s random array names — none (docs only) — nothing.
+- 2026-10-14 — A-5 (partial) — Captain Vey Okonta, the Spore Field, the Psion's nest, the `dungeon` objective and quests b1–b2, on branch `act-ii-story` (worktree `../portfolio-node-mmo-act2`, commits 89b1d82..906916e) — `npm test` green — read the new Act II lines in `src/rpg/storyline.js`; a server restart is needed once this is merged (sim/world code changed); A-2 and A-4 unblock the rest.
+- 2026-10-14 — S-3 — trade, mail send and mail claim each written in one transaction (they could duplicate or lose items if a layer died between writes); saves refused once another layer holds the character; chests, lockouts and legendaries confirmed safe and documented; new `tools/persistcheck.mjs` in `npm test`; commit 2454e9b on `s-3-persistence` — `npm test` green; cluster test not run here (no Postgres) — let CI's cluster test pass on the branch, restart the server on 8080 once merged.
+- 2026-10-14 — S-4 — MULTIPLAYER.md talents, DEPLOY.md test line, GAMEPLAY_PLAN §1 status refreshed and its original power-curve table moved to Appendix A, README links ROADMAP and WORK_PLAN; DEC-8 skipped (still open); commit 4f8e298 on `s-4-doc-fixes` — stale-wording grep, link and moved-text checks, merge-tree against S-1 to S-3 — answer DEC-8; merge the four S branches (S-1 and S-3 need README's dev-tools line combined).
+- 2026-10-14 — A-1 — story flag registry `tools/storyflags.mjs` (14 Prologue and Act I flags, plus the `used:` family) and a "Story flags" section in questcheck: read but never set fails, set but never read warns (8 today), unregistered or out-of-date entries fail; README updated; commit 05070dd on `claude/hopeful-lumiere-c6c3dc` — `npm test` green; a deliberate typo in a7's offer key failed questcheck, then reverted — merge the branch (README's dev-tools line will need combining with S-1/S-3); no restart needed.
+- 2026-10-15 — S-1 to S-4 — merged by the user (PRs #2–#5; local `main` pushed first so each PR held only its own commit); CI passed on the S-1, S-3 (cluster test included) and S-4 PRs, but every run on `main` after the merges was cancelled, so no image has been built from it yet. Merging S-3 after S-1 dropped README's `persistcheck.mjs` description; restored as 43df6f0 on branch `s-3-readme-line` — README only — open and merge that PR (it also triggers a fresh `main` build), restart the server, and do S-1's forest playtest. (2026-10-15: pushed straight to `main` at the user's word instead, a fast-forward; `main` CI run 38707412524 started on it.)
+- 2026-10-15 — A-2 — quest-to-event hook: an `event` objective calls a public event at a place (`WorldEvents.startStory`, tier locked at Normal, `wev lk`), and winning it moves the step on per participant (server op `evwon`); spacing rules and the objective shape for b3 are in A-2's notes; commit 057b474 on `a2-quest-event-hook` — `npm test` green (eventcheck plays a quest surge with two stand-ins in the sim and on the server, plus the lost/retake path) — restart the server on 8080 once merged.
+- 2026-10-15 — A-3 — the story opens the Brood Mother's raid gate (`broodgate_open`; one in the raid group or party with it takes the rest in; no level floor; a refusal says why); no migration, by the user's call; the flag is registered `pending` for A-7's quest 11; commit c2edfc8 on `a-3-raid-gate` (cut from A-1's branch) — `npm test` green — merge A-1 then A-3, and restart the server on 8080; the raid is closed to all until A-7 lands.
+- 2026-10-15 — A-1 — merged by the user (PR #6, 02a8f61 on main); set `done` — questcheck green on merged main — nothing.
+- 2026-10-15 — A-2, A-3 — merged to main (PR #8, PR #7); A-3 `done`, A-2 stays `review` until the server is restarted — `npm test` green on each branch after merging the latest main — restart the server on 8080; the Brood Mother raid is now sealed to everyone until A-7's quest 11 sets `broodgate_open`.
 
+- 2026-10-15 — A-5, A-6, A-7 — all of Act II (b1–b12, moments, barks, flags) on branch `act-ii-story` (worktree `../portfolio-node-mmo-act2`, head 476fa0a), merged with A-1–A-3 and A-4's branch. The fresh-reviewer pass fixed b2's Spore Field, the dungeon waypoint and the journal line — `npm test` green; questcheck plays all 8 choice combinations — read the Act II lines, decide how to merge (one PR, or A-4's own PR first), restart the server after merging, and play from b1.
+- 2026-10-15 — A-5, A-6, A-7 (and A-4) — `act-ii-story` merged into local `main` as 9e151bc, which also brings A-4's Farcall Array (fe7ef51); branch and worktree removed — `npm test` green on the merged commit, run in a clean checkout — push `main`, restart the server, read the Act II lines, play from b1. A-4's own task block still shows `todo`, because its session couldn't write here.
+- 2026-10-15 — DEC-1b, DEC-10 — the Act III story bible and beat sheet decided with the user (the Synths' quarantine, quests c1–c12, the cage-or-shield choice, Foundrywright Isa Brannock). Spec committed as 82373cc. The user chose tech first, so P-1 and P-2 are planned next — no code changed — none.
 ---
 
 ## 12. Backlog and open questions
 
 Add ideas and blockers here. Don't act on them without the user's say-so.
 
--
+- (S-1, 2026-10-14) The ragdoll section of `physicscheck.mjs` seeds `Math.random` globally, and three.js draws from it for every new UUID, so its kicks depend on how many geometries, materials and textures were made before (the toon gradient is lazily created). With other kicks, `scav:juggernaut` and `hive:queen` end 0.11–0.12 of their size off a joint against the 0.10 limit. Worth a dedicated PRNG for the kicks (Ragdoll.js uses `Math.random` at ~line 844) and a look at whether those two rigs are genuinely marginal.
