@@ -33,13 +33,15 @@ export const STORY_FLAGS = {
   beacons_lit: { means: 'The signal beacons round New Meridian are lit.', setBy: ['a4 setFlags'], readBy: ['achievement story_beacons'] },
   has_pass: { means: 'The player took the Rustjaw gate-pass from the outpost.', setBy: ['a5 setFlags'], readBy: [] },
   ironjaw_fell: { means: 'Ironjaw is dead.', setBy: ['a6 setFlags'], readBy: ['achievement story_ironjaw'] },
-  krell_captured: { means: 'Krell was sent to New Meridian in chains (the choice at a6).', setBy: ['a6 stage 3 choices'], readBy: ['a6 turnIn', 'a7 offer', 'achievement story_krell'] },
-  krell_freed: { means: 'Krell was let go (the choice at a6).', setBy: ['a6 stage 3 choices'], readBy: ['achievement story_krell'] },
+  krell_captured: { means: 'Krell was sent to New Meridian in chains (the choice at a6).', setBy: ['a6 stage 3 choices'], readBy: ['a6 turnIn', 'a7 offer', 'achievement story_krell', 'b1 offer'] },
+  krell_freed: { means: 'Krell was let go (the choice at a6).', setBy: ['a6 stage 3 choices'], readBy: ['achievement story_krell', 'bark sporefield:krell', 'folk sporefield:krell'] },
   vault_open: { means: 'The player opened the Sunken Vault, so it can be gone into.', setBy: ['a7 setFlags'], readBy: ['dungeon vault'] },
   trusted_ysolde: { means: 'The player told Ysolde the voice warned them at the vault (the choice at a8).', setBy: ['a8 stage 1 choices'], readBy: [] },
   kept_secret: { means: 'The player kept the voice to themselves (the choice at a8).', setBy: ['a8 stage 1 choices'], readBy: [] },
   act1_done: { means: 'Act I is over.', setBy: ['a8 setFlags'], readBy: ['achievement story_act1'] },
   // ---------------------------------------------------------------- Act II: The Brood
+  act2_started: { means: 'The player reached Farcall and its captain of the watch (b1).', setBy: ['b1 setFlags'], readBy: [] },
+  hamlets_cleared: { means: 'The hamlets gone quiet were found and the spore pods burned (b2).', setBy: ['b2 setFlags'], readBy: [] },
   broodgate_open: {
     means: 'The Wardens opened the Brood Mother\'s raid gate to the player (DEC-4: one in a raid group or party who has it takes the rest in).',
     setBy: [], readBy: ['raid broodmother'], pending: 'A-7: quest 11 "The Gate Opens" sets it',
