@@ -51,6 +51,24 @@ const RACE_BY_BIOME = {
   fungal: { hive: 0.5, fauna: 0.35, scav: 0.15 },
 };
 
+// The act lands: rings out from the hub, one per act of the story, their borders bent by noise
+// and taken whole region by whole region. `to` is the (warped) distance each runs out to; its
+// levels follow from level ≈ 1 + distance / 130.
+export const ACTS = [
+  { act: 1, to: 1000, levels: [1, 8], name: 'Scav country' },
+  { act: 2, to: 2000, levels: [8, 16], name: 'Hive country' },
+  { act: 3, to: 3000, levels: [16, 24], name: 'Synth country' },
+  { act: 4, to: Infinity, levels: [24, 30], name: 'The Maker lands' },
+];
+const ACT_WARP = 150;
+// Which factions each act's lands may hold, and how much more (or less) than their biome says.
+export const RACE_BY_ACT = {
+  1: { scav: 1, fauna: 1 },
+  2: { hive: 2.5, scav: 1, fauna: 1 },
+  3: { synth: 3, hive: 1, scav: 0.6, fauna: 0.8 },
+  4: { synth: 1, hive: 1, scav: 1, fauna: 1 },
+};
+
 // Region names: biome-flavoured adjective + landform.
 const NAME = {
   meadow: [['Bright', 'Golden', 'Willow', 'Summer', 'Clover', 'Amber', 'Glimmer'], ['Vale', 'Downs', 'Fields', 'Meadow', 'Lea', 'Reach']],
@@ -206,6 +224,7 @@ export class WorldGen {
     this.nG = makeNoise2D(s ^ 0xc5d6);
     this.nK = makeNoise2D(s ^ 0xd6e7);
     this.nU = makeNoise2D(s ^ 0xe7f8);
+    this.nA = makeNoise2D(s ^ 0xac75);
     this.regions = new Map();
     this.order = [];
     this._cx = NaN;
@@ -380,6 +399,40 @@ export class WorldGen {
     const jx = ((h & 0xffff) / 0xffff - 0.5) * 0.6;
     const jz = ((h >>> 16) / 0xffff - 0.5) * 0.6;
     return [(rx + jx) * REGION, (rz + jz) * REGION];
+  }
+
+  // Which act's lands a region is in (ACTS): by its site's distance from the hub, bent by noise.
+  // The hub and the ring round it are Act I, and each story city's region is its own act's.
+  actOf(rx, rz) {
+    const key = `${rx},${rz}`;
+    const memo = (this._acts ??= new Map());
+    let act = memo.get(key);
+    if (act) return act;
+    const city = this.cities().find((c) => c.rx === rx && c.rz === rz);
+    if (city) act = city.act;
+    else if (Math.max(Math.abs(rx), Math.abs(rz)) <= 1) act = 1;
+    else {
+      const [sx, sz] = this.site(rx, rz);
+      const d = Math.hypot(sx, sz) + ACT_WARP * this.nA(sx / 1600, sz / 1600);
+      act = ACTS.find((a) => d < a.to).act;
+    }
+    memo.set(key, act);
+    return act;
+  }
+
+  // The act of the region owning (x, z), without building it.
+  actAt(x, z) {
+    const [cx, cz] = this.cellOf(x, z);
+    let best = null;
+    let bd = Infinity;
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dz = -1; dz <= 1; dz++) {
+        const [sx, sz] = this.site(cx + dx, cz + dz);
+        const d = (x - sx) * (x - sx) + (z - sz) * (z - sz);
+        if (d < bd) { bd = d; best = [cx + dx, cz + dz]; }
+      }
+    }
+    return this.actOf(best[0], best[1]);
   }
 
   // Region (Voronoi cell) owning a point.
@@ -650,14 +703,23 @@ export class WorldGen {
     const dist = Math.hypot(sx, sz);
     const biome = hub ? 'meadow' : this.biomeAt(sx, sz);
     const ring = Math.max(Math.abs(rx), Math.abs(rz));
-    let race = weighted(rng, RACE_BY_BIOME[biome]);
-    if (ring <= 1 && (race === 'hive' || race === 'synth')) race = rng() < 0.6 ? 'scav' : 'fauna';
+    // The act decides which factions may hold the region, its biome which of them likely does. The
+    // draws the region's stream made for this before the act lands are still made (and thrown
+    // away), so everything after keeps its place; the faction and the camps draw from a stream
+    // of their own.
+    const was = weighted(rng, RACE_BY_BIOME[biome]);
+    if (ring <= 1 && (was === 'hive' || was === 'synth')) rng();
+    const campRng = mulberry32(hash2(rx, rz, this.seed ^ 0xca39));
+    const act = this.actOf(rx, rz);
+    const allowed = {};
+    for (const [r, m] of Object.entries(RACE_BY_ACT[act])) if (RACE_BY_BIOME[biome][r]) allowed[r] = RACE_BY_BIOME[biome][r] * m;
+    const race = Object.keys(allowed).length ? weighted(campRng, allowed) : Object.keys(RACE_BY_ACT[act])[0];
     const level = hub ? 1 : Math.max(1, Math.round(1 + dist / 130 + (rng() - 0.5) * 0.8));
     const [adj, noun] = NAME[biome];
     const a = adj[Math.floor(rng() * adj.length)];
     const n = noun[Math.floor(rng() * noun.length)];
     const name = hub ? 'Brightwater Vale' : /^[a-z]/.test(n) ? a + n : `${a} ${n}`;
-    const region = { key, rx, rz, x: sx, z: sz, biome, race, level, name, hub, pois: [], mesas: [], pads: [], roads: [], roadCells: new Set() };
+    const region = { key, rx, rz, x: sx, z: sz, biome, race, act, level, name, hub, pois: [], mesas: [], pads: [], roads: [], roadCells: new Set() };
     const town = hub ? null : this.townAt(rx, rz);
     const city = hub ? null : this.cityAt(rx, rz);
 
