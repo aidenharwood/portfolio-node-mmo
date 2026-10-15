@@ -221,9 +221,12 @@ export function storyRef(world, ref, ctx = {}) {
   const key = ctx.home ? `${ctx.home}|${ref}` : ref;
   if (cache.has(key)) return cache.get(key);
   const out = resolve(world, ref, ctx);
-  if (out) cache.set(key, out);
+  // Found, it's kept. Not found is kept too for the refs worked out from the seed alone (searching
+  // again every frame would cost a hitch each time); others may yet turn up as the world streams.
+  if (out || SEEDED.has(ref)) cache.set(key, out);
   return out;
 }
+const SEEDED = new Set(['ironstone', 'ironhamlet']);
 
 function resolve(world, ref, ctx) {
   const gen = world.gen;
@@ -277,7 +280,10 @@ function resolve(world, ref, ctx) {
     if (!c) return null;
     const by = (a, b) => Math.hypot(a.x - c.x, a.z - c.z) - Math.hypot(b.x - c.x, b.z - c.z);
     if (head === 'ironstone') {
-      const stones = world.poisNear(c.x, c.z, 900, ['waystone']).filter((p) => Math.hypot(p.x - c.x, p.z - c.z) > CITY_WALL).sort(by);
+      // Out in the open: not a village's or town's own square (the scouts would be fought among
+      // its folk, and it could be the walker's settlement too).
+      const inSquare = (p) => world.poisNear(p.x, p.z, 120, ['hamlet', 'settlement', 'town']).some((s) => Math.hypot(s.x - p.x, s.z - p.z) < (s.r ?? 12) + 10);
+      const stones = world.poisNear(c.x, c.z, 1400, ['waystone']).filter((p) => Math.hypot(p.x - c.x, p.z - c.z) > CITY_WALL && !inSquare(p)).sort(by);
       return target(stones[0], { r: 4 }) ?? null;
     }
     const homes = world.poisNear(c.x, c.z, 1400, ['hamlet', 'settlement', 'town']).sort(by);

@@ -196,6 +196,17 @@ console.log('Act III\'s people and places:');
   const ham = storyRef(w, 'ironhamlet');
   const hamPoi = ham?.poi && w.poiById(ham.poi);
   check(['hamlet', 'settlement', 'town'].includes(hamPoi?.type) && !!roadRoute(w.gen, hamPoi), `the settlement the first walker marches on has a road for it (${hamPoi?.name ?? 'none'})`);
+  // On any world the stone stands out in the open: not a village's or town's own square (where
+  // the Synth scouts would be fought among its folk), and so never the walker's settlement too.
+  const squares = [];
+  for (const s of [seed, 95028, 777]) {
+    const ws = s === seed ? w : new HeadlessWorld(s);
+    const st = storyRef(ws, 'ironstone');
+    const sp = st?.poi && ws.poiById(st.poi);
+    const home = sp && ws.poisNear(sp.x, sp.z, 120, ['hamlet', 'settlement', 'town']).find((p) => Math.hypot(p.x - sp.x, p.z - sp.z) < (p.r ?? 12) + 10);
+    if (!sp || home) squares.push(`seed ${s}: ${sp ? `${sp.name} is in ${home.name}` : 'no stone'}`);
+  }
+  check(!squares.length, `the stone stands out in the open on every world tried${squares.length ? ` (not: ${squares.join('; ')})` : ''}`);
 }
 
 // ---------------------------------------------------------------- dungeon objectives

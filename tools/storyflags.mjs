@@ -47,7 +47,7 @@ export const STORY_FLAGS = {
   kept_wardens_secret: { means: "The player kept the Wardens' secret between themselves and Ysolde (the choice at b5).", setBy: ['b5 stage 1 choices'], readBy: ['b10 stage 1 say', 'b5 turnIn', 'c5 offer'] },
   psion_slain: { means: "The Hive Psion steering the swarms is dead; its chitin mapped the way to the Brood Pits (b6).", setBy: ['b6 setFlags'], readBy: [] },
   matron_read: { means: "The player read the Matron's nest-node: the Array's call feeds a deeper nest, the Brood Mother's (b8).", setBy: ['b8 setFlags'], readBy: [] },
-  array_destroyed: { means: "The Farcall Array's transmitter is destroyed; its death-pulse woke the Synths (b9; Acts III and IV read it).", setBy: ['b9 setFlags'], readBy: [] },
+  array_destroyed: { means: "The Farcall Array's transmitter is destroyed; its death-pulse woke the Synths (b9; always set by Act II's end, so Act III's emissary moment names the pulse in its line, unkeyed).", setBy: ['b9 setFlags'], readBy: [] },
   act2_done: { means: "Act II is over: the Array silenced, the Brood Mother's gate open (b12).", setBy: ['b12 setFlags'], readBy: [] },
   broodgate_open: {
     means: 'The Wardens opened the Brood Mother\'s raid gate to the player (DEC-4: one in a raid group or party who has it takes the rest in).',

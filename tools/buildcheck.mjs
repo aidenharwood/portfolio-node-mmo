@@ -91,6 +91,9 @@ for (let ring = 0; ring < 24 && [...want.values()].some((v) => !v); ring++) {
   want.set('story:array', probe.gen.region(A.rx, A.rz).pois.find((q) => q.story === 'array') ?? null);
   const fc = probe.gen.cities()[1];
   want.set('citywall:farcall', probe.gen.region(fc.rx, fc.rz).pois.find((q) => q.type === 'citywall') ?? null);
+  // Ironreach's walls with their smokestacks (Act III).
+  const ir = probe.gen.cities()[2];
+  want.set('citywall:ironreach', probe.gen.region(ir.rx, ir.rz).pois.find((q) => q.type === 'citywall') ?? null);
 }
 // The colliders a world took for a place, in a stable order.
 const collidersOf = (w, p) => w.pois.get(p.id).colliders.map((c) => [c.x, c.z, c.r, c.h, c.y, c.hx ?? 0, c.hz ?? 0, c.ry ?? 0].map((v) => v.toFixed(4)).join(',')).sort().join('|');

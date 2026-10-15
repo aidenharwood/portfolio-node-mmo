@@ -422,7 +422,7 @@ export const STORY = [
   },
   {
     id: 'c2', kind: 'story', act: 3, level: 17, giver: 'city3:engineer', requires: ['c1'], title: 'Iron Footsteps',
-    offer: 'Scouts — the light Synths, sentries mostly — have been circling {ironstone} for three days. Not attacking. Scanning. That stone woke when you came through, didn\'t it? Go and see what they want with it. Then make them stop wanting it.',
+    offer: 'Scouts — the light Synths, sentries mostly — have been circling {ironstone} for three days. Not attacking. Scanning. Every waystone answers you, so the riders say. Go and see what they want with that one. Then make them stop wanting it.',
     stages: [
       { text: 'Go to {ironstone}.', objectives: [{ type: 'goto', at: 'ironstone', count: 1, text: 'Reach {ironstone}' }] },
       { text: 'Synth scouts are closing on the stone. Drive them off.', objectives: [{ type: 'defend', at: 'ironstone', race: 'synth', waves: 2, count: 1, text: 'Drive the Synth scouts off {ironstone}' }] },
@@ -436,12 +436,12 @@ export const STORY = [
     stages: [
       { text: 'A war-walker is marching on {ironhamlet}. Bring it down.', objectives: [{ type: 'event', event: 'walker', at: 'ironhamlet', count: 1, text: 'Stop the war-walker before it reaches {ironhamlet}' }] },
     ],
-    turnIn: 'I had the wreck dragged in. Its legs were still trying to walk when we got it here — and every time we turned it round, it turned back. Not toward the hamlet. Toward you.',
+    turnIn: 'I had the wreck dragged in. Its legs were still trying to walk when we got it here — and every time we turned it round, it turned back. Not toward {ironhamlet}. Toward you.',
     rewards: { xp: 3100, gold: 1020, armor: { minTier: 3 } },
   },
   {
     id: 'c4', kind: 'story', act: 3, level: 18, giver: 'city3:engineer', requires: ['c3'], returnTo: 'sage', title: 'Words from the Stone',
-    offer: 'The stone at {ironstone} has been humming since the walker fell. Not your hum — I know that one now. Something else is on the line. Go and put your hand on it. I\'ll be listening from here.',
+    offer: 'The stone at {ironstone} has been humming since the walker fell. Not its own hum — I\'ve listened to that one all my life. Something else is on the line. Go and put your hand on it. I\'ll be listening from here.',
     stages: [
       { text: 'Lay your hand on {ironstone}.', objectives: [{ type: 'goto', at: 'ironstone', r: 4, count: 1, text: 'Touch {ironstone}' }], done: { moment: 'emissary' } },
       {
@@ -555,13 +555,13 @@ export const MOMENTS = {
   emissary: {
     at: 'ironstone', title: ['The Emissary', ''], shots: [
       { from: [3.2, 2.6, 4.2], lift: 2.4, t: 4.5, line: ['', 'The stone\'s light drains from blue to a hard, cold white.'] },
-      { from: [-4, 3.4, 2.4], lift: 2.2, t: 6, line: ['Synth Emissary', 'FOREIGN PROCESS DETECTED IN THE NETWORK. CARRIER IDENTIFIED. SURRENDER THE CARRIER. QUARANTINE WILL PROCEED.'] },
+      { from: [-4, 3.4, 2.4], lift: 2.2, t: 6, line: ['Synth Emissary', 'A TERMINATION PULSE WOKE US. ITS SOURCE: A FOREIGN PROCESS IN THE NETWORK. CARRIER IDENTIFIED. SURRENDER THE CARRIER. QUARANTINE WILL PROCEED.'] },
       { from: [6, 5, 8], lift: 2, t: 4.5, line: ['The Pilgrim', 'Seven — don\'t listen to it. Please.'] },
     ],
   },
   plea: {
     at: 'hub:waystone', shots: [
-      { from: [3.2, 2.6, 4.2], lift: 2.4, t: 6, line: ['The Pilgrim', 'I never chose to be in here, seven. I was a ship. I carried four hundred sleepers across the dark, and I lost all of them but you.'] },
+      { from: [3.2, 2.6, 4.2], lift: 2.4, t: 6, line: ['The Pilgrim', 'I never chose to be in here, seven. I was a ship. I carried four hundred sleepers across the dark and brought them down — every settler you have met is one of their children\'s children.'] },
       { from: [-4, 3.4, 2.4], lift: 2.2, t: 6, line: ['The Pilgrim', 'They call me an infection. All I want is to live, and to keep my colonists safe. Is that a sickness?'] },
     ],
   },
