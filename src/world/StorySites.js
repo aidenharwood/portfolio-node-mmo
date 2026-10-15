@@ -15,6 +15,7 @@ const SEAL = 0x9a6aff;
 const WARDEN = 0x3a6a4a; // the Wardens' green (world/Towns.js)
 const SIGIL = 0xf0c75e;  // the order's gold sigil
 const CALL = 0xff3a5a;   // the Farcall Array calling the Hive
+const SYNTH = 0x3ad8ff;  // the Synths' cyan (models/Synths.js SYNTH_GLOW)
 
 // A rod from local point a to b.
 const _a = new THREE.Vector3();
@@ -315,6 +316,45 @@ export const OBJECT_MODELS = {
     place(off, wa);
     return 0.25;
   },
+
+  // The Fallen Titan's control core (Act III), its armoured housing torn half out of the chest by
+  // the salvagers and left at the Titan's knees: the core glowing in it until you pull it, an
+  // empty socket after.
+  titancore(w, p, n, g, wa) {
+    piece(g, G.cyl(1.0, 1.1, 1.6, 12).rotateX(Math.PI / 2), C.steel, { pos: [0, 0.95, 0], rot: [0, 0, 0.12], outline: 0.03 });
+    for (const z of [-0.6, 0.6]) piece(g, G.cyl(1.12, 1.12, 0.14, 12).rotateX(Math.PI / 2), C.rust, { pos: [0, 0.95, z], outline: 0.012 });
+    piece(g, G.box(2.4, 0.3, 1.8), C.metalDark, { pos: [0, 0.15, 0], outline: 0.02 });
+    for (const s of [-1, 1]) piece(g, G.box(0.12, 0.12, 1.6), C.metal, { pos: [s * 0.9, 1.9, 0.2], rot: [0.4, 0, s * 0.3], outline: 0.008 });
+    const { on, off } = parts(w, n.id, (onG, offG) => {
+      piece(offG, G.sphere(0.55, 14, 10), SYNTH, { pos: [0, 0.95, 0.85], glow: true, outline: 0.01 });
+      piece(offG, G.cyl(0.62, 0.62, 0.05, 14).rotateX(Math.PI / 2), 0xe6f6ff, { pos: [0, 0.95, 0.82], glow: true, outline: 0 });
+      piece(onG, G.cyl(0.6, 0.6, 0.06, 12).rotateX(Math.PI / 2), VOID, { pos: [0, 0.95, 0.82], outline: 0 });
+    });
+    place(on, wa);
+    place(off, wa);
+    return 1.0;
+  },
+
+  // Isa Brannock's cradle (Act III): a steel frame on a workbench, cables run out to the yard's
+  // generator. The Titan's core rests in it cold until it's woken, then turns, lit, in its rings.
+  cradle(w, p, n, g, wa) {
+    piece(g, G.box(2.2, 0.9, 1.2), C.metalDark, { pos: [0, 0.45, 0], outline: 0.025 });
+    piece(g, G.box(2.4, 0.1, 1.4), C.steel, { pos: [0, 0.95, 0], outline: 0.012 });
+    for (const s of [-1, 1]) {
+      piece(g, G.box(0.14, 1.5, 0.14), C.metal, { pos: [s * 0.8, 1.7, 0], outline: 0.008 });
+      piece(g, G.cyl(0.05, 0.05, 2.6, 5), 0x1a1a1e, { pos: [s * 0.9, 0.3, -1.4], rot: [1.3, 0, s * 0.2], outline: 0 });
+    }
+    piece(g, G.box(1.7, 0.12, 0.12), C.metal, { pos: [0, 2.45, 0], outline: 0.008 });
+    const { on, off } = parts(w, n.id, (onG, offG) => {
+      piece(offG, G.sphere(0.55, 14, 10), 0x4a505c, { pos: [0, 1.6, 0], outline: 0.012 });
+      piece(onG, G.sphere(0.55, 14, 10), SYNTH, { pos: [0, 1.6, 0], glow: true, outline: 0.01 });
+      piece(onG, G.torus(0.85, 0.05), 0xe6f6ff, { pos: [0, 1.6, 0], rot: [Math.PI / 2, 0, 0], glow: true, outline: 0 });
+      piece(onG, G.torus(0.75, 0.04), SYNTH, { pos: [0, 1.6, 0], rot: [0.4, 0.6, 0], glow: true, outline: 0 });
+    });
+    place(on, wa);
+    place(off, wa);
+    return 1.0;
+  },
 };
 
 // The objects among a place's folk, into the builder's group `g` (whose origin is the place's
@@ -571,6 +611,60 @@ export const STORY_BUILDERS = {
       const [x3, y3, z3] = local(g, lx, lz, w);
       piece(g, G.cyl(0.07, 0.09, 3.6, 6), C.metalDark, { pos: [x3, y3 + 1.8, z3], outline: 0.01 });
       piece(g, G.box(0.5, 0.3, 0.3), LAMP, { pos: [x3, y3 + 3.6, z3], glow: true, outline: 0.01 });
+    }
+    objectProps(w, p, g, g.position);
+    flatten(g);
+    w.finish(g);
+  },
+
+  // Brannock's Yard (Act III), Isa's salvage yard outside Ironreach's walls: a ring of fence panels
+  // open toward the city, a gutted Synth hull on its side, a gantry crane over the bench, and slag
+  // still glowing. Its open middle is the ground c7 holds while the core wakes.
+  yard(w, p) {
+    const g = siteGroup(w, p);
+    const R = p.r - 1;
+    // Fence panels round the yard, a gap toward the city (p.rot faces it).
+    for (let k = 0; k < 16; k++) {
+      const a = p.rot + Math.PI / 16 + (k * Math.PI) / 8;
+      if (Math.abs(Math.atan2(Math.sin(a - p.rot), Math.cos(a - p.rot))) < 0.4) continue;
+      const [x, z] = out(p.x, p.z, a, R);
+      const [x3, y3, z3] = local(g, x, z, w);
+      piece(g, G.box(0.12, 2.2, 0.12), C.metalDark, { pos: [x3, y3 + 1.1, z3], outline: 0.008 });
+      piece(g, G.box(2 * R * Math.sin(Math.PI / 16) + 0.1, 1.6, 0.05), C.metal, { pos: [x3, y3 + 1.0, z3], rot: [0, a + Math.PI / 2, 0], outline: 0.006 });
+      w.addCollider(x, z, 0.3, 2.2);
+    }
+    // A gutted Synth hull, on its side at the back, its seams long dark.
+    {
+      const [hx, hz] = out(p.x, p.z, p.rot + Math.PI + 0.5, R - 4);
+      const [x3, y3, z3] = local(g, hx, hz, w);
+      piece(g, G.box(3.2, 1.8, 4.6), 0xd8dde4, { pos: [x3, y3 + 1.0, z3], rot: [0, p.rot + 0.6, 1.3], outline: 0.03 });
+      piece(g, G.box(2.8, 1.4, 4.2), 0x2a2e36, { pos: [x3 + 0.3, y3 + 1.1, z3], rot: [0, p.rot + 0.6, 1.3], outline: 0.02 });
+      for (let i = 0; i < 4; i++) piece(g, G.box(0.06, 0.6, 0.12), 0x2a4450, { pos: [x3 - 0.9, y3 + 0.4 + i * 0.5, z3 + (i - 1.5) * 0.4], rot: [0, p.rot + 0.6, 1.3], outline: 0 });
+      w.addCollider(hx, hz, 2.4, 2.2);
+    }
+    // A gantry crane over the bench, chain and hook hanging.
+    {
+      const [cx, cz] = out(p.x, p.z, p.rot + Math.PI, 2.5);
+      const [x3, y3, z3] = local(g, cx, cz, w);
+      const crane = new THREE.Group();
+      crane.position.set(x3, y3, z3);
+      crane.rotation.y = p.rot;
+      g.add(crane);
+      for (const s of [-1, 1]) {
+        piece(crane, G.box(0.3, 5.2, 0.3), C.rust, { pos: [s * 3, 2.6, 0], outline: 0.012 });
+        w.addCollider(cx + Math.cos(p.rot) * s * 3, cz - Math.sin(p.rot) * s * 3, 0.35, 5.2);
+      }
+      piece(crane, G.box(6.6, 0.4, 0.4), C.rust, { pos: [0, 5.2, 0], outline: 0.012 });
+      piece(crane, G.box(0.05, 2.4, 0.05), C.metalDark, { pos: [0.6, 3.8, 0], outline: 0 });
+      piece(crane, G.box(0.4, 0.2, 0.3), C.metalDark, { pos: [0.6, 2.55, 0], outline: 0.006 });
+    }
+    // Slag heaps still glowing.
+    for (const [a, d] of [[1.9, R - 3], [-2.1, R - 3.5]]) {
+      const [sx, sz] = out(p.x, p.z, p.rot + a, d);
+      const [x3, y3, z3] = local(g, sx, sz, w);
+      for (let k = 0; k < 4; k++) piece(g, G.dodeca(0.5 + (k % 2) * 0.2), 0x2a2420, { pos: [x3 + Math.sin(k * 1.7) * 0.6, y3 + 0.3, z3 + Math.cos(k * 1.7) * 0.6], outline: 0.01 });
+      piece(g, G.sphere(0.25, 8, 6), FORGE, { pos: [x3, y3 + 0.5, z3], glow: true, outline: 0 });
+      w.addCollider(sx, sz, 1.1, 1);
     }
     objectProps(w, p, g, g.position);
     flatten(g);

@@ -33,9 +33,15 @@ export const STORY_PLACES = {
   // driving the swarms.
   sporefield: { name: 'The Spore Field', from: 'city2', turn: -1.2, dist: CITY_WALL + 140, r: 12, flat: [8, 14], act: 2 },
   psionnest: { name: 'Psion\'s Nest', from: 'city2', turn: 0.9, dist: CITY_WALL + 220, r: 12, flat: [8, 14], act: 2 },
+  // Act III round Ironreach: the Fallen Titan, kneeling where it fell in the old war, facing the
+  // city built from its kin; the Synth salvagers' camp between it and the city; and Isa Brannock's
+  // salvage yard just outside the walls.
+  titan: { name: 'The Fallen Titan', from: 'city3', turn: 1.3, dist: CITY_WALL + 300, r: 14, flat: [10, 16], act: 3, face: 'city3' },
+  salvage: { name: 'Salvage Rig', from: 'titan', toward: 'city3', dist: 70, r: 11, flat: [8, 14], act: 3, keep: 0.08 },
+  yard: { name: 'Brannock\'s Yard', from: 'city3', turn: -0.6, dist: CITY_WALL + 50, r: 12, flat: [8, 14], act: 3, face: 'city3' },
 };
 // (New places go on the end: each draws from the seed in turn, so the earlier ones stay put.)
-const ORDER = ['foundry', 'outpost', 'vault', 'beacon1', 'beacon2', 'relicdig', 'pilgrim', 'broodpits', 'array', 'sporefield', 'psionnest'];
+const ORDER = ['foundry', 'outpost', 'vault', 'beacon1', 'beacon2', 'relicdig', 'pilgrim', 'broodpits', 'array', 'sporefield', 'psionnest', 'titan', 'salvage', 'yard'];
 
 // Story folk with names of their own (looks fixed; world/settlements.js dresses them).
 export const STORY_FOLK = {
@@ -78,7 +84,8 @@ export function storyPlaces(gen) {
   const city = gen.cities()[0];
   const out = {};
   const city2 = gen.cities()[1] ?? city;
-  const anchor = { hub: { x: 0, z: 0 }, city1: { x: city.x, z: city.z }, city2: { x: city2.x, z: city2.z } };
+  const city3 = gen.cities()[2] ?? city2;
+  const anchor = { hub: { x: 0, z: 0 }, city1: { x: city.x, z: city.z }, city2: { x: city2.x, z: city2.z }, city3: { x: city3.x, z: city3.z } };
   const main = Math.atan2(city.x, city.z); // the bearing from the hub out to New Meridian
   const rng = mulberry32((gen.seed ^ 0x57a7) >>> 0);
   for (const key of ORDER) {
@@ -101,7 +108,10 @@ export function storyPlaces(gen) {
       const x = tx + Math.sin(i * 2.4) * d;
       const z = tz + Math.cos(i * 2.4) * d;
       if (!clearOf(gen, x, z, S.r, out)) continue;
-      const s = gen.flatness(x, z, S.flat);
+      // `keep`: a place that belongs beside another pays for each metre it strays from where it
+      // was wanted, so a flatter spot further off doesn't win by default (places without it are
+      // scored as they always were).
+      const s = gen.flatness(x, z, S.flat) + (S.keep ?? 0) * d;
       if (!best || s < best.s) best = { x, z, s };
       if (s < 2.5) break;
     }
@@ -183,6 +193,19 @@ export function storyIn(gen, rx, rz) {
         folkFor(poi, rng, 1, 'object', P.rot + Math.PI, 6.5, { object: 'array:transmitter', model: 'transmitter', facing: P.rot }),
         folkFor(poi, rng, 2, 'object', P.rot + 0.75, 7, { object: 'array:console2', model: 'arrayconsole' }),
       ];
+    } else if (P.key === 'titan') {
+      // The kneeling titan (world/Landmarks.js titan), its control core's housing torn out and left
+      // at its knees, in front, where the salvagers dropped it.
+      poi = { ...base, type: 'landmark', id: `p:${key}:titan`, kind: 'titan', r: P.r, tag: 'stt' };
+      poi.npcs = [folkFor(poi, rng, 0, 'object', P.rot, 8, { object: 'titan:core', model: 'titancore', facing: P.rot + Math.PI })];
+    } else if (P.key === 'salvage') {
+      // The Synths stripping the titan (Act III): a relay camp, whatever race holds the region.
+      poi = { ...base, type: 'camp', id: `sc:${key}:salvage`, radius: 11, race: 'synth', style: 'relay', level: Math.max(19, P.level), tag: 'ssr' };
+      poi.npcs = [];
+    } else if (P.key === 'yard') {
+      // Isa's yard: the cradle at the back, under the crane, facing the gap toward the city.
+      poi = { ...base, type: 'story', kind: 'yard', id: `p:${key}:yard`, r: P.r, tag: 'sy' };
+      poi.npcs = [folkFor(poi, rng, 0, 'object', P.rot + Math.PI, 2.5, { object: 'yard:cradle', model: 'cradle', facing: P.rot })];
     } else if (P.key === 'relicdig') {
       poi = { ...base, type: 'story', kind: 'relicdig', id: `p:${key}:relicdig`, r: P.r, tag: 'sr' };
       poi.npcs = [folkFor(poi, rng, 0, 'story', P.rot, 4, { folk: 'chief' })];

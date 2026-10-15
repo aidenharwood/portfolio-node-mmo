@@ -207,6 +207,21 @@ console.log('Act III\'s people and places:');
     if (!sp || home) squares.push(`seed ${s}: ${sp ? `${sp.name} is in ${home.name}` : 'no stone'}`);
   }
   check(!squares.length, `the stone stands out in the open on every world tried${squares.length ? ` (not: ${squares.join('; ')})` : ''}`);
+  // The Fallen Titan (B-2): the kneeling titan landmark, its core to pull, the salvagers' camp by
+  // it, and Isa's yard just outside the walls where the core is woken.
+  const poiOf = (r) => { const t = storyRef(w, r); return t && w.poiById(t.poi ?? t.camp ?? ''); };
+  const titan = poiOf('titan');
+  check(titan?.type === 'landmark' && titan.kind === 'titan' && titan.name === 'The Fallen Titan' && Math.hypot(titan.x - c3.x, titan.z - c3.z) < 700, `the Fallen Titan kneels out past Ironreach (${titan ? `${Math.round(Math.hypot(titan.x - c3.x, titan.z - c3.z))} m` : 'missing'})`);
+  check(!!at('titan:core'), 'its core is something to pull');
+  const rig = poiOf('salvage');
+  check(rig?.type === 'camp' && rig.race === 'synth' && titan && Math.hypot(rig.x - titan.x, rig.z - titan.z) < 80, `the salvagers camp beside it (${rig?.name ?? 'none'}, ${rig?.race ?? '-'})`);
+  const yard = poiOf('yard');
+  const yd = yard && Math.hypot(yard.x - c3.x, yard.z - c3.z);
+  check(yard?.type === 'story' && yd > CITY_WALL && yd < CITY_WALL + 160 && !!at('yard:cradle'), `Brannock's Yard stands just outside the walls, with the cradle (${yd ? Math.round(yd - CITY_WALL) : '-'} m out)`);
+  // No landmark the world makes for itself takes the story's name.
+  const clash = [];
+  for (let rx = -12; rx <= 12; rx++) for (let rz = -12; rz <= 12; rz++) for (const p of w.gen.region(rx, rz).pois) if (p.type === 'landmark' && p.name === 'The Fallen Titan' && !p.story) clash.push(p.id);
+  check(!clash.length, `no other landmark is called "The Fallen Titan"${clash.length ? ` (${clash.join(', ')})` : ''}`);
 }
 
 // ---------------------------------------------------------------- dungeon objectives
