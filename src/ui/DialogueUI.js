@@ -1,6 +1,10 @@
 // NPC conversation panel: speaker, line of text, notes (a quest board's postings, the war table's
 // marks) and option buttons.
 import { esc } from './cards.js';
+import { markHtml } from './questMarks.js';
+
+// A quest card's badge: the mark its quest wears over the giver's head.
+const NOTE_MARK = { available: 'offer', ready: 'turnin', active: 'objective' };
 
 const QUEST_KIND_LABEL = { story: 'Story Quest', side: 'Side Quest', errand: 'Errand', contract: 'Warden Contract', hunt: 'Hunt', job: 'Board Posting' };
 const QUEST_KIND_CLASS = new Set(Object.keys(QUEST_KIND_LABEL));
@@ -32,7 +36,7 @@ export class DialogueUI {
     this.el.innerHTML = `
       <header class="dlg-head"><div><div class="dlg-eyebrow">${esc(QUEST_KIND_LABEL[kindClass] ?? 'Conversation')}</div><div class="dlg-name">${esc(name)}</div>${title ? `<div class="dlg-role">${esc(title)}</div>` : ''}</div>${step ? `<span class="dlg-step">${esc(step)}</span>` : ''}</header>
       <p class="dlg-line">${esc(text)}</p>
-      ${notes.length ? `<div class="dlg-notes">${notes.map((n) => `<article class="dlg-note ${esc(n.state ?? '')}"><header><b>${esc(n.title)}</b>${n.tag ? `<small>${esc(n.tag)}</small>` : ''}</header><p>${esc(n.text)}</p>${Number.isInteger(n.optionIndex) ? actionButton(this.options[n.optionIndex], n.optionIndex, 'dlg-note-action') : ''}</article>`).join('')}</div>` : ''}
+      ${notes.length ? `<div class="dlg-notes">${notes.map((n) => `<article class="dlg-note ${esc(n.state ?? '')} ${n.tone ? `qm-${esc(n.tone)}` : ''}"><header>${n.tone ? markHtml({ state: NOTE_MARK[n.state] ?? 'offer', tone: n.tone, n: 1 }) : ''}<b>${esc(n.title)}</b>${n.tag ? `<small>${esc(n.tag)}</small>` : ''}</header><p>${esc(n.text)}</p>${Number.isInteger(n.optionIndex) ? actionButton(this.options[n.optionIndex], n.optionIndex, 'dlg-note-action') : ''}</article>`).join('')}</div>` : ''}
       ${actions ? `<div class="dlg-options">${actions}</div>` : ''}`;
     this.el.classList.remove('hidden');
   }

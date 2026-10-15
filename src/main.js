@@ -106,7 +106,7 @@ const OBJECTS = {
 };
 const FOLK_NEAR = 85;  // townsfolk are built when you come this close…
 const FOLK_FAR = 110;  // …and let go past this
-const rewardText = (q) => `${q.rewards.xp} XP · ${q.rewards.gold}g${q.rewards.weapon ? ' · a weapon' : q.rewards.armor ? ' · armour' : ''}`;
+const rewardText = (q) => (q.rewards ? `${q.rewards.xp ?? 0} XP · ${q.rewards.gold ?? 0}g${q.rewards.weapon ? ' · a weapon' : q.rewards.armor ? ' · armour' : ''}` : '');
 const QUEST_KIND_LABEL = { story: 'Story quest', side: 'Side quest', errand: 'Errand', contract: 'Warden contract', hunt: 'Hunt', job: 'Board posting' };
 const questKindLabel = (q) => QUEST_KIND_LABEL[q?.kind] ?? 'Quest';
 
@@ -1449,36 +1449,52 @@ class Game {
     }
     this.said = [];
     const options = [];
+    const notes = [];
     let contextQuest = null;
-    let text = said;
+    const text0 = said;
+    // Their quests as the quest board shows its postings: a card each, its button in it.
     for (const q of ready) {
       contextQuest ??= q;
-      options.push({ label: q.title, action: `${questKindLabel(q)} · Turn in`, cls: `quest ${q.kind ?? ''}`, onClick: () => this.completeQuest(q.id, npc) });
+      notes.push(this.questNote(q, 'ready', options, () => this.completeQuest(q.id, npc)));
     }
-    if (!text && ready.length) text = log.pick(ready[0].turnIn);
     // Taken: they tell you where to start (unless a story moment takes over).
     for (const q of avail) {
       contextQuest ??= q;
-      options.push({
-        label: q.title, action: `${questKindLabel(q)} · Accept`, cls: `quest ${q.kind ?? ''}`,
-        onClick: () => {
-          if (!this.charLink.do({ op: 'accept', id: q.id }) || this.moments.active) return;
-          const first = log.stageOf(q.id)?.text ?? q.progress;
-          this.said = [{ text: first ? log.fill(first, q) : q.title, quest: q.id }];
-          this.showTalk(npc, this.said[0].text);
-        },
-      });
+      notes.push(this.questNote(q, 'available', options, () => {
+        if (!this.charLink.do({ op: 'accept', id: q.id }) || this.moments.active) return;
+        const first = log.stageOf(q.id)?.text ?? q.progress;
+        this.said = [{ text: first ? log.fill(first, q) : q.title, quest: q.id }];
+        this.showTalk(npc, this.said[0].text);
+      }));
     }
-    if (!text && avail.length) text = log.fill(avail[0].offer, avail[0]);
-    if (!text && going.length) text = log.fill(log.stageOf(going[0].id)?.text ?? going[0].progress ?? '', going[0]);
+    for (const q of going) notes.push(this.questNote(q, 'active', options));
     contextQuest ??= going[0] ?? log.wantedQuest(npc.id);
+    let text = text0;
     // What they're there for.
     options.push(...services);
     if (!text) {
       text = npc.def.greeting ?? (npc.def.lines ? npc.def.lines[npc.lineIndex++ % npc.def.lines.length] : null)
         ?? (npc.role === 'trader' ? 'Steel, powder and sorcery — fair prices, mostly. Got anything to sell?' : 'Keep your blade sharp out there.');
     }
-    this.dialogue.open({ name: npc.name, title: npc.title, text, options, questKind: contextQuest?.kind ?? null, step: options.length ? 'Choose a response' : '' });
+    this.dialogue.open({ name: npc.name, title: npc.title, text, notes, options, questKind: contextQuest?.kind ?? null, step: options.length ? 'Choose a response' : '' });
+  }
+
+  // A quest as the quest board shows it (and folk with quests too): a card with its title; what
+  // kind of quest, where it stands and what it pays; what it's about — and its button in it.
+  // `state`: 'available', 'active' or 'ready'; `onClick` (none for one under way) adds the button
+  // to `options`.
+  questNote(q, state, options, onClick = null) {
+    const log = this.quests;
+    const where = { available: 'Available', active: 'In progress', ready: 'Ready to turn in' }[state];
+    const pay = state !== 'active' && rewardText(q);
+    const about = state === 'available' ? q.offer : state === 'active' ? log.stageOf(q.id)?.text ?? q.progress ?? '' : q.turnIn;
+    // Its colour and badge are the quest's marks' (ui/questMarks.js): gilt story, blue side, white work.
+    const note = { title: q.title, state, tone: toneOf(q.kind), tag: `${questKindLabel(q)} · ${where}${pay ? ` · ${pay}` : ''}`, text: log.fill(about ?? '', q) };
+    if (onClick) {
+      note.optionIndex = options.length;
+      options.push({ label: q.title, action: state === 'ready' ? 'Turn in quest' : 'Accept quest', cls: `quest ${q.kind ?? ''}`, onClick });
+    }
+    return note;
   }
 
   // The quest's step: a question (answer it, and their reply is a page of its own), else what
@@ -1487,6 +1503,7 @@ class Game {
   showQuestStep(npc, said, { choice, ready, saidQuest, more }) {
     const log = this.quests;
     const options = [];
+    const notes = [];
     let text = said;
     let contextQuest = choice ? log.defs.get(choice[0]) : saidQuest ?? ready[0] ?? null;
     if (choice) {
@@ -1500,13 +1517,13 @@ class Game {
       }));
       text ??= log.fill(log.stageOf(qid)?.say?.[Object.keys(log.stageOf(qid).say ?? {})[0]] ?? '', log.defs.get(qid)) || null;
     } else {
-      for (const q of ready) options.push({ label: q.title, action: `${questKindLabel(q)} · Turn in`, cls: `quest ${q.kind ?? ''}`, onClick: () => this.completeQuest(q.id, npc) });
-      if (!text && ready.length) text = log.pick(ready[0].turnIn);
+      for (const q of ready) notes.push(this.questNote(q, 'ready', options, () => this.completeQuest(q.id, npc)));
+      if (!text && ready.length) text = 'Back, are you? Let\'s see it, then.';
       if (more) options.push({ label: 'Continue', onClick: () => { this.said = []; this.showTalk(npc, null, true); } });
     }
     text ||= log.fill(contextQuest?.progress ?? '', contextQuest) || '…';
     this.dialogue.open({
-      name: npc.name, title: npc.title, text, options, questKind: contextQuest?.kind ?? null,
+      name: npc.name, title: npc.title, text, notes, options, questKind: contextQuest?.kind ?? null,
       step: choice ? 'Choose a response' : ready.length ? 'Hand in' : '',
     });
   }
@@ -1537,18 +1554,9 @@ class Game {
       const ready = log.readyToTurnIn(slot)[0];
       const going = log.inProgress(slot)[0];
       const offer = ready || going ? null : log.offer(slot);
-      if (ready) {
-        const note = { title: ready.title, tag: 'Ready to turn in', text: ready.turnIn, state: 'ready' };
-        note.optionIndex = options.length;
-        options.push({ label: ready.title, action: 'Turn in quest', cls: 'quest', onClick: async () => { await this.charLink.do({ op: 'turnin', id: ready.id }); this.openBoard(board); } });
-        notes.push(note);
-      } else if (going) notes.push({ title: going.title, tag: 'In progress', text: going.progress, state: 'active' });
-      else if (offer) {
-        const note = { title: offer.title, tag: `Available · Reward ${rewardText(offer)}`, text: offer.offer, state: 'available' };
-        note.optionIndex = options.length;
-        options.push({ label: offer.title, action: 'Accept quest', cls: 'quest', onClick: () => { this.charLink.do({ op: 'accept', id: offer.id }); this.openBoard(board); } });
-        notes.push(note);
-      }
+      if (ready) notes.push(this.questNote(ready, 'ready', options, async () => { await this.charLink.do({ op: 'turnin', id: ready.id }); this.openBoard(board); }));
+      else if (going) notes.push(this.questNote(going, 'active', options));
+      else if (offer) notes.push(this.questNote(offer, 'available', options, () => { this.charLink.do({ op: 'accept', id: offer.id }); this.openBoard(board); }));
     }
     this.dialogue.open({
       name: board.name, title: board.title, notes, options,

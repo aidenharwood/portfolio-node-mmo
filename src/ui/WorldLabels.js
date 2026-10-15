@@ -60,6 +60,7 @@ export class WorldLabels {
 
   update(game) {
     const seen = new Set();
+    const marked = []; // where folk with marks on screen stand (see the waypoint, below)
     const w = document.documentElement.clientWidth || window.innerWidth;
     const h = document.documentElement.clientHeight || window.innerHeight;
     const p = game.player;
@@ -108,7 +109,10 @@ export class WorldLabels {
         // Far off, just the marks (smaller with distance).
         el.classList.toggle('marker-only', d > LABEL_NEAR);
         el.style.setProperty('--qm-scale', d > LABEL_NEAR ? Math.max(0.6, 1 - (d - LABEL_NEAR) / 90).toFixed(2) : '1');
-        this.place(el, this.project(n.position, n.height + 0.3, w, h));
+        const xy = this.project(n.position, n.height + 0.3, w, h);
+        this.place(el, xy);
+        // (Their marks on screen stand in for the tracked waypoint, when it's them it leads to.)
+        if (xy && marks.length) marked.push(n.position);
       }
 
       // Other players: name, level and health.
@@ -146,6 +150,8 @@ export class WorldLabels {
       }
 
       for (const [key, wp, cls] of [['waypoint', game.questWaypoint(), 'waypoint'], ['marker', game.customMarker, 'waypoint custom']]) {
+        // The quest waypoint gives way to the overhead marks of whoever it leads to, while those show.
+        const atMarked = key === 'waypoint' && marked.some((m) => Math.hypot(m.x - wp?.x, m.z - wp?.z) < 2.5);
         if (!wp) continue;
         const el = this.el(key, cls);
         seen.add(key);
@@ -166,7 +172,7 @@ export class WorldLabels {
           y *= k;
         }
         el.classList.toggle('edge', off);
-        el.style.display = dist < 6 ? 'none' : '';
+        el.style.display = dist < 6 || atMarked ? 'none' : '';
         el.style.transform = `translate(${((x + 1) / 2) * w}px, ${((1 - y) / 2) * h}px) translate(-50%, -50%)`;
       }
     }
