@@ -211,6 +211,16 @@ export class SimHost {
     }
   }
 
+  // The story flags of the others going in with someone (their raid group, else their party): one
+  // who has opened a raid's gate opens it for them all (DEC-4, sim/Dungeons.js opened).
+  matesFlags(s) {
+    const raids = this.realm.raids;
+    const group = raids?.groupOf?.(s);
+    const party = this.realm.parties.partyOf(s);
+    const others = group ? raids.sessions(group) : party ? this.realm.parties.members(party) : [];
+    return others.filter((o) => o !== s && o.core).map((o) => o.core.quests.flags);
+  }
+
   // The instance manager as one character's operations see it (rpg/CharacterCore.js `dungeons`):
   // going in with their party (or alone, or with their raid group), coming out, and the chests
   // that are theirs.
@@ -219,6 +229,7 @@ export class SimHost {
     const who = () => ({
       id: s.id, position: s.proxy.position, party: this.realm.parties.partyOf(s)?.id ?? `solo:${s.charId}`,
       raid: this.realm.raids?.keyOf(s) ?? null, level: s.core?.stats.level ?? 1, flags: s.core?.quests.flags ?? {},
+      mates: this.matesFlags(s),
     });
     return {
       enter: (ask) => d.enter(who(), ask),

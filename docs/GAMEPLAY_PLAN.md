@@ -657,8 +657,9 @@ and talks in raid chat. Where it differs from the plan below:
   one), twelve players. Formed with `/raid form` or at a city's war table; the raid leader invites a
   party by naming any of its members and its leader answers; `/ra` is raid chat; raid frames show
   the members outside your party. A group lives on one layer, as parties do.
-- **Getting in:** through the raid gate in a city's gate yard (the gate is no longer sealed), from
-  level 14. When Act II arrives in phase 8 the story will open the gate instead.
+- **Getting in:** through the raid gate in a city's gate yard, once Act II's "The Gate Opens" has
+  set `broodgate_open` (DEC-4: anyone in the raid group or party with it takes the rest in; no
+  level floor). Until that quest exists, the gate stays sealed.
 - **The copy:** the dungeon generator lays it out from a route of its own: entrance hall, then
   three halls of trash (5–8 a hall, with elites) and three arenas (36–44 m). Each arena's gate
   shuts behind the raid when its boss is pulled. If everyone is down or out of the arena for three

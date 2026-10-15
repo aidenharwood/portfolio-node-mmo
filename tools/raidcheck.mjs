@@ -18,7 +18,7 @@ import { WorldSim } from '../src/sim/WorldSim.js';
 import { Dungeons } from '../src/sim/Dungeons.js';
 import { generateDungeon } from '../src/world/DungeonGen.js';
 import { Interior } from '../src/world/Interior.js';
-import { RAIDS, RAID_SIZE, lockWeek, weekEnds, raidLockKey, instanceDef } from '../src/world/raids.js';
+import { RAIDS, RAID_SIZE, lockWeek, weekEnds, raidLockKey, instanceDef, raidChoices } from '../src/world/raids.js';
 import { BOSS_SCRIPTS, RAID_TYPES, raidHealth, amount } from '../src/combat/bosses.js';
 import { ENEMY_TYPES } from '../src/combat/bestiary.js';
 import { BESTIARY } from '../src/rpg/codex.js';
@@ -32,6 +32,7 @@ import { itemFromRecipe } from '../src/items/items.js';
 import { GEAR_SETS } from '../src/items/sets.js';
 import { Parties } from '../server/parties.js';
 import { RaidGroups } from '../server/raidgroups.js';
+import { SimHost } from '../server/simhost.js';
 
 const seed = Number(process.argv[2] ?? 12345);
 let failed = 0;
@@ -188,6 +189,15 @@ console.log('Raid groups:');
   realm.parties.leave(B[1]); realm.parties.leave(B[2]);   // Eve's party falls to one: disbanded
   raids.tick(Date.now() + 4000);
   check(raids.size(g) === 9 && !raids.keyOf(B[0]), `a party that disbands is gone from the raid (${raids.size(g)} left)`);
+  // Whose story flags count at the raid gate (server/simhost.js matesFlags, DEC-4): the rest of
+  // the raid group, else the party.
+  for (const s of sessions.values()) s.core = { quests: { flags: {} } };
+  lone.core.quests.flags.broodgate_open = true;
+  extra[1].core.quests.flags.broodgate_open = true;
+  const mates = (s) => SimHost.prototype.matesFlags.call({ realm }, s);
+  check(mates(A[1]).some((f) => f.broodgate_open) && mates(A[1]).length === raids.size(g) - 1, `the server counts the whole raid group's flags for each of them (${mates(A[1]).length} others)`);
+  check(mates(extra[0]).length === 1 && mates(extra[0])[0].broodgate_open, 'a party with no raid group: the party\'s');
+  check(!mates(lone).some((f) => f.broodgate_open), 'and never their own');
   raids.promote(A[0], 'Hal');
   check(g.leader === C[0].charId, 'the lead passes to another party\'s leader');
   raids.leave(A[0]);
@@ -209,6 +219,7 @@ const host = {
 };
 const sim = new WorldSim(host);
 const cores = new Map();
+const groupOf = new Map(); // player id → their raid group's key
 const dun = new Dungeons({
   world: w, sim,
   send: (id, msg) => sent.push({ id, msg }),
@@ -227,7 +238,10 @@ function player(id, key, level = 16) {
   stats.level = level;
   const quests = new QuestLog({ hud: null, world: w, encounters: { isCleared: () => false }, stats, player: { position } });
   const core = new CharacterCore({ stats, inventory: new Inventory(3), quests, attuned: new Set(['w-hub']), chests: new Set(), shop: { stock: [], fine: [] }, settings: { lootFilter: 0 }, position, world: w, strict: true });
-  const who = () => ({ id, position, party: `solo:${id}`, raid: key, level: stats.level, flags: quests.flags });
+  // `mates`: the story flags of the others in their raid group, as server/simhost.js matesFlags.
+  const mates = () => (key ? [...groupOf.entries()].filter(([pid, k]) => pid !== id && k === key).map(([pid]) => cores.get(pid).quests.flags) : []);
+  groupOf.set(id, key);
+  const who = () => ({ id, position, party: `solo:${id}`, raid: key, level: stats.level, flags: quests.flags, mates: mates() });
   core.dungeons = {
     enter: (ask) => dun.enter(who(), ask),
     leave: () => dun.leave(who()),
@@ -253,7 +267,24 @@ const R = [];
 for (let i = 0; i < 6; i++) R.push(player(1 + i, 'raid:7'));
 const low = player(40, 'raid:7', 9);
 for (const P of [...R, low]) stand(P, gateNpc.x + 1.5, gateNpc.z + 1);
-check(!op(low.core, { op: 'enter', d: 'broodmother', mode: 'run', tier: 1, via: 'gate' }) && /level 14/.test(dun.error), `refused below its level ("${dun.error}")`);
+// The story opens the gate (DEC-4): `broodgate_open` on anyone in the raid group takes them all
+// in, whatever their level.
+const FLAG = RAIDS.broodmother.needs?.flag;
+check(FLAG === 'broodgate_open', `the Brood Mother's gate needs a story flag (${FLAG})`);
+const enterGate = (P, tier = 1) => op(P.core, { op: 'enter', d: 'broodmother', mode: 'run', tier, via: 'gate' });
+check(!enterGate(R[0]) && /sealed/.test(dun.error) && /story/.test(dun.error), `sealed to a level-16 raid group nobody in which has it, and says why ("${dun.error}")`);
+const lone = player(42, null, 9);
+stand(lone, gateNpc.x + 1.5, gateNpc.z + 1);
+check(!enterGate(lone, 0), 'sealed to a lone player without it');
+lone.core.quests.flags[FLAG] = true;
+check(enterGate(lone, 0) && dun.runOf(lone.id)?.def.id === 'broodmother', 'open to a lone level-9 player with it: no level floor');
+dun.out(lone.id);
+low.core.quests.flags[FLAG] = true;
+const outsider = player(43, 'raid:8');
+stand(outsider, gateNpc.x + 1.5, gateNpc.z + 1);
+check(!enterGate(outsider), 'one in another raid group having it opens nothing for this one');
+check(raidChoices({}).every((c) => c.sealed && c.locked) && raidChoices({}, { grouped: true }).every((c) => c.sealed && !c.locked) && raidChoices({ [FLAG]: true }).every((c) => !c.sealed),
+  'the gate\'s list: sealed without it; open to try from in a group (the server decides); open with it');
 stand(R[0], gateNpc.x + 60, gateNpc.z);
 check(!op(R[0].core, { op: 'enter', d: 'broodmother', mode: 'run', tier: 1, via: 'gate' }), 'refused away from the gate');
 stand(R[0], gateNpc.x + 1.5, gateNpc.z + 1);
@@ -264,6 +295,7 @@ check(!op(atWaygate.core, { op: 'enter', d: 'broodmother', mode: 'run', tier: 0,
 for (const P of R) op(P.core, { op: 'enter', d: 'broodmother', mode: 'run', tier: 1, via: 'gate' });
 const run = dun.runOf(1);
 check(!!run?.raid && R.every((P) => dun.runOf(P.id) === run && P.core.dungeon?.d === 'broodmother' && P.core.tier === 1), `the raid group (${R.length}) into one Veteran copy of ${def.name}, level ${run?.level}`);
+check(R.every((P) => !P.core.quests.flags[FLAG]), `none of them had the flag: their level-9 raid member ${low.id} did`);
 // The size cap: twelve in a copy.
 const more = [];
 for (let i = 0; i < RAID_SIZE - R.length; i++) { const P = player(60 + i, 'raid:7'); stand(P, gateNpc.x + 1.5, gateNpc.z + 1); op(P.core, { op: 'enter', d: 'broodmother', mode: 'run', tier: 1, via: 'gate' }); more.push(P); }
