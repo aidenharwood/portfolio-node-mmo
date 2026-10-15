@@ -1,6 +1,6 @@
 // Procedural surfaces (docs/GRAPHICS_PLAN.md G1.1): planks, stone blocks, brick, metal panels,
 // corrugated sheet, roof tiles, shingles, thatch, plaster, fabric, rust, concrete, cobbles, rock,
-// resin, adobe and carved stone, drawn in the shader with no image textures, in the comic style:
+// resin, adobe, carved stone and bark, drawn in the shader with no image textures, in the comic style:
 // crisp darker seams, a little tint per board, brick or block, a little grain.
 // Every piece a world builder bakes (render/ModelKit.js bake) carries surface coordinates in metres
 // along its own faces (`puv`) and its kind (`pat`), so a pattern follows each wall, plank and tile
@@ -13,7 +13,7 @@ import { C } from '../world/palette.js';
 
 export const SURFACE_KINDS = [
   null, 'planks', 'blocks', 'brick', 'panels', 'corrugated', 'tiles', 'thatch', 'plaster', 'fabric',
-  'rust', 'concrete', 'cobbles', 'rock', 'resin', 'adobe', 'carved', 'shingles',
+  'rust', 'concrete', 'cobbles', 'rock', 'resin', 'adobe', 'carved', 'shingles', 'bark',
 ];
 export const SURFACE_ID = Object.fromEntries(SURFACE_KINDS.map((k, i) => [k, i]).filter(([k]) => k));
 export const SURFACES = { value: 1 };
@@ -141,7 +141,7 @@ const GLSL = /* glsl */ `
   varying vec2 vSurfUv;
   varying float vSurfKind;
   // Each kind's cell (its boards', blocks', rows' size, metres): it fades out as that nears a pixel.
-  const float S_CELL[18] = float[18](1.0, 0.24, 0.45, 0.12, 1.2, 0.12, 0.28, 0.5, 1.0, 1.1, 0.6, 1.6, 0.35, 1.3, 0.6, 0.42, 0.8, 0.22);
+  const float S_CELL[19] = float[19](1.0, 0.24, 0.45, 0.12, 1.2, 0.12, 0.28, 0.5, 1.0, 1.1, 0.6, 1.6, 0.35, 1.3, 0.6, 0.42, 0.8, 0.22, 0.16);
   // How much a surface darkens (a little, lifts) its colour here, about 1 on average. px: metres
   // per pixel here (taken outside any branch, where its derivatives are sound).
   float surfaceShade(vec2 uv, float kind, float px) {
@@ -229,6 +229,12 @@ const GLSL = /* glsl */ `
       m = 0.9 + 0.12 * sHash(id);
       m *= 1.0 - 0.45 * sLine(d, 0.03, aa, cell, px);
       m *= 1.0 - 0.25 * sLine(abs(fract(uv.y / 0.8) * 0.8 - 0.4), 0.012, aa, cell, px);
+    } else if (k == 18) { // bark: ridges up the trunk, wandering a little, split by dark furrows
+      mean = 0.9;
+      float x = uv.x / 0.16 + (sNoise(vec2(uv.x * 2.0, uv.y * 0.9)) - 0.5) * 0.9;
+      float d = abs(fract(x) - 0.5) * 0.16;
+      m = 0.88 + 0.14 * sHash(vec2(floor(x), floor(uv.y / 0.7))) + 0.06 * (sNoise(uv * vec2(3.0, 9.0)) - 0.5);
+      m *= 1.0 - 0.45 * sLine(d, 0.014, aa, cell, px);
     }
     // Far off (a cell a few pixels across) it settles to its average, so nothing shimmers.
     return mix(m, mean, smoothstep(0.2, 0.7, px / cell)) / mean;

@@ -316,11 +316,14 @@ export function toonMesh(geometry, color, { outline = 0.03, castShadow = true, r
 }
 
 // Instanced toon mesh + matching instanced outline, for scattering scenery cheaply. `wind`
-// ({ amp, base }) sways it — and its outline and its shadow.
-export function instancedToon(geometry, color, count, { outline = 0.04, castShadow = true, receiveShadow = true, wind = null } = {}) {
+// ({ amp, base }) sways it — and its outline and its shadow. vertexColors: its colours are in its
+// geometry (world/scenery/); tint: each instance's colour multiplies them; double: drawn from both
+// sides (leaves and blades with no back to them).
+export function instancedToon(geometry, color, count, { outline = 0.04, castShadow = true, receiveShadow = true, wind = null, vertexColors = false, tint = false, double = false } = {}) {
   const group = new THREE.Group();
-  const mat = toonMaterial(color);
+  const mat = toonMaterial(color, { vertexColors, ...(double ? { side: THREE.DoubleSide } : {}) });
   const body = new THREE.InstancedMesh(geometry, wind ? addWind(mat, wind) : mat, count);
+  if (tint) body.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(count * 3).fill(1), 3);
   body.castShadow = castShadow;
   body.receiveShadow = receiveShadow;
   if (wind) body.customDepthMaterial = addWind(new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking }), wind);

@@ -429,13 +429,13 @@ console.log('Scenery:');
   check(total > 50 && !plain, `the server's scenery colliders have their meshes' triangles (${total - plain} of ${total})`);
   check(!off.length && worst < 0.01, `and the same ones as a screen's, collider by collider (worst ${worst.toFixed(4)} m apart)${off.length ? `: ${off.slice(0, 5).join('; ')}` : ''}`);
 
-  const cactusGeo = server.sets.cactus.body.geometry;
   const [dx, dz] = found.get('desert') ?? [0, 0];
   for (let k = 0; k < 25 && !cactus; k++) {
     const cx = dx + (k % 5) - 2;
     const cz = dz + Math.floor(k / 5) - 2;
     server.loadChunk(cx, cz);
-    cactus = server.chunks.get(`${cx},${cz}`).colliders.find((c) => c.meshGeometry === cactusGeo) ?? null;
+    const cacti = new Set(Object.entries(server.sets).filter(([key]) => key.startsWith('cactus.')).map(([, set]) => set.hit));
+    cactus = server.chunks.get(`${cx},${cz}`).colliders.find((c) => cacti.has(c.meshGeometry)) ?? null;
   }
 
   // A body walked at a cactus from all round is stopped by its trunk and arms, not a circle

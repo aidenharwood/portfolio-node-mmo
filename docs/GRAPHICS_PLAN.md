@@ -192,6 +192,21 @@ A modular, procedural generator in `src/world/build/` that every builder can use
   bespoke camp/fort, story-site and dungeon builders have not all been migrated to the kit; they
   retain their bespoke geometry and use G1 surface baking where applicable. Style captures and
   before/after performance measurements remain outstanding.
+  - *The wilds* (`src/world/scenery/`): scattered scenery follows the same pattern. `kit.js`
+    assembles a seeded `Model` from components (tapered limbs with root flare, roughened lumps,
+    jagged needle tiers, leaf and frond blades, lathes) into one geometry with its colours in its
+    vertices (gradients, colour on up-facing faces, hollow shading, strata) and `bark`/`rock`
+    surfaces, plus the pieces it collides with. `models.js` holds the base models (conifer,
+    broadleaf, snag, palm, mushroom, saguaro, rock, hoodoo, crystal, bush, fern, reeds, grass,
+    flowers), their biome styles (snow and moss on rocks and firs, willows, blossom, charred and
+    bleached snags, crystal-grown rocks) and two to four variants each, picked by position so the
+    scatter's own random numbers are untouched. Trees and similar kinds have a far model (the same
+    plan, small pieces dropped, coarser shapes) drawn past the ground-detail ring. Instanced sets
+    are made on first use and grow as needed; each instance gets a slight tint. Trees collide with
+    their trunks only, rocks whole, and the server builds the same collision triangles
+    (`physicscheck` scenery parity). Measured over six biomes at rest, frame time is within noise
+    of the old primitives at a similar triangle count; draw calls rise by up to ~180 where many
+    biomes' sets are in view. `tools/worldshots.js` `scenery()` and `measure()` capture and time it.
 - **G3 Special effects:** implemented for surface-aware impacts, particle-based flame tongues and
   weapon-attached melee sparks (emitted from transformed mesh geometry at the striking end),
   toggleable blood particles for organic enemy hits, nearby scenery flames with pooled flickering

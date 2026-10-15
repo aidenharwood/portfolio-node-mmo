@@ -17,10 +17,11 @@
 //              there the ground is their floors, nothing of the land streams in, and no place of
 //              the world stands
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { instancedToon, toonMaterial, disposeObject, noInk } from '../render/Toon.js';
+import { instancedToon, toonMaterial, disposeObject, noInk, chainCompile } from '../render/Toon.js';
+import { withSurfaces } from '../render/Surfaces.js';
 import { piece, bakeTree, flatten, G, shade } from '../render/ModelKit.js';
 import { building, bodyCols, KIT } from './build/kit.js';
+import { KINDS, sceneryKey, sceneryTint, sceneryModel } from './scenery/models.js';
 import { mulberry32 } from '../core/rng.js';
 import { WorldGen, REGION, WATER_LEVEL, HUB } from './Gen.js';
 import { Chunk, CHUNK, RES0 } from './Chunks.js';
@@ -104,98 +105,13 @@ const hashStr = (s) => {
   return h >>> 0;
 };
 
-// Scenery types: geometry, colour, outline, capacity, casts shadow, and how it sways in the wind
-// ({ amp, base }: amp × the square of the height above base, in the model's own units — trunks,
-// rocks and stumps don't sway; crowns and grass tips do).
-const SWAY = {
-  crown: { amp: 0.008, base: 1.8 },
-  pine: { amp: 0.004, base: 0.6 },
-  bare: { amp: 0.002, base: 0.8 },
-  bush: { amp: 0.03, base: -0.6 },
-  reed: { amp: 0.06, base: 0 },
-  tuft: { amp: 0.3, base: 0 },
-  head: { amp: 0.27, base: -0.35 }, // flowers ride the tips of the tufts they grow from
-  frond: { amp: 0.012, base: 4.5 },
-  fern: { amp: 0.035, base: 0 },
-};
-function sceneryTypes() {
-  const noUV = (g) => { g.deleteAttribute('uv'); return g; };
-  const flat = (list) => mergeGeometries(list.map((g) => noUV(g.index ? g.toNonIndexed() : g)));
-  const cactusGeo = flat([
-    new THREE.CylinderGeometry(0.32, 0.38, 4.2, 8).translate(0, 2.1, 0),
-    new THREE.SphereGeometry(0.32, 8, 4, 0, TAU, 0, Math.PI / 2).translate(0, 4.2, 0),
-    new THREE.CylinderGeometry(0.2, 0.2, 1.1, 6).rotateZ(Math.PI / 2).translate(0.75, 2.0, 0),
-    new THREE.CylinderGeometry(0.2, 0.22, 1.6, 6).translate(1.3, 2.75, 0),
-    new THREE.SphereGeometry(0.2, 6, 3, 0, TAU, 0, Math.PI / 2).translate(1.3, 3.55, 0),
-    new THREE.CylinderGeometry(0.18, 0.18, 0.9, 6).rotateZ(Math.PI / 2).translate(-0.6, 2.8, 0),
-    new THREE.CylinderGeometry(0.18, 0.2, 1.2, 6).translate(-1.05, 3.35, 0),
-    new THREE.SphereGeometry(0.18, 6, 3, 0, TAU, 0, Math.PI / 2).translate(-1.05, 3.95, 0),
-  ]);
-  const hoodooGeo = flat([
-    new THREE.CylinderGeometry(0.9, 1.4, 3, 7).translate(0, 1.5, 0),
-    new THREE.CylinderGeometry(0.55, 0.9, 2.4, 7).translate(0.1, 4.2, 0),
-    new THREE.DodecahedronGeometry(1.5, 0).scale(1, 0.42, 1).translate(0.15, 5.7, 0),
-  ]);
-  const frondGeo = flat(Array.from({ length: 7 }, (_, k) => new THREE.BoxGeometry(0.9, 0.08, 3.4).translate(0, 0, 1.7).rotateX(0.55).rotateY((k / 7) * TAU).translate(0, 6.2, 0)));
-  const fernGeo = flat(Array.from({ length: 6 }, (_, k) => new THREE.ConeGeometry(0.5, 2.6, 4).scale(1, 1, 0.18).translate(0, 1.3, 0).rotateX(0.85).rotateY((k / 6) * TAU + 0.3)));
-  const crystalGeo = flat([[0, 0, 0, 0], [0.5, 0.2, 0.6, 0.5], [-0.45, -0.3, 0.5, -0.45], [0.1, 0.55, 0.45, 0.3]].map(([x, z, s, t]) => new THREE.OctahedronGeometry(0.55, 0).scale(1 - s * 0.6, 2.6 - s * 1.4, 1 - s * 0.6).rotateZ(t).translate(x, 1.2 - s, z)));
-  const pineGeo = mergeGeometries([
-    new THREE.ConeGeometry(1.6, 2.4, 7).translate(0, 2.4, 0).toNonIndexed(),
-    new THREE.ConeGeometry(1.25, 2.0, 7).translate(0, 3.5, 0).toNonIndexed(),
-    new THREE.ConeGeometry(0.85, 1.6, 7).translate(0, 4.5, 0).toNonIndexed(),
-  ].map(noUV));
-  const roundGeo = mergeGeometries([
-    new THREE.IcosahedronGeometry(1.7, 0).translate(0, 3.2, 0),
-    new THREE.IcosahedronGeometry(1.1, 0).translate(1.0, 2.6, 0.4),
-    new THREE.IcosahedronGeometry(1.0, 0).translate(-0.9, 2.8, -0.3),
-  ].map(noUV));
-  const deadGeo = mergeGeometries([
-    new THREE.CylinderGeometry(0.16, 0.3, 3.6, 6).translate(0, 1.8, 0).toNonIndexed(),
-    new THREE.CylinderGeometry(0.06, 0.1, 1.4, 5).rotateZ(0.9).translate(0.55, 2.6, 0).toNonIndexed(),
-    new THREE.CylinderGeometry(0.05, 0.09, 1.2, 5).rotateZ(-1.0).translate(-0.5, 2.2, 0.1).toNonIndexed(),
-    new THREE.CylinderGeometry(0.05, 0.08, 1.0, 5).rotateX(0.9).translate(0, 3.0, 0.4).toNonIndexed(),
-  ].map(noUV));
-  return {
-    trunk: [new THREE.CylinderGeometry(0.22, 0.34, 2.2, 7).translate(0, 1.1, 0), C.woodDark, 0.05, 9000, true],
-    pine: [pineGeo, C.pine, 0.06, 7000, true, SWAY.pine],
-    snowPine: [pineGeo, C.snowPine, 0.06, 5000, true, SWAY.pine],
-    round: [roundGeo, C.leaf, 0.06, 4000, true, SWAY.crown],
-    dead: [deadGeo, C.dead, 0.04, 3000, true, SWAY.bare],
-    charred: [deadGeo, C.charred, 0.04, 3000, true, SWAY.bare],
-    rock: [new THREE.DodecahedronGeometry(1, 0), C.stone, 0.05, 6000, true],
-    boulder: [new THREE.DodecahedronGeometry(1, 0), shade(C.stone, 0.92), 0.06, 2500, true],
-    bush: [new THREE.IcosahedronGeometry(0.7, 0), C.bush, 0.035, 5000, true, SWAY.bush],
-    reed: [new THREE.ConeGeometry(0.05, 1.3, 4).translate(0, 0.65, 0), C.reed, 0, 8000, false, SWAY.reed],
-    tuft: [new THREE.ConeGeometry(0.1, 0.45, 4).translate(0, 0.22, 0), 0x62ab4c, 0, 16000, false, SWAY.tuft],
-    flowerY: [new THREE.SphereGeometry(0.07, 5, 4), 0xfff27a, 0, 1500, false, SWAY.head],
-    flowerW: [new THREE.SphereGeometry(0.07, 5, 4), 0xffffff, 0, 1500, false, SWAY.head],
-    flowerP: [new THREE.SphereGeometry(0.07, 5, 4), 0xff8ac6, 0, 1500, false, SWAY.head],
-    flowerB: [new THREE.SphereGeometry(0.07, 5, 4), 0x9ad0ff, 0, 1500, false, SWAY.head],
-    stem: [new THREE.CylinderGeometry(0.05, 0.07, 0.4, 6).translate(0, 0.2, 0), 0xe8e4d8, 0.015, 2500, false],
-    // Desert and badlands
-    cactus: [cactusGeo, C.cactus, 0.04, 2500, true],
-    dryBush: [new THREE.IcosahedronGeometry(0.55, 0), 0x9a8a5a, 0.03, 3500, false],
-    sandRock: [new THREE.DodecahedronGeometry(1, 0), C.sandstone, 0.05, 3000, true],
-    redRock: [new THREE.DodecahedronGeometry(1, 0), C.redrock, 0.05, 4000, true],
-    hoodoo: [hoodooGeo, shade(C.redrock, 1.08), 0.06, 1200, true],
-    // Jungle
-    tallTrunk: [new THREE.CylinderGeometry(0.18, 0.3, 6.3, 7).translate(0, 3.15, 0), 0x6a5a3a, 0.04, 3500, true],
-    palm: [frondGeo, C.jungleLeaf, 0.04, 3500, true, SWAY.frond],
-    fern: [fernGeo, 0x2f8a3a, 0.03, 4000, false, SWAY.fern],
-    // Crystal fields
-    crystal: [crystalGeo, 0x8ce0ff, 0.04, 3000, true],
-    spire: [new THREE.OctahedronGeometry(1, 0).scale(1, 5, 1).translate(0, 4.5, 0), 0xb894ff, 0.06, 800, true],
-    // Fungal groves
-    shroomStem: [new THREE.CylinderGeometry(0.25, 0.42, 3.2, 8).translate(0, 1.6, 0), C.shroomStem, 0.04, 3000, true],
-    shroomCap: [new THREE.SphereGeometry(1.6, 12, 6, 0, TAU, 0, Math.PI / 2).scale(1, 0.55, 1).translate(0, 3.1, 0), C.shroomCap, 0.05, 3000, true],
-    puff: [new THREE.IcosahedronGeometry(0.6, 1), 0xd8b8e8, 0.03, 2500, false],
-  };
-}
-// Each scenery type's geometry alone, which its collision triangles come from: for the server's
-// world, which draws nothing but must collide with what the screens draw.
-export function sceneryGeometries() {
-  return Object.fromEntries(Object.entries(sceneryTypes()).map(([k, [geo]]) => [k, geo]));
-}
+// The wilds' sets (world/scenery/): each kind's models in their styles and variants, built when
+// first scattered. Besides them, the glowing flora: little stems and the caps and shards that glow.
+const STEM = [new THREE.CylinderGeometry(0.05, 0.07, 0.4, 6).translate(0, 0.2, 0), 0xe8e4d8, 0.015];
+// What's only drawn near (the ground's detail): grass, flowers and the glowing flora.
+const DETAIL = new Set(['tuft', 'flowerY', 'flowerW', 'flowerP', 'flowerB', 'stem', 'cap', 'shard']);
+// Instanced sets start this big and double as more of them come into view.
+const SET_START = 64;
 const FLORA_TYPES = {
   shard: [new THREE.OctahedronGeometry(0.25).scale(0.6, 2.2, 0.6).translate(0, 0.5, 0), 3000],
   cap: [new THREE.SphereGeometry(0.2, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2).scale(1, 0.6, 1).translate(0, 0.38, 0), 2500],
@@ -1042,16 +958,9 @@ export class World {
   // ------------------------------------------------------------ scenery
   buildScenerySets() {
     this.sets = {};
-    for (const [k, [geo, color, outline, cap, shadow, wind = null]] of Object.entries(sceneryTypes())) {
-      const inst = instancedToon(geo, color, cap, { outline, castShadow: shadow, wind });
-      inst.group.traverse((o) => { o.frustumCulled = false; });
-      inst.finish(0);
-      this.root.add(inst.group);
-      this.sets[k] = { inst, cap, body: inst.group.children[0], hull: inst.group.children[1] ?? null };
-      // Small things that never had an ink hull (grass tufts, reeds, flowers) get no screen-space
-      // ink either: at their size it would turn them black.
-      if (!outline) noInk(this.sets[k].body.material);
-    }
+    // A set by its key (`${kind}.${style}#${variant}`, with `~` after it for the far model), made the
+    // first time something of it is scattered or drawn.
+    this.setFor = (k) => (this.sets[k] ??= this.scenerySet(k));
     for (const [k, [geo, cap]] of Object.entries(FLORA_TYPES)) {
       const mesh = new THREE.InstancedMesh(geo, noInk(new THREE.MeshBasicMaterial({ color: 0xffffff })), cap);
       mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(cap * 3), 3);
@@ -1062,6 +971,47 @@ export class World {
     }
   }
 
+  // One scenery set: its model (near or far) as an instanced toon mesh, coloured in its vertices
+  // and tinted per instance, with its ink shell, swaying as its kind does; and the model's
+  // collision triangles (a tree's trunk, a whole rock) for the colliders scattered from it.
+  scenerySet(k) {
+    const far = k.endsWith('~');
+    const key = far ? k.slice(0, -1) : k;
+    const kind = KINDS[key.split('.')[0]];
+    const [geo, color, outline] = kind ? [sceneryModel(key, { far }).geo, 0xffffff, kind.outline] : STEM;
+    const hit = kind && !far ? sceneryModel(key).hit : geo;
+    const inst = instancedToon(geo, color, SET_START, {
+      outline, castShadow: kind?.shadow ?? false, wind: kind?.wind ?? null, vertexColors: !!kind, tint: !!kind, double: !!kind?.double,
+    });
+    if (geo.attributes.pat) withSurfaces(inst.group.children[0].material, chainCompile);
+    inst.group.traverse((o) => { o.frustumCulled = false; });
+    inst.finish(0);
+    this.root.add(inst.group);
+    const set = { inst, cap: SET_START, body: inst.group.children[0], hull: inst.group.children[1] ?? null, hit, tint: !!kind };
+    // Small things that never had an ink hull (grass tufts, reeds, flowers) get no screen-space
+    // ink either: at their size it would turn them black.
+    if (!outline) noInk(set.body.material);
+    return set;
+  }
+
+  // Makes room in a set for n instances (doubling), keeping what's there.
+  growSet(set, n) {
+    if (n <= set.cap) return;
+    let cap = set.cap;
+    while (cap < n) cap *= 2;
+    for (const mesh of [set.body, set.hull]) {
+      if (!mesh) continue;
+      const m = new THREE.InstancedBufferAttribute(new Float32Array(cap * 16), 16);
+      m.setUsage(THREE.DynamicDrawUsage);
+      mesh.instanceMatrix = m;
+    }
+    if (set.tint) {
+      set.body.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(cap * 3).fill(1), 3);
+      set.body.instanceColor.setUsage(THREE.DynamicDrawUsage);
+    }
+    set.cap = cap;
+  }
+
   // Deterministic scatter for one chunk: per-type instance matrices (and flora colours), plus the
   // colliders for trees and rocks. Clear of camps, landmarks, roads and water.
   scatterChunk(ch) {
@@ -1070,15 +1020,21 @@ export class World {
     const lists = {};
     const colors = {};
     const colliders = [];
-    const push = (k, x, y, z, s, { ry = rnd() * Math.PI * 2, sy = s, tilt = 0, color = null, collision = false } = {}) => {
+    // `kind` is a scenery kind (world/scenery/models.js), drawn from the set for its style where it
+    // grows and a variant picked by where it stands, tinted a little as it stands; or a flora set.
+    let biome = null;
+    const push = (kind, x, y, z, s, { ry = rnd() * Math.PI * 2, sy = s, tilt = 0, color = null, collision = false } = {}) => {
       _e.set(tilt * (rnd() - 0.5), ry, tilt * (rnd() - 0.5));
       _m.compose(_v.set(x, y, z), _q.setFromEuler(_e), _s.set(s, sy, s));
+      const k = KINDS[kind] ? sceneryKey(kind, biome, x, z) : kind;
       (lists[k] ??= []).push(..._m.elements);
+      if (KINDS[kind]) color = sceneryTint(x, z, _col);
       if (color !== null) (colors[k] ??= []).push(color.r, color.g, color.b);
       if (collision) {
-        // (The server's sets are geometry only, the same as a screen's: see server/world.js.)
-        const set = this.sets[k];
-        return set ? { meshGeometry: set.colors ? set.mesh.geometry : set.body.geometry, meshMatrix: _m.clone() } : {};
+        // (The server's sets are the collision triangles only, the same as a screen's: see
+        // server/world.js.)
+        const set = this.setFor(k);
+        return { meshGeometry: set.hit, meshMatrix: _m.clone() };
       }
     };
     const pois = this.poisNear(ch.x0 + CHUNK / 2, ch.z0 + CHUNK / 2, CHUNK + 40);
@@ -1096,7 +1052,7 @@ export class World {
       for (let gz = 0; gz < CHUNK; gz += STEP) {
         const x = ch.x0 + gx + rnd() * STEP;
         const z = ch.z0 + gz + rnd() * STEP;
-        const biome = gen.biomeAt(x, z);
+        biome = gen.biomeAt(x, z);
         const roll = rnd();
         const near = Math.hypot(x, z) < 22;
         const y = this.analyticHeight(x, z);
@@ -1138,20 +1094,13 @@ export class World {
         const s = 0.75 + rnd() * 0.7;
         if (kind === 'pine' || kind === 'round' || kind === 'snowPine') {
           const meshData = push(kind, x, y - 0.1, z, s, { collision: true });
-          const m = lists[kind].slice(-16);
-          (lists.trunk ??= []).push(...m);
-          if (meshData.meshGeometry) meshData.meshGeometry = this.sets.trunk.body.geometry;
           colliders.push({ x, z, r: 0.36 * s, h: 2.2 * s, y, surface: 'planks', ...meshData });
         } else if (kind === 'palm') {
           const meshData = push('palm', x, y - 0.1, z, s, { tilt: 0.3, collision: true });
-          (lists.tallTrunk ??= []).push(...lists.palm.slice(-16));
-          if (meshData.meshGeometry) meshData.meshGeometry = this.sets.tallTrunk.body.geometry;
           colliders.push({ x, z, r: 0.32 * s, h: 6.3 * s, y, surface: 'planks', ...meshData });
         } else if (kind === 'shroom') {
           const ss = s * (0.8 + rnd() * 0.9);
-          const meshData = push('shroomCap', x, y - 0.05, z, ss, { tilt: 0.2, collision: true });
-          (lists.shroomStem ??= []).push(...lists.shroomCap.slice(-16));
-          if (meshData.meshGeometry) meshData.meshGeometry = this.sets.shroomStem.body.geometry;
+          const meshData = push('shroom', x, y - 0.05, z, ss, { tilt: 0.2, collision: true });
           colliders.push({ x, z, r: 0.43 * ss, h: 3.2 * ss, y, surface: 'chitin', ...meshData });
         } else if (kind === 'cactus') {
           const meshData = push('cactus', x, y - 0.1, z, s, { tilt: 0.12, collision: true });
@@ -1170,23 +1119,23 @@ export class World {
           colliders.push({ x, z, r: 1.05 * cs, h: 9.5 * cs, y, surface: 'crystal', ...meshData });
         } else if (kind === 'sandRock' || kind === 'redRock') {
           const rs = 0.5 + rnd() * 1.4;
-          const meshData = push(kind, x, y + rs * 0.25, z, rs, { sy: rs * 0.7, tilt: 3, collision: true });
+          const meshData = push(kind, x, y + rs * 0.2, z, rs, { sy: rs * 0.7, tilt: 0.3, collision: true });
           colliders.push({ x, z, r: rs, h: rs * 1.2, y, surface: 'rock', ...meshData });
         } else if (kind === 'fern' || kind === 'dryBush' || kind === 'puff') {
-          push(kind, x, kind === 'puff' ? y + s * 0.3 : y, z, s * (kind === 'fern' ? 1.1 : 1), { sy: kind === 'dryBush' ? s * 0.7 : s, tilt: 0.3 });
+          push(kind, x, kind === 'puff' ? y + s * 0.3 : y, z, s * (kind === 'fern' ? 1.1 : 1), { sy: kind === 'dryBush' ? s * 0.85 : s, tilt: 0.3 });
         } else if (kind === 'dead' || kind === 'charred') {
           const meshData = push(kind, x, y - 0.1, z, s, { collision: true });
           colliders.push({ x, z, r: 1.25 * s, h: 3.8 * s, y, surface: 'planks', ...meshData });
         } else if (kind === 'rock') {
           const rs = 0.4 + rnd() * 1.1;
-          const meshData = push('rock', x, y + rs * 0.25, z, rs, { sy: rs * 0.75, tilt: 3, collision: true });
+          const meshData = push('rock', x, y + rs * 0.2, z, rs, { sy: rs * 0.75, tilt: 0.3, collision: true });
           colliders.push({ x, z, r: rs, h: rs, y, surface: 'rock', ...meshData });
         } else if (kind === 'boulder') {
           const bs = 1.8 + rnd() * 2.6;
-          const meshData = push('boulder', x, y + bs * 0.3, z, bs, { sy: bs * 0.8, tilt: 3, collision: true });
+          const meshData = push('boulder', x, y + bs * 0.25, z, bs, { sy: bs * 0.8, tilt: 0.25, collision: true });
           colliders.push({ x, z, r: bs, h: bs * 1.3, y, surface: 'rock', ...meshData });
         } else if (kind === 'bush') {
-          push('bush', x, y + s * 0.3, z, s * 1.1, { sy: s * 0.75, tilt: 1 });
+          push('bush', x, y + s * 0.35, z, s * 1.1, { sy: s * 0.85, tilt: 0.3 });
         } else if (kind === 'reed') {
           for (let k = 0; k < 4; k++) {
             const rx = x + (rnd() - 0.5) * 2;
@@ -1196,9 +1145,11 @@ export class World {
         }
       }
     }
-    const DETAIL = new Set(['tuft', 'flowerY', 'flowerW', 'flowerP', 'flowerB', 'stem', 'cap', 'shard']);
     ch.scenery = {};
-    for (const [k, list] of Object.entries(lists)) ch.scenery[k] = { m: new Float32Array(list), c: colors[k] ? new Float32Array(colors[k]) : null, detail: DETAIL.has(k) };
+    for (const [k, list] of Object.entries(lists)) {
+      const kind = KINDS[k.split('.')[0]];
+      ch.scenery[k] = { m: new Float32Array(list), c: colors[k] ? new Float32Array(colors[k]) : null, detail: DETAIL.has(k.split('.')[0]), far: !!kind?.far };
+    }
     ch.sceneryColliders = colliders;
   }
 
@@ -1217,18 +1168,33 @@ export class World {
     return Math.hypot(g.height(x + e, z) - g.height(x - e, z), g.height(x, z + e) - g.height(x, z - e)) / (2 * e);
   }
 
-  // Re-packs every loaded chunk's scenery into the shared instanced meshes.
+  // Re-packs every loaded chunk's scenery into the shared instanced meshes: grass and flowers only
+  // where the ground's detail is (near), and the far models of trees and the like past it.
   packScenery() {
     this.sceneryDirty = false;
+    const fill = new Map();
+    for (const ch of this.chunks.values()) {
+      if (!ch.scenery) continue;
+      for (const [k, sc] of Object.entries(ch.scenery)) {
+        if (sc.detail && !ch.detail) continue;
+        const key = sc.far && !ch.detail ? `${k}~` : k;
+        let list = fill.get(key);
+        if (!list) fill.set(key, (list = []));
+        list.push(sc);
+      }
+    }
+    for (const key of fill.keys()) this.setFor(key);
     const counts = {};
     for (const [k, set] of Object.entries(this.sets)) {
-      let n = 0;
+      const list = fill.get(k) ?? [];
+      let total = 0;
+      for (const sc of list) total += sc.m.length / 16;
+      if (!set.colors) this.growSet(set, total);
       const target = set.colors ? set.mesh : set.body;
       const arr = target.instanceMatrix.array;
-      const colArr = set.colors ? set.mesh.instanceColor.array : null;
-      for (const ch of this.chunks.values()) {
-        const sc = ch.scenery?.[k];
-        if (!sc || (sc.detail && !ch.detail)) continue;
+      const colArr = set.colors ? set.mesh.instanceColor.array : set.tint ? set.body.instanceColor.array : null;
+      let n = 0;
+      for (const sc of list) {
         const cnt = Math.min(sc.m.length / 16, set.cap - n);
         if (cnt <= 0) break;
         arr.set(cnt * 16 === sc.m.length ? sc.m : sc.m.subarray(0, cnt * 16), n * 16);
@@ -1238,19 +1204,15 @@ export class World {
       counts[k] = n;
       // Most biomes use a few of the sets: an empty one would still cost a draw (and a shadow
       // draw) every frame.
-      (set.colors ? set.mesh : set.body).visible = n > 0;
-      if (set.colors) {
-        set.mesh.count = n;
-        set.mesh.instanceMatrix.needsUpdate = true;
-        set.mesh.instanceColor.needsUpdate = true;
-      } else {
-        set.body.count = n;
-        set.body.instanceMatrix.needsUpdate = true;
-        if (set.hull) {
-          set.hull.instanceMatrix.array.set(arr.subarray(0, n * 16));
-          set.hull.count = n;
-          set.hull.instanceMatrix.needsUpdate = true;
-        }
+      target.visible = n > 0;
+      target.count = n;
+      target.instanceMatrix.needsUpdate = true;
+      if (colArr) (set.colors ? set.mesh : set.body).instanceColor.needsUpdate = true;
+      if (set.hull) {
+        set.hull.instanceMatrix.array.set(arr.subarray(0, n * 16));
+        set.hull.count = n;
+        set.hull.visible = n > 0;
+        set.hull.instanceMatrix.needsUpdate = true;
       }
     }
     this.sceneryCounts = counts;
