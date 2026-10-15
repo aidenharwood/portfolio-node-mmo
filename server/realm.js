@@ -713,17 +713,54 @@ export class Realm {
     for (const other of this.sessions.values()) if (other.known.has(s)) other.send(look);
   }
 
+  // A player's character as it's stored: { id, data, level }.
+  row(s) {
+    if (s.state) s.extras.pos = s.state.p;
+    return { id: s.charId, data: characterData(s.core, s.extras), level: s.core.stats.level };
+  }
+
   // A player's saves go one after another (a slow write can never land after a newer one).
   saveCharacter(s) {
-    if (s.state) s.extras.pos = s.state.p;
-    const data = characterData(s.core, s.extras);
-    const level = s.core.stats.level;
+    if (s.unsaved) return s.saving ?? Promise.resolve();
+    const r = this.row(s);
     s.dirty = false;
     s.savedAt = Date.now();
     s.saving = (s.saving ?? Promise.resolve())
-      .then(() => this.store.saveCharacter(s.charId, data, level))
+      .then(() => this.store.saveCharacter(r.id, r.data, r.level, this.layer))
+      .then((held) => { if (!held) this.dropUnsaved(s, 'another layer has them now'); })
       .catch((err) => { s.dirty = true; log.error('realm', err, { saving: s.name }); });
     return s.saving;
+  }
+
+  // A write that hands things between characters (or to a letter), which must land whole:
+  // `write()` (one transaction) goes after each one's earlier saves. If it fails, they're let go
+  // unsaved, so they come back as stored — all of it or none of it — rather than half of it
+  // landing with the regular saves later. Resolves to what `write` did (true, false or null).
+  saveTogether(list, write) {
+    for (const s of list) {
+      s.dirty = false;
+      s.savedAt = Date.now();
+    }
+    const done = Promise.all(list.map((s) => s.saving))
+      .then(write)
+      .then((ok) => {
+        if (ok === false) for (const s of list) this.dropUnsaved(s, 'another layer has them now');
+        return ok;
+      }, (err) => {
+        for (const s of list) this.dropUnsaved(s, err);
+        return false;
+      });
+    for (const s of list) s.saving = done;
+    return done;
+  }
+
+  // The server's copy of a character can't be stored (another layer holds them, or a transfer
+  // failed): nothing more of it is written, and the player is let go to load what's stored.
+  dropUnsaved(s, why) {
+    if (s.unsaved) return;
+    s.unsaved = true;
+    log.warn('realm', `${s.name} let go unsaved: ${why?.message ?? why}`);
+    s.ws?.terminate();
   }
 
   // Closing: no one new comes here; everyone is saved and let go. In the cluster their screens

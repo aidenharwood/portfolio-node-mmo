@@ -8,6 +8,8 @@
 // reward chest: once a week per raid, per encounter, per tier, for each character.
 //
 // They're entered at a city's raid gate (the gate yard, world/places.js), formed at its war table.
+// The story opens each one (`needs: { flag }`): a raid member who has the flag takes the whole raid
+// group (or, with none, their party) in, whatever anyone's level (DEC-4).
 // Boss health and how many of each mechanic come (soaks, marks, adds) follow how many are in the
 // fight; the tier is the run's Threat for everyone in it, as in a dungeon.
 import { DUNGEONS, lockKey } from './dungeons.js';
@@ -17,8 +19,10 @@ export const RAID_GRID = 168;         // a raid's plot, cells per side (336 m: a
 
 export const RAIDS = {
   broodmother: {
-    id: 'broodmother', raid: true, name: 'The Brood Mother', theme: 'hive', level: 16, minLevel: 14, seed: 0xb40d3a, size: RAID_SIZE,
+    id: 'broodmother', raid: true, name: 'The Brood Mother', theme: 'hive', level: 16, seed: 0xb40d3a, size: RAID_SIZE,
     grid: RAID_GRID, open: false,
+    // Act II's "The Gate Opens" (quest 11) opens it.
+    needs: { flag: 'broodgate_open' },
     blurb: 'Under the Brood Pits, past where the tunnels have any right to go, the nests open into halls the size of cathedrals — and at the bottom of them, the thing that lays the Hive.',
     // The final boss, for whatever reads a dungeon's.
     boss: { type: 'broodmother', name: 'The Brood Mother' },
@@ -62,7 +66,15 @@ export const raidLockKey = (raid, enc, tier) => `${lockKey(raid, tier)}:${enc}`;
 // A dungeon or a raid by its id (the instance manager runs both).
 export const instanceDef = (id) => DUNGEONS[id] ?? RAIDS[id] ?? null;
 
-// At a city's raid gate: the raids someone may go into.
-export function raidChoices(level = 1, { dev = false } = {}) {
-  return Object.values(RAIDS).map((r) => ({ def: r, locked: !dev && level < (r.minLevel ?? r.level) }));
+// At a city's raid gate: the raids someone may go into. `sealed`: the story hasn't opened it to
+// them; `locked`: sealed with nobody to take them in (`grouped`: they're in a raid group or a
+// party, where one who has it opens it for all — the instance manager has the last word).
+export function raidChoices(flags = {}, { dev = false, grouped = false } = {}) {
+  return Object.values(RAIDS).map((r) => {
+    const sealed = !dev && !!r.needs?.flag && !flags[r.needs.flag];
+    return { def: r, sealed, locked: sealed && !grouped };
+  });
 }
+
+// Why a raid's gate stays shut to someone.
+export const sealedText = (def) => `${def.name}'s gate is sealed. The Wardens open it in the story — or go in with someone in your raid group or party who has.`;

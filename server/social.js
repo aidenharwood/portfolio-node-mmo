@@ -331,14 +331,13 @@ export class Social {
     if (gold > core.stats.gold) return this.tell(s, "You don't have that much gold.");
     const item = bi !== null ? core.inventory.backpack[bi] : null;
     if (bi !== null && !item) return this.tell(s, 'That item isn\'t in your backpack.');
-    // The gold and item leave the sender first (a server op both sides apply), then the letter
-    // goes, and the sender is saved straight away so the two can't come apart.
+    // The gold and item leave the sender (a server op both sides apply), and the letter and the
+    // sender without them are written in one go, so the two can't come apart.
     const op = { op: 'post', roll: { bi, gold } };
     if (!core.apply(op).ok) return this.tell(s, "Couldn't send that.");
-    s.dirty = true;
     s.send({ t: 'sop', op });
-    await this.store.sendMail(to.id, s.name, body, gold, item?.recipe ?? null);
-    await this.realm.saveCharacter(s);
+    const row = this.realm.row(s);
+    if (!await this.realm.saveTogether([s], () => this.store.postMail(row, this.realm.layer, to.id, s.name, body, gold, item?.recipe ?? null))) return;
     this.tell(s, `Sent to ${to.name}.`);
     this.bus.publish('all', { k: 'mailNew', toChar: to.id, from: s.name });
   }
@@ -348,12 +347,16 @@ export class Social {
     if (!m || m.claimed || (!m.gold && !m.item)) return this.tell(s, 'Nothing to claim.');
     const core = s.core;
     if (m.item && !core.inventory.backpack.includes(null)) return this.tell(s, 'No room in your backpack.');
-    if (!await this.store.claimMail(id, s.charId)) return;
+    // The letter marked claimed and the claimer with what it carried, written in one go.
     const op = { op: 'claim', roll: { gold: m.gold, item: m.item } };
-    core.apply(op);
-    s.dirty = true;
-    s.send({ t: 'sop', op });
-    await this.realm.saveCharacter(s);
+    const ok = await this.realm.saveTogether([s], () => this.store.claimMailInto(id, s.charId, this.realm.layer, () => {
+      if (m.item && !core.inventory.backpack.includes(null)) return null;
+      core.apply(op);
+      s.send({ t: 'sop', op });
+      return this.realm.row(s);
+    }));
+    if (ok === null) return this.tell(s, 'Nothing to claim.');
+    if (!ok) return;
     await this.sendInbox(s);
   }
 

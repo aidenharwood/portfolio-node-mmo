@@ -39,7 +39,7 @@ import { Stats } from './rpg/Stats.js';
 import { QuestLog, RACE, compass } from './rpg/Quests.js';
 import { respecCost } from './rpg/talents.js';
 import { BARKS } from './rpg/storyline.js';
-import { reachedPlaces, defenceAt, heldObjectives, questDrops } from './rpg/questWatch.js';
+import { reachedPlaces, defenceAt, heldObjectives, questDrops, eventCalled, eventObjectives } from './rpg/questWatch.js';
 import { Moments } from './ui/Moments.js';
 import { Projectiles } from './combat/Projectiles.js';
 import { Aim, rayCylinder } from './combat/Aim.js';
@@ -1264,11 +1264,12 @@ class Game {
       // Where the story names it: someone to talk to, an object, a place to reach or hold.
       const at = (ref) => {
         const t = this.quests.ref(ref, q);
-        return t && { x: t.x, z: t.z, radius: o.type === 'goto' || o.type === 'defend' ? (o.r ?? t.r ?? 4) : 2 };
+        return t && { x: t.x, z: t.z, radius: o.type === 'goto' || o.type === 'defend' || o.type === 'event' ? (o.r ?? t.r ?? 4) : 2 };
       };
       if (o.type === 'talk' || o.type === 'choose') { const t = at(o.npc); if (t) return { ...t, kind: 'talk' }; continue; }
       if (o.type === 'use') { const t = at(o.object); if (t) return { ...t, kind: 'use' }; continue; }
       if (o.type === 'goto' || o.type === 'defend') { const t = at(o.at); if (t) return { ...t, kind: o.type }; continue; }
+      if (o.type === 'event') { const t = at(o.at); if (t) return { ...t, kind: 'defend' }; continue; }
       if (o.type === 'clear') {
         const c = this.world.poiById(o.camp) ?? this.world.poiById(this.quests.ref(o.camp, q)?.poi ?? '');
         if (c) return { x: c.x, z: c.z, radius: c.radius ?? 12, kind: 'clear' };
@@ -1956,7 +1957,9 @@ class Game {
   onEventEnd(ev) {
     if (this.net.inWorld) return;
     const me = ev.result.people.find((p) => p.id === 0);
-    if (me) this.charLink.do({ op: 'event', roll: eventRoll(ev, me, this.stats.level, () => this.char.gid()) });
+    if (!me) return;
+    this.charLink.do({ op: 'event', roll: eventRoll(ev, me, this.stats.level, () => this.char.gid()) });
+    for (const [id, i] of eventObjectives(this.quests, ev)) this.charLink.do({ op: 'evwon', roll: { id, i } });
   }
 
   // Offline: a warband wiped out (online the server rolls the bonus).
@@ -1977,13 +1980,16 @@ class Game {
       const roll = visitRoll(this.world, p.x, p.z, R);
       if (roll) this.charLink.do({ op: 'visit', roll });
     }
-    // Offline, what the server watches for quests (rpg/questWatch.js): places reached, places to hold.
+    // Offline, what the server watches for quests (rpg/questWatch.js): places reached, places to
+    // hold, events called.
     if (!this.net.inWorld && !below && this.player.alive && (this.questTimer = (this.questTimer ?? 0) - dt) <= 0) {
       this.questTimer = 1;
       const p = this.player.position;
       for (const [id, i] of reachedPlaces(this.quests, p.x, p.z)) this.charLink.do({ op: 'reach', roll: { id, i } });
       const d = defenceAt(this.quests, this.world, p.x, p.z);
       if (d) this.enemyLayer.sim?.encounters.defend(d);
+      const e = eventCalled(this.quests, p.x, p.z);
+      if (e) this.enemyLayer.sim?.director?.startStory(e.site, e.type);
     }
     const combo = this.player.combo;
     if (combo >= 25 && combo > R.bestCombo && (combo % 25 === 0 || combo === 50)) this.charLink.do({ op: 'feat', f: 'combo', v: combo });
