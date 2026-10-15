@@ -213,6 +213,22 @@ export const OBJECT_MODELS = {
     return 0;
   },
 
+  // The Foundry Below's way in (Act III): a Synth blast hatch set in the back wall of a cut, white
+  // plate in a graphite frame, cyan along its seams and a lit strip over the lintel. Its doors are
+  // shut for good; the way down opens to whoever the story has opened it to (world/dungeons.js).
+  hatch(w, p, n, g, wa) {
+    piece(g, G.box(6.4, 5.4, 1.2), 0x2a2e36, { pos: [0, 2.7, -0.6], outline: 0.04 });
+    for (const s of [-1, 1]) {
+      piece(g, G.box(2.2, 4.0, 0.3), 0xd8dde4, { pos: [s * 1.12, 2.1, 0.05], outline: 0.025 });
+      piece(g, G.box(0.08, 3.6, 0.06), SYNTH, { pos: [s * 0.04, 2.1, 0.22], glow: true, outline: 0 });
+      piece(g, G.box(0.6, 5.0, 1.0), 0x4a505c, { pos: [s * 2.9, 2.5, -0.1], outline: 0.02 });
+    }
+    piece(g, G.box(4.6, 0.14, 0.1), SYNTH, { pos: [0, 4.4, 0.05], glow: true, outline: 0 });
+    piece(g, G.box(5.2, 0.5, 0.8), 0x4a505c, { pos: [0, 4.85, 0], outline: 0.02 });
+    for (const lx of [-2.6, -1.2, 0, 1.2, 2.6]) wcol(w, wa, lx, -0.6, 0.9, 5.4);
+    return 0;
+  },
+
   // One of the Farcall Array's consoles: a Maker slab of black stone, its face cut with runes, and
   // a Warden panel welded over the top. Screaming red while the Array calls; dark once you've
   // powered it down.
@@ -473,6 +489,37 @@ export const STORY_BUILDERS = {
     for (let k = 0; k < 4; k++) {
       const [x, y, z] = local(g, p.x + (rnd() - 0.5) * p.r, p.z + (rnd() - 0.5) * p.r, w);
       piece(g, G.cyl(0.08, 0.06, 1.4, 6), C.bone, { pos: [x, y + 0.1, z], rot: [Math.PI / 2, rnd() * 3, 0], outline: 0.01 });
+    }
+    objectProps(w, p, g, g.position);
+    flatten(g);
+    w.finish(g);
+  },
+
+  // The Foundry Below (Act III): a cut into the ground, rock walls either side and behind, the blast
+  // hatch at its back; light poles on either side and old Synth scrap left lying where it fell.
+  // Local +z faces Ironreach, the way in.
+  foundrybelow(w, p) {
+    const g = siteGroup(w, p);
+    const rnd = w.rnd;
+    for (let k = 0; k < 11; k++) {
+      // Walls of rock round the back half of the cut, open toward the city.
+      const a = p.rot + Math.PI + (k - 5) * 0.32;
+      const [x, z] = out(p.x, p.z, a, p.r - 1.5 + (k % 2) * 0.8);
+      const [x3, y3, z3] = local(g, x, z, w);
+      const s = 1.8 + rnd() * 0.9;
+      piece(g, G.dodeca(s), k % 3 ? C.stoneDark : C.stone, { pos: [x3, y3 + s * 0.6, z3], rot: [rnd() * 3, rnd() * 3, 0], scale: [1, 1.3, 1], outline: 0.04 });
+      w.addCollider(x, z, s * 0.85, s * 1.6);
+    }
+    for (const s of [-1, 1]) {
+      const [x, z] = out(p.x, p.z, p.rot + s * 0.9, p.r - 3);
+      const [x3, y3, z3] = local(g, x, z, w);
+      piece(g, G.cyl(0.08, 0.1, 4.2, 6), 0x2a2e36, { pos: [x3, y3 + 2.1, z3], outline: 0.01 });
+      piece(g, G.box(0.45, 0.2, 0.3), SYNTH, { pos: [x3, y3 + 4.2, z3], glow: true, outline: 0.006 });
+      w.addCollider(x, z, 0.25, 4.2);
+    }
+    for (let k = 0; k < 3; k++) {
+      const [x3, y3, z3] = local(g, p.x + (rnd() - 0.5) * p.r, p.z + (rnd() - 0.5) * p.r * 0.6, w);
+      piece(g, G.box(1.2 + rnd(), 0.4, 0.8), 0xd8dde4, { pos: [x3, y3 + 0.2, z3], rot: [rnd() * 0.4, rnd() * 3, rnd() * 0.4], outline: 0.015 });
     }
     objectProps(w, p, g, g.position);
     flatten(g);

@@ -57,6 +57,8 @@ export const ACHIEVEMENTS = [
   { id: 'dungeon_run', cat: 'dungeons', name: 'Private Business', desc: 'Finish a private run.', goal: 1, points: 10, stat: (r) => clears(r, 1) },
   { id: 'dungeon_10', cat: 'dungeons', name: 'Regular', desc: 'Finish 10 private runs.', goal: 10, points: 15, stat: (r) => clears(r, 1) },
   { id: 'dungeon_elite', cat: 'dungeons', name: 'Deep and Dark', desc: 'Finish a private run on Elite.', goal: 1, points: 25, title: 'Deepdelver', stat: (r) => clears(r, 3) },
+  // Act III's dungeon (not in "Into Every Dark", whose words name the first three).
+  { id: 'dungeon_foundrybelow', cat: 'dungeons', name: 'Down the Line', desc: 'Defeat the Forge-Overseer in the Foundry Below.', goal: 1, points: 15, stat: (r) => ((r.dungeons?.foundrybelow ?? []).some((v) => v > 0) ? 1 : 0) },
   // ---------------------------------------------------------------- raids
   { id: 'raid_warden', cat: 'raids', name: 'Through the Gate', desc: 'Defeat the Brood Warden.', goal: 1, points: 10, stat: (r) => raidKills(r, 'broodmother', 'warden') },
   { id: 'raid_choir', cat: 'raids', name: 'Silence', desc: 'Defeat the Psion Choir.', goal: 1, points: 15, stat: (r) => raidKills(r, 'broodmother', 'choir') },

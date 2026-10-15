@@ -39,9 +39,12 @@ export const STORY_PLACES = {
   titan: { name: 'The Fallen Titan', from: 'city3', turn: 1.3, dist: CITY_WALL + 300, r: 14, flat: [10, 16], act: 3, face: 'city3' },
   salvage: { name: 'Salvage Rig', from: 'titan', away: 'city3', dist: 70, r: 11, flat: [8, 14], act: 3, keep: 0.3, around: [0, 0.6, -0.6, 1.2, -1.2] },
   yard: { name: 'Brannock\'s Yard', from: 'city3', turn: -0.6, dist: CITY_WALL + 50, r: 12, flat: [8, 14], act: 3, face: 'city3' },
+  // Act III: the way down into the Foundry Below (a dungeon: world/dungeons.js), a Synth blast
+  // hatch in a cut out past Ironreach.
+  foundrybelow: { name: 'The Foundry Below', from: 'city3', turn: 2.4, dist: CITY_WALL + 380, r: 12, flat: [8, 14], act: 3, face: 'city3' },
 };
 // (New places go on the end: each draws from the seed in turn, so the earlier ones stay put.)
-const ORDER = ['foundry', 'outpost', 'vault', 'beacon1', 'beacon2', 'relicdig', 'pilgrim', 'broodpits', 'array', 'sporefield', 'psionnest', 'titan', 'salvage', 'yard'];
+const ORDER = ['foundry', 'outpost', 'vault', 'beacon1', 'beacon2', 'relicdig', 'pilgrim', 'broodpits', 'array', 'sporefield', 'psionnest', 'titan', 'salvage', 'yard', 'foundrybelow'];
 
 // Story folk with names of their own (looks fixed; world/settlements.js dresses them).
 export const STORY_FOLK = {
@@ -216,6 +219,10 @@ export function storyIn(gen, rx, rz) {
       // Isa's yard: the cradle at the back, under the crane, facing the gap toward the city.
       poi = { ...base, type: 'story', kind: 'yard', id: `p:${key}:yard`, r: P.r, tag: 'sy', gate: P.rot };
       poi.npcs = [folkFor(poi, rng, 0, 'object', P.rot + Math.PI, 2.5, { object: 'yard:cradle', model: 'cradle', facing: P.rot })];
+    } else if (P.key === 'foundrybelow') {
+      // The hatch at the back of the cut, facing the way you come in from the city.
+      poi = { ...base, type: 'story', kind: 'foundrybelow', id: `p:${key}:foundrybelow`, r: P.r, tag: 'sfb' };
+      poi.npcs = [folkFor(poi, rng, 0, 'object', P.rot + Math.PI, 3, { object: 'foundrybelow:hatch', model: 'hatch', facing: P.rot })];
     } else if (P.key === 'relicdig') {
       poi = { ...base, type: 'story', kind: 'relicdig', id: `p:${key}:relicdig`, r: P.r, tag: 'sr' };
       poi.npcs = [folkFor(poi, rng, 0, 'story', P.rot, 4, { folk: 'chief' })];

@@ -150,6 +150,15 @@ const door = w.storyPlace('vault').npcs.find((n) => n.object === 'vault:door');
 stand(A, door.x + 1, door.z + 1);
 check(!op(A.core, { op: 'enter', d: 'vault', mode: 'run', tier: 0, via: 'entrance' }), `the Sunken Vault refused before the seal is broken ("${dun.error}")`);
 check(!dun.enter({ id: 1, position: A.position, party: 'x', level: 8, flags: {} }, { d: 'synthlab', mode: 'run', tier: 0 }), 'the dev-only dungeons refused');
+// The Foundry Below (Act III): sealed at its hatch until the Fallen Titan's core is taken (c6).
+{
+  const hatch = w.storyPlace('foundrybelow')?.npcs.find((n) => n.object === 'foundrybelow:hatch');
+  const at = hatch && new THREE.Vector3(hatch.x + 1, w.groundHeight(hatch.x + 1, hatch.z + 1), hatch.z + 1);
+  const who = (flags) => ({ id: 91, position: at, party: 'solo:91', level: 21, flags });
+  check(!!hatch && !dun.enter(who({}), { d: 'foundrybelow', mode: 'run', tier: 0, via: 'entrance' }) && /sealed/.test(dun.error), `the Foundry Below refused at its hatch before the Titan's core is taken ("${dun.error}")`);
+  check(!!hatch && !!dun.enter(who({ titan_core_taken: true }), { d: 'foundrybelow', mode: 'run', tier: 0, via: 'entrance' }), 'and let in once it is');
+  if (hatch) dun.out(91);
+}
 stand(A, gate.x + 1.5, gate.z + 1.5);
 const back = [A.position.x, A.position.y, A.position.z];
 check(op(A.core, { op: 'enter', d: 'foundry', mode: 'open', via: 'entrance' }) && A.core.dungeon?.d === 'foundry', 'into the Rustjaw Foundry\'s open-world copy from its gate');

@@ -492,6 +492,17 @@ export const STORY = [
     turnIn: '"Containment held. Origin unknown." It wasn\'t fighting us when it fell, sleeper. It was keeping something out of the network — long before the Pilgrim came down. Your voice isn\'t the first to get in. I want to know who was — and I want to know where they make these things.',
     rewards: { xp: 3600, gold: 1200, armor: { minTier: 3 } },
   },
+  {
+    id: 'c8', kind: 'story', act: 3, level: 21, giver: 'city3:engineer', requires: ['c7'], title: 'The Foundry Below',
+    offer: 'The core gave up more than its log. Its access codes open a hatch {foundrybelow:dir} of here that nobody in Ironreach has ever got through — the way down to where they make them. The Foundry Below. Go down, find whatever runs it, and stop it. And bring me anything that looks like plans.',
+    stages: [
+      { text: 'Reach the hatch at {foundrybelow}.', objectives: [{ type: 'goto', at: 'foundrybelow', count: 1, text: 'Reach {foundrybelow}' }] },
+      { text: 'Go down through the Foundry Below and stop what runs it.', objectives: [{ type: 'dungeon', d: 'foundrybelow', at: 'foundrybelow:hatch', count: 1, text: 'Clear the Foundry Below' }] },
+    ],
+    turnIn: 'A whole line, still running. Still building. For orders no one alive ever gave. ...What did you bring up? Let me see.',
+    setFlags: ['foundry_below_cleared'],
+    rewards: { xp: 3800, gold: 1260, weapon: { minTier: 3 } },
+  },
 ];
 
 // Short scenes, played on screen when a quest asks (ui/Moments.js): a few shots, each a camera

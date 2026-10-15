@@ -234,6 +234,10 @@ console.log('Act III\'s people and places:');
   const clash = [];
   for (let rx = -12; rx <= 12; rx++) for (let rz = -12; rz <= 12; rz++) for (const p of w.gen.region(rx, rz).pois) if (p.type === 'landmark' && p.name === 'The Fallen Titan' && !p.story) clash.push(p.id);
   check(!clash.length, `no other landmark is called "The Fallen Titan"${clash.length ? ` (${clash.join(', ')})` : ''}`);
+  // The Foundry Below (B-3): its hatch out past Ironreach, the way down.
+  const below = poiOf('foundrybelow');
+  const bd = below && Math.hypot(below.x - c3.x, below.z - c3.z);
+  check(below?.type === 'story' && below.kind === 'foundrybelow' && bd < 700 && !!at('foundrybelow:hatch'), `the Foundry Below's hatch stands out past Ironreach (${bd ? Math.round(bd) : '-'} m)`);
 }
 
 // ---------------------------------------------------------------- dungeon objectives
@@ -328,6 +332,7 @@ check(quests.flags.act3_started && quests.completed.has('c2'), 'Act III under wa
 check(quests.completed.has('c3'), 'the first war-walker stopped (c3, a public event the quest called)');
 check(quests.flags.synth_orders_known && quests.completed.has('c5'), 'the Synths\' orders known from the stone, and the Pilgrim heard out');
 check(quests.flags.titan_core_taken && quests.completed.has('c7'), 'the Fallen Titan\'s core pulled, and read at Brannock\'s Yard');
+check(quests.flags.foundry_below_cleared && (core.records.dungeons.foundrybelow ?? []).some((n) => n > 0), 'down the Foundry Below to its boss (c8, the dungeon step)');
 check(npc(storyRef(w, 'city1:raidgate')?.npc ?? '')?.gate === 'raid', 'New Meridian\'s raid gate can be pointed at (city1:raidgate)');
 check(!!quests.flags.told_ashe !== !!quests.flags.kept_wardens_secret, `Ysolde's confession: one choice made (${quests.flags.told_ashe ? 'told Ashe' : quests.flags.kept_wardens_secret ? 'kept it' : 'neither'})`);
 {
@@ -463,7 +468,7 @@ for (const a6 of [0, 1]) {
       const onePerPair = pairs.every((pair, k) => f[pair[picked[k]]] && !f[pair[1 - picked[k]]]);
       const bad = lines.filter(([, t]) => !LINE_OK(t));
       const name = `Krell ${a6 ? 'freed' : 'chained'}, voice ${a8 ? 'kept' : 'told'}, Wardens' secret ${b5 ? 'kept' : 'told Ashe'}`;
-      check(!stuck && f.act2_done && f.synth_orders_known && f.titan_core_taken && onePerPair && !bad.length,
+      check(!stuck && f.act2_done && f.synth_orders_known && f.titan_core_taken && f.foundry_below_cleared && onePerPair && !bad.length,
         `${name}: ${stuck ?? (bad.length ? `bad lines: ${bad.map(([w]) => w).join(', ')}` : `Acts II and III so far done, ${lines.length} lines`)}`);
     }
   }

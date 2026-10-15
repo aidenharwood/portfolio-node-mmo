@@ -81,6 +81,14 @@ export const DUNGEONS = {
     blurb: 'Hive tunnels out past Farcall, chewed down through the rock to the nests — and the thing that lays in them.',
     boss: { type: 'queen', name: 'The Brood Matron', tag: 'matron' }, mini: { type: 'praetorian', name: 'The Gravid Guard' },
   },
+  // Act III: where the Synths are made, under the highlands past Ironreach. Sealed until the
+  // Fallen Titan's core is taken (its codes are the way down). The standard route for now; G-2's
+  // structural twist can come to it later without moving its id or its way in.
+  foundrybelow: {
+    id: 'foundrybelow', name: 'The Foundry Below', theme: 'synth', level: 21, seed: 0xf0b31a, open: true, entrance: 'foundrybelow:hatch', needs: { flag: 'titan_core_taken' },
+    blurb: 'Under the highlands, the line where the Synths are made — still running, still building, for orders nobody living gave.',
+    boss: { type: 'colossus', name: 'The Forge-Overseer', tag: 'forgeoverseer' }, mini: { type: 'bulwark', name: 'The Line Foreman' },
+  },
   // The other two themes, for the dev panel and the checks.
   synthlab: {
     id: 'synthlab', name: 'Relay Station Kappa', theme: 'synth', level: 16, seed: 0x5717ab, open: false, dev: true,
@@ -93,7 +101,7 @@ export const DUNGEONS = {
     boss: { type: 'behemoth', name: 'The Old Bull' }, mini: { type: 'thunderhorn', name: 'Greyhorn' },
   },
 };
-export const LAUNCH = ['foundry', 'vault', 'brood'];
+export const LAUNCH = ['foundry', 'vault', 'brood', 'foundrybelow'];
 
 // The UTC day, for the reward chest's lockout (once a day per dungeon per tier).
 export const lockDay = (ms = Date.now()) => Math.floor(ms / 86400000);
