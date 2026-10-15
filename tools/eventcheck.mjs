@@ -528,7 +528,8 @@ console.log('On the server (server/simhost.js):');
   move(c, hive.p.x, hive.p.z);
   move(d, hive.p.x + 3, hive.p.z);
   move(e, hive.p.x + 900, hive.p.z);
-  tick(2);
+  // (Until the world round them is built and they're told: the server builds it a slice a tick.)
+  for (let t = 0; t < 6 && !c.out.some((m) => m.t === 'wev'); t += 0.5) tick(0.5);
   const sev = [...hd.events.values()].find((x) => x.story);
   check(!!sev && sev.site.id === hive.p.id && sev.locked, `the server's quest watch starts it for the players on the step (${sev?.name})`);
   const sw = c.out.filter((m) => m.t === 'wev').at(-1)?.l.find((v) => v.id === sev?.id);
