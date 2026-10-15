@@ -73,9 +73,12 @@ function build(def, probe) {
   const kit = KITS[fort ? FORT_KIT[def.race] ?? 'scav' : def.style] ?? KITS.scav;
   const pieces = [];
   const blocked = (x, z) => !!probe && probe(def.x + x, def.z + z);
+  // Folk who belong here (a story camp's): nothing is built where they stand.
+  const folk = (def.npcs ?? []).map((n) => [n.x - def.x, n.z - def.z]);
   const add = (kind, x, z, rot = 0, extra = {}) => {
     if (blocked(x, z)) return null;
     const [r, h] = PIECES[kind] ?? [0, 0];
+    if (folk.some(([fx, fz]) => Math.hypot(fx - x, fz - z) < r + 1.2)) return null;
     const p = { kind, x, z, rot, r, h, ...extra };
     pieces.push(p);
     return p;
