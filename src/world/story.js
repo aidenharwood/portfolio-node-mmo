@@ -236,6 +236,11 @@ function resolve(world, ref, ctx) {
     if (!c) return null;
     const heart = gen.region(c.rx, c.rz).pois.find((p) => p.type === 'city');
     if (!tail) return { x: c.x, z: c.z, r: CITY_WALL, name: c.name, poi: heart?.id };
+    // The raid gate, in the city's gate yard (world/places.js planCity).
+    if (tail === 'raidgate') {
+      const yard = gen.region(c.rx, c.rz).pois.find((p) => p.type === 'district' && p.kind === 'gates' && p.city === heart?.id);
+      return person(npcOf(yard, (n) => n.role === 'gate' && n.gate === 'raid'), yard);
+    }
     return person(npcOf(heart, (n) => n.role === tail || n.folk === tail), heart);
   }
   const S = storyPlaces(gen)[head];

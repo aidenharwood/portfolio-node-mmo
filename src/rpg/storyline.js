@@ -351,6 +351,43 @@ export const STORY = [
     setFlags: ['array_destroyed'],
     rewards: { xp: 2200, gold: 720, armor: { minTier: 3 } },
   },
+  {
+    id: 'b10', kind: 'story', act: 2, level: 15, giver: 'city1:warden', requires: ['b9'], title: 'Marshal the Wardens',
+    offer: 'The Array\'s dead, but the brood isn\'t. Whatever lays them is still down there, and no one blade is going to reach it. Come to the war table. It\'s time the Wardens fought like an army.',
+    stages: [{
+      text: 'Join High Warden Ashe at the war table.',
+      objectives: [{ type: 'talk', npc: 'city1:warden', count: 1, text: 'Talk to High Warden Ashe' }],
+      say: {
+        'city1:warden': {
+          told_ashe: 'I read Ysolde\'s letter three times. Keepers. We were keepers, and we forgot. Well — we remember now, and every Warden at this table knows it. No more secrets. We go down together: raid groups, a dozen strong, gathered here at the war table.',
+          kept_wardens_secret: 'Ysolde won\'t come to the table — she sent this instead. An old Warden seal; I\'ve never seen its like. Said you\'d know what it means. ...Fine. Keep your counsel. We go down together: raid groups, a dozen strong, gathered here at the war table.',
+          default: 'We go down together: raid groups, a dozen strong, gathered here at the war table.',
+        },
+      },
+    }],
+    turnIn: 'Gather who you trust at the war table and they\'ll march with you. Now — the gate.',
+    rewards: { xp: 2300, gold: 760, weapon: { minTier: 3 } },
+  },
+  {
+    id: 'b11', kind: 'story', act: 2, level: 16, giver: 'city1:warden', requires: ['b10'], title: 'The Gate Opens',
+    offer: 'The way down to the Brood Mother runs through the gate yard. It\'s been sealed since before I was born. Go and stand at it — I\'ll have it opened in your name.',
+    stages: [{ text: 'Go to the raid gate in {city1}\'s gate yard.', objectives: [{ type: 'goto', at: 'city1:raidgate', r: 8, count: 1, text: 'Reach the raid gate' }] }],
+    turnIn: 'It\'s open. Anyone who marches with you can go through it now. I won\'t pretend I like what\'s on the other side.',
+    setFlags: ['broodgate_open'],
+    rewards: { xp: 2400, gold: 800, armor: { minTier: 3 } },
+  },
+  {
+    id: 'b12', kind: 'story', act: 2, level: 16, giver: 'city1:warden', requires: ['b11'], title: 'Report to Ashe', moments: { done: 'act2end' },
+    offer: 'Before you go anywhere near that gate, tell me what you saw at the Array. All of it.',
+    stages: [{
+      text: 'Report to High Warden Ashe.',
+      objectives: [{ type: 'talk', npc: 'city1:warden', count: 1, text: 'Report to High Warden Ashe' }],
+      say: { 'city1:warden': 'Red, you said. Every stone, all at once. ...I had riders in from the highlands this morning. They say the old Maker machines up there are moving. Things that haven\'t moved in a thousand years.' },
+    }],
+    turnIn: 'The Brood Mother can wait for an army. The highlands won\'t wait at all. Rest while you can, sleeper.',
+    setFlags: ['act2_done'],
+    rewards: { xp: 2600, gold: 900, weapon: { minTier: 3 } },
+  },
 ];
 
 // Short scenes, played on screen when a quest asks (ui/Moments.js): a few shots, each a camera
@@ -421,6 +458,11 @@ export const MOMENTS = {
     at: 'array', title: ['The Array Falls Silent', ''], shots: [
       { from: [-10, 9, 14], lift: 4, t: 5, line: ['', 'Down the network, waystone after waystone flickers red.'] },
       { from: [24, 18, 30], lift: 6, t: 6, line: ['', 'And far off, in the highlands, something made of metal answers.'] },
+    ],
+  },
+  act2end: {
+    at: 'player', title: ['Act II complete', 'The Brood'], shots: [
+      { from: [8, 5, 10], lift: 1.6, t: 6, line: ['', 'The Array is silent, the Brood Mother\'s gate stands open — and in the highlands, the Makers\' guardians are waking.'] },
     ],
   },
   act1end: {

@@ -43,14 +43,15 @@ export const STORY_FLAGS = {
   act2_started: { means: 'The player reached Farcall and its captain of the watch (b1).', setBy: ['b1 setFlags'], readBy: [] },
   hamlets_cleared: { means: 'The hamlets gone quiet were found and the spore pods burned (b2).', setBy: ['b2 setFlags'], readBy: [] },
   array_found: { means: 'The player found the Farcall Array calling the Hive, with Warden marks on it (b4).', setBy: ['b4 setFlags'], readBy: [] },
-  told_ashe: { means: "The player chose to tell Ashe the Wardens' forgotten purpose (the choice at b5).", setBy: ['b5 stage 1 choices'], readBy: ['b5 turnIn', 'b6 offer'] },
-  kept_wardens_secret: { means: "The player kept the Wardens' secret between themselves and Ysolde (the choice at b5).", setBy: ['b5 stage 1 choices'], readBy: ['b5 turnIn'] },
+  told_ashe: { means: "The player chose to tell Ashe the Wardens' forgotten purpose (the choice at b5).", setBy: ['b5 stage 1 choices'], readBy: ['b10 stage 1 say', 'b5 turnIn', 'b6 offer'] },
+  kept_wardens_secret: { means: "The player kept the Wardens' secret between themselves and Ysolde (the choice at b5).", setBy: ['b5 stage 1 choices'], readBy: ['b10 stage 1 say', 'b5 turnIn'] },
   psion_slain: { means: "The Hive Psion steering the swarms is dead; its chitin mapped the way to the Brood Pits (b6).", setBy: ['b6 setFlags'], readBy: [] },
   matron_read: { means: "The player read the Matron's nest-node: the Array's call feeds a deeper nest, the Brood Mother's (b8).", setBy: ['b8 setFlags'], readBy: [] },
   array_destroyed: { means: "The Farcall Array's transmitter is destroyed; its death-pulse woke the Synths (b9; Acts III and IV read it).", setBy: ['b9 setFlags'], readBy: [] },
+  act2_done: { means: "Act II is over: the Array silenced, the Brood Mother's gate open (b12).", setBy: ['b12 setFlags'], readBy: [] },
   broodgate_open: {
     means: 'The Wardens opened the Brood Mother\'s raid gate to the player (DEC-4: one in a raid group or party who has it takes the rest in).',
-    setBy: [], readBy: ['raid broodmother'], pending: 'A-7: quest 11 "The Gate Opens" sets it',
+    setBy: ['b11 setFlags'], readBy: ['raid broodmother'],
   },
 };
 
