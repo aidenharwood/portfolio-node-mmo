@@ -10,6 +10,7 @@
 // camp the server checks — the quest log's and the waypoints' one way of finding anything.
 import { mulberry32 } from '../core/rng.js';
 import { SIZES, CITY_WALL, folkFor } from './places.js';
+import { roadRoute } from '../sim/Routes.js';
 
 const TAU = Math.PI * 2;
 
@@ -42,6 +43,9 @@ export const STORY_FOLK = {
   krell: { name: 'Krell', title: 'Ironjaw\'s Lieutenant', look: { skin: 0xe0ac84, hair: 0x1f1a17, hairStyle: 'spiky', top: 0x6a3a2a, topDark: 0x4a2418, trim: 0xb0583a, pants: 0x2e2e36, boots: 0x2a2018, leather: 0x4a3a2a, metal: 0x8a909c, glow: 0xff8a2a, beard: 0x1f1a17, pauldrons: true } },
   // Farcall's captain of the watch (Act II), in Warden green, with a mast officer's goggles.
   captain: { name: 'Vey Okonta', title: 'Captain of the Watch', look: { skin: 0x8d5a3b, hair: 0x1a1412, hairStyle: 'short', top: 0x3a6a4a, topDark: 0x2a4a34, trim: 0xd0d0d0, pants: 0x2a2e36, boots: 0x3a2a1a, leather: 0x4a3a2a, metal: 0xc9d1dc, glow: 0x7aff9a, goggles: true, pauldrons: true, cape: 0x2a4a34 } },
+  // Ironreach's foundrywright (Act III), who reads dead Synths for a living: a soot-black apron
+  // over shop greys, welding goggles up on her brow, the Synths' cyan on her tools.
+  engineer: { name: 'Isa Brannock', title: 'Foundrywright', look: { skin: 0xd8a37c, hair: 0x6a3a22, hairStyle: 'bun', top: 0x5a5f6a, topDark: 0x3a3e46, trim: 0xd9a227, pants: 0x2a2e36, boots: 0x2a2018, leather: 0x4a3a2a, metal: 0x9aa0aa, glow: 0x3ad8ff, goggles: true, apron: 0x22242a } },
 };
 
 // Whether (x, z) keeps clear of the hub, the cities, the waystones (and the villages and towns
@@ -264,6 +268,20 @@ function resolve(world, ref, ctx) {
     if (!c) return null;
     const near = world.poisNear(c.x, c.z, 1400, ['hamlet']).sort((a, b) => Math.hypot(a.x - c.x, a.z - c.z) - Math.hypot(b.x - c.x, b.z - c.z));
     return target(near[Number(head.slice(5)) - 1]) ?? null;
+  }
+  // Act III round Ironreach: the waystone the Synth scouts scan, and where the emissary speaks
+  // (the nearest to the city outside its walls), and the settlement the first war-walker marches
+  // on (the nearest with a road a walker can come down: sim/Routes.js).
+  if (head === 'ironstone' || head === 'ironhamlet') {
+    const c = gen.cities()[2];
+    if (!c) return null;
+    const by = (a, b) => Math.hypot(a.x - c.x, a.z - c.z) - Math.hypot(b.x - c.x, b.z - c.z);
+    if (head === 'ironstone') {
+      const stones = world.poisNear(c.x, c.z, 900, ['waystone']).filter((p) => Math.hypot(p.x - c.x, p.z - c.z) > CITY_WALL).sort(by);
+      return target(stones[0], { r: 4 }) ?? null;
+    }
+    const homes = world.poisNear(c.x, c.z, 1400, ['hamlet', 'settlement', 'town']).sort(by);
+    return target(homes.find((p) => roadRoute(gen, p))) ?? null;
   }
   if (ref === 'hubcamp') return target(nearest(world, 0, 0, 500, ['camp'], (c) => !c.stronghold && !c.story), { camp: true });
   if (head === 'home' && ctx.home) {

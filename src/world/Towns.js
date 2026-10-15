@@ -231,7 +231,20 @@ function mastOn(f, x, z, a, top, T, big, mast) {
   piece(h, G.sphere(0.14, 8, 6), 0xff4a3a, { pos: [0, y + M + 1.25, 0], glow: true, outline: 0 });
 }
 
-function ringWall(f, R, { ht = 3.2, thick = 0.8, gate = 4.8, tower = 1.8, every = 9, color = C.stone, cap = C.stoneDark, band = HEARTH, roof = C.metalDark, masts = false }) {
+// Ironreach's dressing (Act III), the foundry city: every other wall tower (not the gate towers)
+// carries a smokestack, iron-banded, glowing at the lip where the furnaces below breathe out.
+// Above the tower's own collider: none of its own.
+function stackOn(f, x, z, a, top) {
+  const h = f.put(x, z, a);
+  const y = top - f.gy(x, z);
+  const S = 7;
+  piece(h, G.cyl(0.55, 0.75, S, 10), C.stoneDark, { pos: [0, y + S / 2, 0], outline: 0.012 });
+  for (let k = 1; k < 4; k++) piece(h, G.cyl(0.66 - k * 0.04, 0.66 - k * 0.04, 0.16, 10), C.metalDark, { pos: [0, y + k * (S / 4), 0], outline: 0.006 });
+  piece(h, G.cyl(0.62, 0.55, 0.3, 10), C.metal, { pos: [0, y + S + 0.1, 0], outline: 0.008 });
+  piece(h, G.cyl(0.42, 0.42, 0.06, 10), FORGE, { pos: [0, y + S + 0.27, 0], glow: true, outline: 0 });
+}
+
+function ringWall(f, R, { ht = 3.2, thick = 0.8, gate = 4.8, tower = 1.8, every = 9, color = C.stone, cap = C.stoneDark, band = HEARTH, roof = C.metalDark, masts = false, stacks = false }) {
   const gates = crossings(f, R);
   const half = (gate / 2 + tower / 2) / R;
   const n = Math.max(12, Math.round((TAU * R) / 3.4));
@@ -249,6 +262,7 @@ function ringWall(f, R, { ht = 3.2, thick = 0.8, gate = 4.8, tower = 1.8, every 
     piece(f.g, G.box(0.3, 0.3, 0.3), LAMP, { pos: [x - f.p.x - Math.sin(a) * (T / 2 + 0.1), y + th - 0.7, z - f.p.z - Math.cos(a) * (T / 2 + 0.1)], glow: true, outline: 0.008 });
     f.col(x, z, T * 0.72, th);
     if (masts) mastOn(f, x, z, a, y + th + 0.4, T, big, (towers++) % 2 === 0);
+    else if (stacks && !big && (towers++) % 2 === 0) stackOn(f, x, z, a, y + th + 1.2);
   };
   let towers = 0;
   for (let i = 0; i < n; i++) {
@@ -773,8 +787,9 @@ export function buildCityWall(w, p) {
     piece(t, G.ico(1.5, 0), C.leaf, { pos: [0, 3.1, 0], outline: 0.04 });
     f.col(x, z, 0.35, 3);
   }
-  // Farcall (Act II) is the city of signal masts: they stand on its wall towers.
-  ringWall(f, p.wall, { ht: 5.6, thick: 1.4, gate: 6.4, tower: 3, every: 7, color: C.stone, cap: C.stoneDark, roof: st.roofs[0], masts: p.act === 2 });
+  // Farcall (Act II) is the city of signal masts, Ironreach (Act III) the foundry city: masts or
+  // smokestacks stand on their wall towers.
+  ringWall(f, p.wall, { ht: 5.6, thick: 1.4, gate: 6.4, tower: 3, every: 7, color: C.stone, cap: C.stoneDark, roof: st.roofs[0], masts: p.act === 2, stacks: p.act === 3 });
   flatten(f.g);
   w.finish(f.g);
 }

@@ -20,6 +20,8 @@ import { reachedPlaces, defenceAt, heldObjectives, questDrops, eventCalled, even
 import { storyRef } from '../src/world/story.js';
 import { settlementFolk } from '../src/world/settlements.js';
 import { flagUses, flagProblems, storyFolk, STORY_FLAGS } from './storyflags.mjs';
+import { roadRoute } from '../src/sim/Routes.js';
+import { CITY_WALL } from '../src/world/places.js';
 
 const seed = Number(process.argv[2] ?? 12345);
 const w = new HeadlessWorld(seed);
@@ -173,6 +175,25 @@ console.log('Act II\'s people and places:');
   log.flags.krell_freed = false;
   log.flags.krell_captured = true;
   check(!!k?.when && !log.whenHolds(k.when), 'but not if he was taken in chains');
+}
+
+// ---------------------------------------------------------------- Act III's people and places
+console.log('Act III\'s people and places:');
+{
+  const at = (r) => { const t = storyRef(w, r); return t?.npc && npc(t.npc); };
+  const isa = at('city3:engineer');
+  const shown = isa && settlementFolk(w.placeOf(isa), isa);
+  check(shown?.name === 'Isa Brannock' && shown.title === 'Foundrywright', `Ironreach's foundrywright stands in the city (${shown?.name ?? 'nobody'})`);
+  const tal = at('city3:warden');
+  const talShown = tal && settlementFolk(w.placeOf(tal), tal);
+  check(talShown?.name === 'High Warden Tal', `High Warden Tal stands in Ironreach's citadel (${talShown?.name ?? 'nobody'})`);
+  const c3 = w.gen.cities()[2];
+  const stone = storyRef(w, 'ironstone');
+  const stonePoi = stone?.poi && w.poiById(stone.poi);
+  check(stonePoi?.type === 'waystone' && Math.hypot(stonePoi.x - c3.x, stonePoi.z - c3.z) > CITY_WALL, `the stone the Synths scan is a waystone out past Ironreach's walls (${stonePoi?.name ?? 'none'})`);
+  const ham = storyRef(w, 'ironhamlet');
+  const hamPoi = ham?.poi && w.poiById(ham.poi);
+  check(['hamlet', 'settlement', 'town'].includes(hamPoi?.type) && !!roadRoute(w.gen, hamPoi), `the settlement the first walker marches on has a road for it (${hamPoi?.name ?? 'none'})`);
 }
 
 // ---------------------------------------------------------------- dungeon objectives
