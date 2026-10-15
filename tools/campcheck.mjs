@@ -3,6 +3,7 @@
 // camp layouts, their placement and the reinforcement waves that hold them.
 // Run: node tools/campcheck.mjs [--seed N] [--fingerprint]
 import { WorldGen, ACTS } from '../src/world/Gen.js';
+import { TIERS, campLayout } from '../src/world/campLayout.js';
 
 const arg = (k) => { const i = process.argv.indexOf(k); return i === -1 ? null : process.argv[i + 1]; };
 const SEEDS = arg('--seed') ? [Number(arg('--seed'))] : [12345, 1, 777, 4242, 90210];
@@ -63,6 +64,45 @@ function actLands(gen) {
   check(early === 0, `no Hive before Act II and no Synths before Act III (${early} regions)`);
   check(far === 0, `every region is within 150 m of its act's ring (${far} strays)`);
 }
+
+// ---------------------------------------------------------------- layouts
+const STYLES = { scav: 'scav', salvage: 'scav', nest: 'hive', relay: 'synth', den: 'fauna' };
+function layouts() {
+  console.log('Layouts:');
+  const defs = [];
+  for (let s = 1; s <= 20; s++) {
+    for (const [style, race] of Object.entries(STYLES)) {
+      for (const tier of Object.keys(TIERS)) defs.push({ id: `t:${style}:${tier}:${s}`, x: 0, z: 0, radius: TIERS[tier].R, race, style, tier, level: 10, seed: s });
+    }
+    for (const race of Object.values(STYLES)) defs.push({ id: `t:fort:${race}:${s}`, x: 0, z: 0, radius: TIERS.base.R, race, style: 'fort', tier: 'base', stronghold: true, level: 10, seed: s });
+  }
+  const bad = {};
+  const fail = (what, def) => { (bad[what] ??= []).push(def.id); };
+  for (const def of defs) {
+    const T = TIERS[def.tier];
+    const L = campLayout(def);
+    // (Spawner ids carry the camp's id, which is changed here to get past the memo.)
+    const plain = (x) => JSON.stringify({ ...x, spawners: x.spawners.map(({ id, ...sp }) => sp) });
+    if (plain(L) !== plain(campLayout({ ...def, id: `${def.id}b` }))) fail('deterministic', def);
+    if (L.tier !== def.tier || L.R !== T.R) fail('tier and radius', def);
+    if (!L.pieces.every((p) => Math.hypot(p.x, p.z) + (p.r ?? 0) <= T.R + 2)) fail('pieces inside R + 2', def);
+    if (L.posts.length < T.garrison[1]) fail('enough posts', def);
+    if (L.spawners.length < T.spawners[0] || L.spawners.length > T.spawners[1]) fail('spawner count', def);
+    if (!L.spawners.every((sp, i) => sp.id === `${def.id}:sp${i}` && sp.kind)) fail('spawner ids', def);
+    const solid = L.pieces.filter((p) => p.r > 0);
+    if (!L.posts.every((q) => solid.every((p) => Math.hypot(q.x - p.x, q.z - p.z) >= p.r + 0.6))) fail('posts clear of pieces', def);
+    if (!L.posts.every((q, i) => L.posts.every((o, j) => i === j || Math.hypot(q.x - o.x, q.z - o.z) >= 1.2))) fail('posts 1.2 m apart', def);
+    if (def.tier === 'outpost' ? L.gates.length : !L.gates.length) fail('gates by tier', def);
+    if (!!L.throne !== !!def.stronghold) fail('a throne only in a stronghold', def);
+    const wet = campLayout({ ...def, id: `${def.id}w` }, (wx) => wx > 5);
+    if (![...wet.posts, ...wet.spawners, ...wet.pieces].every((q) => q.x <= 5)) fail('nothing stands in the water', def);
+    if (!wet.spawners.length) fail('a spawner even with water', def);
+  }
+  for (const what of ['deterministic', 'tier and radius', 'pieces inside R + 2', 'enough posts', 'spawner count', 'spawner ids', 'posts clear of pieces', 'posts 1.2 m apart', 'gates by tier', 'a throne only in a stronghold', 'nothing stands in the water', 'a spawner even with water']) {
+    check(!bad[what], `${what} (${defs.length} layouts${bad[what] ? `; e.g. ${bad[what].slice(0, 3).join(', ')} of ${bad[what].length}` : ''})`);
+  }
+}
+layouts();
 
 for (const seed of SEEDS) {
   console.log(`Seed ${seed}:`);
