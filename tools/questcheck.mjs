@@ -30,13 +30,24 @@ const check = (ok, what) => {
 };
 
 const position = new THREE.Vector3();
-const stats = new Stats();
+let stats = new Stats();
 const host = { hud: null, world: w, encounters: { isCleared: () => false }, stats, player: { position } };
-const quests = new QuestLog(host);
-const core = new CharacterCore({
+let quests = new QuestLog(host);
+const makeCore = () => new CharacterCore({
   stats, inventory: new Inventory(3), quests, attuned: new Set(['w-hub']), chests: new Set(), shop: { stock: [], fine: [] },
   settings: { lootFilter: 1 }, position, world: w, strict: true,
 });
+let core = makeCore();
+// Which option each 'choose' step takes (quest id → option index; 0 when not named).
+let choices = {};
+// A new character from scratch, for playing the story again another way.
+function fresh(pick) {
+  stats = new Stats();
+  host.stats = stats;
+  quests = new QuestLog(host);
+  core = makeCore();
+  choices = pick;
+}
 const op = (o) => runOp(core, { op: o });
 // The server's own (server-sent) ops: applied straight to the character.
 const give = (o) => core.apply(o).ok;
@@ -105,7 +116,7 @@ function playStage(id) {
       const n = npc(quests.npcOf(o.npc, q));
       by(n);
       run({ op: 'talk', npc: n.id });
-      run({ op: 'choose', quest: id, i: 0, npc: n.id });
+      run({ op: 'choose', quest: id, i: choices[id] ?? 0, npc: n.id });
     } else if (o.type === 'clear') {
       const t = ref(o.camp, q) ?? { poi: o.camp, x: position.x, z: position.z };
       go(t.x, t.z);
@@ -317,6 +328,47 @@ const outOfDate = [
   ...flags.wrong.map(({ flag, field, want }) => `${flag} ${field} should be ${quoted(want)}`),
 ];
 check(!outOfDate.length, outOfDate.length ? `registry out of date: ${outOfDate.join('; ')}` : 'and it names who sets and reads each one, as the game does');
+
+// ---------------------------------------------------------------- every way through the story
+// The story again, quietly, for each answer to its three choices (Krell at a6, the voice at a8,
+// Ysolde's confession at b5): each reaches the end of Act II with one flag of each pair, and every
+// line said or offered along the way resolves to real text.
+console.log('Every way through the story:');
+const LINE_OK = (t) => typeof t === 'string' && t.length > 0 && !t.includes('undefined') && !t.includes('[object');
+for (const a6 of [0, 1]) {
+  for (const a8 of [0, 1]) {
+    for (const b5 of [0, 1]) {
+      fresh({ a6, a8, b5 });
+      const lines = [];
+      let stuck = null;
+      for (const q of STORY) {
+        const giver = npc(quests.giverId(q));
+        if (!giver) { stuck = `${q.id}: no giver`; break; }
+        by(giver);
+        run({ op: 'talk', npc: giver.id });
+        lines.push([`${q.id} offer`, quests.fill(q.offer, q)]);
+        if (!run({ op: 'accept', id: q.id }).ok) { stuck = `${q.id}: not taken`; break; }
+        for (let s = 0; s < quests.stagesOf(q).length && !quests.isComplete(q.id); s++) {
+          said = [];
+          playStage(q.id);
+          for (const t of said) lines.push([`${q.id} said`, t]);
+        }
+        if (!quests.isComplete(q.id)) { stuck = `${q.id}: stuck at stage ${(quests.stage[q.id] ?? 0) + 1}`; break; }
+        lines.push([`${q.id} turnIn`, quests.fill(q.turnIn, q)]);
+        by(npc(quests.returnId(q)));
+        if (!op({ op: 'turnin', id: q.id }).ok) { stuck = `${q.id}: not handed in`; break; }
+      }
+      const f = quests.flags;
+      const pairs = [['krell_captured', 'krell_freed'], ['trusted_ysolde', 'kept_secret'], ['told_ashe', 'kept_wardens_secret']];
+      const picked = [a6, a8, b5];
+      const onePerPair = pairs.every((pair, k) => f[pair[picked[k]]] && !f[pair[1 - picked[k]]]);
+      const bad = lines.filter(([, t]) => !LINE_OK(t));
+      const name = `Krell ${a6 ? 'freed' : 'chained'}, voice ${a8 ? 'kept' : 'told'}, Wardens' secret ${b5 ? 'kept' : 'told Ashe'}`;
+      check(!stuck && f.act2_done && onePerPair && !bad.length,
+        `${name}: ${stuck ?? (bad.length ? `bad lines: ${bad.map(([w]) => w).join(', ')}` : `Act II done, ${lines.length} lines`)}`);
+    }
+  }
+}
 
 console.log(failed ? `questcheck: ${failed} failed` : 'questcheck: all good');
 process.exit(failed ? 1 : 0);
