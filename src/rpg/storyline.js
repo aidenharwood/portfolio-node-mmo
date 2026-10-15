@@ -15,10 +15,17 @@ export const ACTS = [
   { act: 0, title: 'Prologue', sub: 'The Last Sleeper', levels: '1–3' },
   { act: 1, title: 'Act I', sub: 'Signal Fire', levels: '3–8' },
   { act: 2, title: 'Act II', sub: 'The Brood', levels: '8–16' },
+  // `partial`: an act whose quests are still being written (WORK_PLAN B-1 to B-5).
+  { act: 3, title: 'Act III', sub: 'Iron Heart', levels: '16–24', partial: true },
 ];
 
-// What the journal says once every act there is has been played: the next one is still to come.
-export const storyToldText = () => `The story so far is told. Act ${['I', 'II', 'III', 'IV', 'V'][ACTS.at(-1).act]} comes in a later update.`;
+// What the journal says once every quest there is has been played: the rest of an act still
+// being written, or the next act, is still to come.
+export const storyToldText = () => {
+  const last = ACTS.at(-1);
+  if (last.partial) return `The story so far is told. ${last.title} continues in a later update.`;
+  return `The story so far is told. Act ${['I', 'II', 'III', 'IV', 'V'][last.act]} comes in a later update.`;
+};
 
 export const STORY = [
   // ---------------------------------------------------------------- Prologue
@@ -393,6 +400,76 @@ export const STORY = [
     setFlags: ['act2_done'],
     rewards: { xp: 2600, gold: 900, weapon: { minTier: 3 } },
   },
+
+  // ---------------------------------------------------------------- Act III: Iron Heart
+  // (docs/superpowers/specs/2026-10-15-act-iii-story-design.md; the lines are proposals.)
+  {
+    id: 'c1', kind: 'story', act: 3, level: 16, giver: 'city1:warden', requires: ['b12'], returnTo: 'city3:engineer', title: 'The Highland Road', moments: { accept: 'act3' },
+    offer: {
+      told_ashe: 'Ironreach\'s riders again — three this week. Their foundrywright has been pulling Synth wrecks apart for thirty years, and she says these ones are different. After what Ysolde told us, I believe her. Go to Ironreach, {city3:dir} of here, and find Isa Brannock.',
+      default: 'Ironreach\'s riders again — three this week. Old Maker machines walking the highlands, and their foundrywright says she knows why. Go to Ironreach, {city3:dir} of here, and find Isa Brannock. If anyone alive can read a Synth, it\'s her.',
+    },
+    stages: [
+      { text: 'Travel to Ironreach.', objectives: [{ type: 'goto', at: 'city3', count: 1, text: 'Reach Ironreach' }] },
+      {
+        text: 'Find Ironreach\'s foundrywright.', objectives: [{ type: 'talk', npc: 'city3:engineer', count: 1, text: 'Talk to Isa Brannock' }],
+        say: { 'city3:engineer': 'Ashe\'s sleeper. Good — I asked for you by name. Don\'t look so surprised. Every Synth I\'ve cut open this month had the same thing in its head: a heading. They\'re all walking the same way, and they\'re walking toward wherever you\'ve been.' },
+      },
+    ],
+    turnIn: 'Sit. Not there, that\'s still hot. ...Right. Let me show you what I mean.',
+    setFlags: ['act3_started'],
+    rewards: { xp: 2800, gold: 950, armor: { minTier: 3 } },
+  },
+  {
+    id: 'c2', kind: 'story', act: 3, level: 17, giver: 'city3:engineer', requires: ['c1'], title: 'Iron Footsteps',
+    offer: 'Scouts — the light Synths, sentries mostly — have been circling {ironstone} for three days. Not attacking. Scanning. That stone woke when you came through, didn\'t it? Go and see what they want with it. Then make them stop wanting it.',
+    stages: [
+      { text: 'Go to {ironstone}.', objectives: [{ type: 'goto', at: 'ironstone', count: 1, text: 'Reach {ironstone}' }] },
+      { text: 'Synth scouts are closing on the stone. Drive them off.', objectives: [{ type: 'defend', at: 'ironstone', race: 'synth', waves: 2, count: 1, text: 'Drive the Synth scouts off {ironstone}' }] },
+    ],
+    turnIn: 'Scanning, then shooting. They weren\'t after the stone, sleeper — they were checking it for you. It answers you, and they want to know where you\'ve been. Every stone you\'ve woken is a footprint.',
+    rewards: { xp: 2900, gold: 980, weapon: { minTier: 3 } },
+  },
+  {
+    id: 'c3', kind: 'story', act: 3, level: 18, giver: 'city3:engineer', requires: ['c2'], title: 'The Walker',
+    offer: 'One of the big ones is walking. A war-walker — nine metres of it — coming down the old road toward {ironhamlet}. Thirty years I\'ve wanted to see one move. I\'d rather it wasn\'t toward people. Stop it before it gets there.',
+    stages: [
+      { text: 'A war-walker is marching on {ironhamlet}. Bring it down.', objectives: [{ type: 'event', event: 'walker', at: 'ironhamlet', count: 1, text: 'Stop the war-walker before it reaches {ironhamlet}' }] },
+    ],
+    turnIn: 'I had the wreck dragged in. Its legs were still trying to walk when we got it here — and every time we turned it round, it turned back. Not toward the hamlet. Toward you.',
+    rewards: { xp: 3100, gold: 1020, armor: { minTier: 3 } },
+  },
+  {
+    id: 'c4', kind: 'story', act: 3, level: 18, giver: 'city3:engineer', requires: ['c3'], returnTo: 'sage', title: 'Words from the Stone',
+    offer: 'The stone at {ironstone} has been humming since the walker fell. Not your hum — I know that one now. Something else is on the line. Go and put your hand on it. I\'ll be listening from here.',
+    stages: [
+      { text: 'Lay your hand on {ironstone}.', objectives: [{ type: 'goto', at: 'ironstone', r: 4, count: 1, text: 'Touch {ironstone}' }], done: { moment: 'emissary' } },
+      {
+        text: 'Tell Isa what the stone said.', objectives: [{ type: 'talk', npc: 'city3:engineer', count: 1, text: 'Report to Isa Brannock' }],
+        say: { 'city3:engineer': '"Surrender the carrier." ...It means you, sleeper. Not the stones, not the Wardens. You. Whatever\'s riding in your head, they think it\'s a sickness — and they think they\'re the cure. Go and see the old woman in Brightwater. If anyone knew you were coming, it\'s her.' },
+      },
+    ],
+    turnIn: 'The machines came for you? ...Sit down, dear. In seventy years of listening to those stones I\'ve heard your voice speak once. I think it\'s time it spoke for itself.',
+    setFlags: ['synth_orders_known'],
+    rewards: { xp: 3200, gold: 1060, weapon: { minTier: 3 } },
+  },
+  {
+    id: 'c5', kind: 'story', act: 3, level: 19, giver: 'sage', requires: ['c4'], returnTo: 'city3:engineer', title: 'What the Voice Wants',
+    offer: {
+      told_ashe: 'Ashe wrote to me. She knows what the Wardens were now, and she asks what else I kept. This is the last of it, dear: I don\'t know what rides in your head. But I know where it first spoke to you.',
+      kept_wardens_secret: 'We\'ve kept one secret between us already. Here\'s the end of mine, dear: I don\'t know what rides in your head. But I know where it first spoke to you.',
+      default: 'I don\'t know what rides in your head, dear. Nobody does. But I know where it first spoke to you.',
+    },
+    stages: [
+      {
+        text: 'Hear Old Ysolde out.', objectives: [{ type: 'talk', npc: 'sage', count: 1, text: 'Talk to Old Ysolde' }],
+        say: { sage: 'The machines want it cut out of you. Before anyone decides that — you, me, Ashe, the Synths — we ought to hear what it has to say for itself. Go to the stone by the gate.' },
+      },
+      { text: 'Lay your hand on the Brightwater waystone.', objectives: [{ type: 'goto', at: 'hub:waystone', r: 4, count: 1, text: 'Touch the Brightwater waystone' }], done: { moment: 'plea' } },
+    ],
+    turnIn: 'Back again. You\'ve the look of someone who\'s been arguing with their own head. Did it make its case? Good. Mine\'s simpler: I want to know who built the thing that wants you dead. And I know where to start.',
+    rewards: { xp: 3300, gold: 1100, armor: { minTier: 3 } },
+  },
 ];
 
 // Short scenes, played on screen when a quest asks (ui/Moments.js): a few shots, each a camera
@@ -470,6 +547,24 @@ export const MOMENTS = {
       { from: [8, 5, 10], lift: 1.6, t: 6, line: ['', 'The Array is silent, the Brood Mother\'s gate stands open — and in the highlands, the Makers\' guardians are waking.'] },
     ],
   },
+  act3: {
+    at: 'player', title: ['Act III', 'Iron Heart'], shots: [
+      { from: [8, 6, 10], lift: 1.6, t: 5.5, line: ['High Warden Ashe', 'The Maker machines in the highlands are walking. Ironreach has the one woman alive who can read them. Go to her.'] },
+    ],
+  },
+  emissary: {
+    at: 'ironstone', title: ['The Emissary', ''], shots: [
+      { from: [3.2, 2.6, 4.2], lift: 2.4, t: 4.5, line: ['', 'The stone\'s light drains from blue to a hard, cold white.'] },
+      { from: [-4, 3.4, 2.4], lift: 2.2, t: 6, line: ['Synth Emissary', 'FOREIGN PROCESS DETECTED IN THE NETWORK. CARRIER IDENTIFIED. SURRENDER THE CARRIER. QUARANTINE WILL PROCEED.'] },
+      { from: [6, 5, 8], lift: 2, t: 4.5, line: ['The Pilgrim', 'Seven — don\'t listen to it. Please.'] },
+    ],
+  },
+  plea: {
+    at: 'hub:waystone', shots: [
+      { from: [3.2, 2.6, 4.2], lift: 2.4, t: 6, line: ['The Pilgrim', 'I never chose to be in here, seven. I was a ship. I carried four hundred sleepers across the dark, and I lost all of them but you.'] },
+      { from: [-4, 3.4, 2.4], lift: 2.2, t: 6, line: ['The Pilgrim', 'They call me an infection. All I want is to live, and to keep my colonists safe. Is that a sickness?'] },
+    ],
+  },
   act1end: {
     at: 'player', title: ['Act I complete', 'Signal Fire'], shots: [
       { from: [8, 5, 10], lift: 1.6, t: 6, line: ['', 'The Sunken Vault lies open under Ironjaw\'s dig — and its gate in New Meridian stands sealed, for now.'] },
@@ -489,4 +584,5 @@ export const BARKS = [
   { npc: 'city2:captain', when: { quest: 'b1', stage: 1 }, line: 'You — the one from New Meridian? Up here.' },
   { npc: 'sporefield:krell', when: { quest: 'b2', stage: 1, flag: 'krell_freed' }, line: 'Sleeper! Over here — I didn\'t forget.' },
   { npc: 'sage', when: { quest: 'b5', stage: 0 }, line: 'Come in, dear. Close the door.' },
+  { npc: 'city3:engineer', when: { quest: 'c1', stage: 1 }, line: 'You\'ll be the sleeper. Over here — and don\'t touch anything.' },
 ];

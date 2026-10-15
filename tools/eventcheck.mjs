@@ -20,6 +20,7 @@ import { loadCharacter } from '../server/characters.js';
 import { eventCalled, eventObjectives, EVENT_CALL } from '../src/rpg/questWatch.js';
 import { roadRoute, RouteFollower } from '../src/sim/Routes.js';
 import { CITY_WALL } from '../src/world/places.js';
+import { storyRef } from '../src/world/story.js';
 
 const seed = Number(process.argv[2] ?? 12345);
 const world = new HeadlessWorld(seed);
@@ -453,6 +454,15 @@ console.log('The war-walker:');
     const fight = (k + (EVENT_TYPES.walker.couplings * cp.maxHp) / boss.maxHp) * 75 * 1.15;
     check(meet + fight <= shortest, `alone: about ${mins(meet + fight)} to meet it and bring it down (hull ${k.toFixed(2)} Colossus fights), against at least a ${mins(shortest)} walk`);
     for (const e of [hull, boss, cp]) sim.removeEnemy(e);
+  }
+
+  // Act III's "The Walker" (c3) calls one at Ironreach's nearest settlement with a road
+  // (world/story.js 'ironhamlet'): the director starts it there for real.
+  {
+    reset();
+    const ham = storyRef(world, 'ironhamlet');
+    const c3 = ham?.poi && dir.startStory(ham.poi, 'walker');
+    check(c3?.type === 'walker' && c3.site.id === ham.poi && c3.route?.length >= 360, `c3's walker starts at ${ham?.name ?? 'nowhere'} (${Math.round(c3?.route?.length ?? 0)} m of road)`);
   }
 
   // Overrun already: no walker can be called there.

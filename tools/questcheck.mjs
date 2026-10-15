@@ -155,6 +155,8 @@ console.log('Lines keyed by story flags:');
   check(heard(false) === 'B', 'and without it, the default');
   const act2 = ACTS.find((A) => A.act === 2);
   check(act2?.title === 'Act II' && act2.sub === 'The Brood' && act2.levels === '8–16', 'Act II, The Brood (8–16), is in the journal\'s acts');
+  const act3 = ACTS.find((A) => A.act === 3);
+  check(act3?.title === 'Act III' && act3.sub === 'Iron Heart' && act3.levels === '16–24', 'Act III, Iron Heart (16–24), is in the journal\'s acts');
 }
 
 // ---------------------------------------------------------------- Act II's people and places
@@ -236,10 +238,12 @@ console.log('The story, as the live world has it:');
   // A dungeon step names where its way in is, for the compass and the map.
   const lost = STORY.flatMap((q) => quests.stagesOf(q).flatMap((st) => st.objectives.filter((o) => o.type === 'dungeon' && !storyRef(w, o.at ?? '')).map(() => q.id)));
   check(!lost.length, `every dungeon step points at its entrance${lost.length ? ` (not: ${lost.join(', ')})` : ''}`);
-  // When the last act is done, the journal names the act still to come.
+  // When every quest there is has been played, the journal says what comes next: the rest of an
+  // act still being written, or the next act.
   const told = storyline.storyToldText?.() ?? '';
-  const coming = ACTS.at(-1).act + 1;
-  check(told.includes(['Prologue', 'Act I', 'Act II', 'Act III', 'Act IV'][coming] + ' ') && !ACTS.some((A) => told.includes(`${A.title} comes`)), `the journal, story told, looks ahead to the next act ("${told}")`);
+  const last = ACTS.at(-1);
+  const want = last.partial ? `${last.title} continues` : `${['Prologue', 'Act I', 'Act II', 'Act III', 'Act IV'][last.act + 1]} comes`;
+  check(told.includes(want), `the journal, story told, looks ahead ("${told}")`);
 }
 
 // ---------------------------------------------------------------- the story
@@ -282,6 +286,9 @@ check(quests.flags.psion_slain && quests.flags.matron_read && quests.flags.array
 check((core.records.dungeons.brood ?? []).some((n) => n > 0), 'the Brood Pits beaten along the way (the dungeon step)');
 check(quests.flags.broodgate_open && quests.flags.act2_done, 'Act II complete: the Brood Mother\'s gate open, the act done');
 check(!Object.keys(core.records.raids ?? {}).length, 'and all without a raid clear');
+check(quests.flags.act3_started && quests.completed.has('c2'), 'Act III under way: Ironreach reached, the Synth scouts at the stone driven off');
+check(quests.completed.has('c3'), 'the first war-walker stopped (c3, a public event the quest called)');
+check(quests.flags.synth_orders_known && quests.completed.has('c5'), 'the Synths\' orders known from the stone, and the Pilgrim heard out');
 check(npc(storyRef(w, 'city1:raidgate')?.npc ?? '')?.gate === 'raid', 'New Meridian\'s raid gate can be pointed at (city1:raidgate)');
 check(!!quests.flags.told_ashe !== !!quests.flags.kept_wardens_secret, `Ysolde's confession: one choice made (${quests.flags.told_ashe ? 'told Ashe' : quests.flags.kept_wardens_secret ? 'kept it' : 'neither'})`);
 {
@@ -291,6 +298,11 @@ check(!!quests.flags.told_ashe !== !!quests.flags.kept_wardens_secret, `Ysolde's
   const b1 = STORY.find((q) => q.id === 'b1');
   check(later.available(later.giverId(b1)).some((q) => q.id === 'b1'), 'a character past Act I is offered Act II by High Warden Ashe');
   check(later.giverName(later.returnId(b1)) === 'Vey Okonta in Farcall', `the journal names Farcall's captain (${later.giverName(later.returnId(b1))})`);
+  // And one past Act II: Ashe sends them on to Ironreach.
+  for (const q of STORY) if (q.act < 3) later.completed.add(q.id);
+  const c1 = STORY.find((q) => q.id === 'c1');
+  check(!!c1 && later.available(later.giverId(c1)).some((q) => q.id === 'c1'), 'a character past Act II is offered Act III by High Warden Ashe');
+  check(!!c1 && later.giverName(later.returnId(c1)) === 'Isa Brannock in Ironreach', `the journal names Ironreach's foundrywright (${c1 && later.giverName(later.returnId(c1))})`);
 }
 check(quests.pick(STORY.find((q) => q.id === 'a6').turnIn).startsWith('Ironjaw dead, and his bookkeeper'), 'and what people say follows them');
 check(STORY.every((q) => quests.completed.has(q.id)) && !Object.keys(quests.active).length, `all ${STORY.length} story quests done, the log clear`);
@@ -412,8 +424,8 @@ for (const a6 of [0, 1]) {
       const onePerPair = pairs.every((pair, k) => f[pair[picked[k]]] && !f[pair[1 - picked[k]]]);
       const bad = lines.filter(([, t]) => !LINE_OK(t));
       const name = `Krell ${a6 ? 'freed' : 'chained'}, voice ${a8 ? 'kept' : 'told'}, Wardens' secret ${b5 ? 'kept' : 'told Ashe'}`;
-      check(!stuck && f.act2_done && onePerPair && !bad.length,
-        `${name}: ${stuck ?? (bad.length ? `bad lines: ${bad.map(([w]) => w).join(', ')}` : `Act II done, ${lines.length} lines`)}`);
+      check(!stuck && f.act2_done && f.synth_orders_known && onePerPair && !bad.length,
+        `${name}: ${stuck ?? (bad.length ? `bad lines: ${bad.map(([w]) => w).join(', ')}` : `Acts II and III so far done, ${lines.length} lines`)}`);
     }
   }
 }
