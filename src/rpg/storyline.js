@@ -242,6 +242,15 @@ export const STORY = [
     setFlags: ['hamlets_cleared'],
     rewards: { xp: 1250, gold: 460, weapon: { minTier: 3 } },
   },
+  {
+    id: 'b3', kind: 'story', act: 2, level: 10, giver: 'city2:captain', requires: ['b2'], title: 'Hold the Line',
+    offer: 'The masts picked up movement under {quiet1} — a lot of it, coming up. They\'ll hit the hamlet before dawn. Get out there and hold it. Anyone with a blade who hears the call will come.',
+    stages: [
+      { text: 'The Hive is surging on {quiet1}. Hold it.', objectives: [{ type: 'event', event: 'surge', at: 'quiet1', count: 1, text: 'Hold {quiet1} against the surge' }] },
+    ],
+    turnIn: 'Held. Good. But here\'s what bothers me: the masts tracked the ones that got past you. They didn\'t scatter. They turned — all together, the same way, like they\'d heard their name called. Toward something out past the masts.',
+    rewards: { xp: 1400, gold: 500, armor: { minTier: 3 } },
+  },
 ];
 
 // Short scenes, played on screen when a quest asks (ui/Moments.js): a few shots, each a camera

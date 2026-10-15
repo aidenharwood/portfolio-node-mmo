@@ -217,6 +217,7 @@ for (const q of STORY) {
 check(quests.flags.act1_done && quests.flags.ironjaw_fell && quests.flags.vault_open, 'Act I complete: Ironjaw fell, the vault is open');
 check(quests.flags.krell_captured && !quests.flags.krell_freed && quests.flags.trusted_ysolde, 'choices set their flags (Krell taken in chains, Ysolde told)');
 check(quests.flags.act2_started && quests.flags.hamlets_cleared, 'Act II under way: Farcall reached, the quiet hamlets answered');
+check(quests.completed.has('b3'), 'the surge on the quiet hamlet held (b3, a public event the quest called)');
 {
   // A character who finished Act I before Act II existed: Ashe has the next step for them.
   const later = new QuestLog(host);
