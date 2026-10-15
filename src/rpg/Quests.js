@@ -658,11 +658,15 @@ export class QuestLog {
     return hit;
   }
 
-  // The choice a stage offers someone (its `choices`), if they're who `npcId` is.
+  // The choice a stage offers someone (its `choices`), if they're who `npcId` is and it's still
+  // unanswered (a last stage stays current once answered, while the quest waits to be handed in).
   choiceAt(id, npcId) {
     const q = this.defs.get(id);
     const c = this.stageOf(id)?.choices;
-    return c && this.npcOf(c.npc, q) === npcId && this.active[id] ? c : null;
+    const prog = this.active[id];
+    if (!c || !prog || this.npcOf(c.npc, q) !== npcId) return null;
+    const open = this.objectivesOf(id).some((o, k) => o.type === 'choose' && prog[k] < (o.count ?? 1));
+    return open ? c : null;
   }
 
   // Answered: the option's flag set, its reply said, the stage's 'choose' objective done.

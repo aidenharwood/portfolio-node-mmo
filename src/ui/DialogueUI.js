@@ -18,7 +18,7 @@ export class DialogueUI {
 
   get isOpen() { return !this.el.classList.contains('hidden'); }
 
-  open({ name, title = '', text, options, notes = [], questKind = null }) {
+  open({ name, title = '', text, options, notes = [], questKind = null, step = 'Choose a response' }) {
     this.options = [...options, { label: 'Leave', onClick: () => this.game.closeMenus() }];
     const actionButton = (o, i, extraClass = '') => {
       const classes = (o.cls ?? '').split(/\s+/).filter((c) => QUEST_KIND_CLASS.has(c) || c === 'quest').join(' ');
@@ -30,7 +30,7 @@ export class DialogueUI {
     this.el.classList.toggle('quest-story', kindClass === 'story');
     this.el.classList.toggle('quest-side', kindClass === 'side');
     this.el.innerHTML = `
-      <header class="dlg-head"><div><div class="dlg-eyebrow">${esc(QUEST_KIND_LABEL[kindClass] ?? 'Conversation')}</div><div class="dlg-name">${esc(name)}</div>${title ? `<div class="dlg-role">${esc(title)}</div>` : ''}</div><span class="dlg-step">Choose a response</span></header>
+      <header class="dlg-head"><div><div class="dlg-eyebrow">${esc(QUEST_KIND_LABEL[kindClass] ?? 'Conversation')}</div><div class="dlg-name">${esc(name)}</div>${title ? `<div class="dlg-role">${esc(title)}</div>` : ''}</div>${step ? `<span class="dlg-step">${esc(step)}</span>` : ''}</header>
       <p class="dlg-line">${esc(text)}</p>
       ${notes.length ? `<div class="dlg-notes">${notes.map((n) => `<article class="dlg-note ${esc(n.state ?? '')}"><header><b>${esc(n.title)}</b>${n.tag ? `<small>${esc(n.tag)}</small>` : ''}</header><p>${esc(n.text)}</p>${Number.isInteger(n.optionIndex) ? actionButton(this.options[n.optionIndex], n.optionIndex, 'dlg-note-action') : ''}</article>`).join('')}</div>` : ''}
       ${actions ? `<div class="dlg-options">${actions}</div>` : ''}`;
