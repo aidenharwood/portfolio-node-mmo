@@ -38,7 +38,7 @@ const FORT_KIT = { scav: 'scav', hive: 'nest', synth: 'relay', fauna: 'den' };
 // out of them).
 export const PIECES = {
   fire: [0.9, 0.6], furnace: [1.3, 2], node: [1, 1.2], pylon: [0.9, 5.5], overhang: [3.4, 3.2],
-  stakes: [0.7, 1.4], scrapwall: [1, 2.2], boulder: [1.2, 1.4], mound: [1.1, 1.2], fence: [0.5, 2.4], wallseg: [1.6, 4],
+  stakes: [0.7, 1.4], scrapwall: [1, 2.2], boulder: [1.2, 1.4], mound: [1.1, 1.2], fence: [1, 2.4], wallseg: [1.6, 4],
   shack: [1.6, 2.4], tent: [1.5, 2], mast: [0.5, 3.4], heap: [1.2, 1.4], suitrack: [0.8, 2.2], eggs: [0.9, 0.8],
   spire: [0.6, 4.5], pod: [1, 1.6], nest: [1.4, 0.5], bones: [0, 0],
   gunnest: [1.2, 1.6], spitspire: [0.8, 4], turret: [0.8, 2.2], tower: [1.8, 6], throne: [1.5, 2],
@@ -67,7 +67,8 @@ function build(def, probe) {
   const stream = (layer) => mulberry32((seed ^ (0x1a41 + LAYERS[layer])) >>> 0);
   const tier = tierOf(def);
   const T = TIERS[tier];
-  const R = T.R;
+  // (A story camp keeps the radius its site was made for.)
+  const R = def.radius ?? T.R;
   const fort = def.style === 'fort';
   const kit = KITS[fort ? FORT_KIT[def.race] ?? 'scav' : def.style] ?? KITS.scav;
   const pieces = [];
@@ -99,6 +100,10 @@ function build(def, probe) {
   const wallKind = fort ? 'wallseg' : null;
   const span = tier === 'outpost' && !fort ? 0.5 + rng() * 0.2 : 1;
   const start = rng() * Math.PI * 2;
+  // The line it runs on wanders in and out (a fort's stands true), so no two camps are the same
+  // circle: up to a tenth of the radius in.
+  const [k1, k2, p1, p2] = [2 + Math.floor(rng() * 2), 3 + Math.floor(rng() * 3), rng() * 6.3, rng() * 6.3];
+  const wobble = (a) => (fort ? 0 : R * 0.05 * (2 + Math.sin(k1 * a + p1) * 1.2 + Math.sin(k2 * a + p2) * 0.8) / 2);
   const [wr] = PIECES[wallKind ?? kit.wall[0]];
   const steps = Math.ceil((Math.PI * 2 * R) / (wr * 2.1));
   for (let i = 0; i < steps; i++) {
@@ -109,23 +114,38 @@ function build(def, probe) {
     const kind = wallKind ?? pick(rng, kit.wall);
     const [r] = PIECES[kind];
     // Heaped walls (boulders, mounds) lie a little ragged; built ones stand true.
-    const d = R - r + (wallKind || kind === 'fence' || kind === 'scrapwall' ? 0 : (rng() - 0.5) * 0.6);
+    const d = R - r - wobble(a) + (wallKind || kind === 'fence' || kind === 'scrapwall' ? 0 : (rng() - 0.5) * 0.6);
     add(kind, Math.sin(a) * d, Math.cos(a) * d, a, kind === 'boulder' || kind === 'mound' ? { s: 0.8 + rng() * 0.5 } : {});
+  }
+  // Inside a camp or a base, short runs of wall split it into yards.
+  const arcs = tier === 'outpost' ? 0 : tier === 'camp' ? 1 : 2;
+  for (let k = 0; k < arcs; k++) {
+    const kind = kit.wall[0];
+    const [r] = PIECES[kind];
+    const d = R * (0.42 + rng() * 0.12);
+    const a0 = start + (k + 0.3 + rng() * 0.4) * (Math.PI * 2 / Math.max(arcs, 1));
+    const len = 0.7 + rng() * 0.5;
+    const n = Math.max(2, Math.round((len * d) / (r * 2.1)));
+    for (let i = 0; i < n; i++) {
+      const a = a0 + (i / n) * len;
+      if (gates.some((g) => angDiff(g.a, a) < gateHalf + 0.15)) continue;
+      add(kind, Math.sin(a) * d, Math.cos(a) * d, a, kind === 'boulder' || kind === 'mound' ? { s: 0.7 + rng() * 0.4 } : {});
+    }
   }
 
   // Buildings, round the middle and apart from each other.
   rng = stream('buildings');
-  const nBuild = tier === 'outpost' ? 1 : tier === 'camp' ? 3 : 6;
+  const nBuild = tier === 'outpost' ? 2 : tier === 'camp' ? 5 : 9;
   for (let i = 0; i < nBuild; i++) {
     // One of each kind first, then any.
     const kind = i < kit.building.length ? kit.building[i] : pick(rng, kit.building);
     const [r] = PIECES[kind];
     for (let k = 0; k < 40; k++) {
       const a = rng() * Math.PI * 2;
-      const d = R * (0.35 + rng() * 0.45);
+      const d = R * (0.3 + rng() * 0.45);
       const x = Math.sin(a) * d;
       const z = Math.cos(a) * d;
-      if (Math.hypot(x, z) + r > R - 1.5 || !clear(x, z, r) || gates.some((g) => angDiff(g.a, a) < 0.4 && d > R * 0.6)) continue;
+      if (Math.hypot(x, z) + r > R * 0.85 - 1.5 || !clear(x, z, r) || gates.some((g) => angDiff(g.a, a) < 0.4 && d > R * 0.6)) continue;
       add(kind, x, z, a + Math.PI);
       break;
     }
@@ -172,15 +192,18 @@ function build(def, probe) {
 
   // Clutter: crates, barrels, eggs, bones.
   rng = stream('clutter');
-  const nClutter = tier === 'outpost' ? 3 : tier === 'camp' ? 6 : 10;
+  // In heaps by the buildings and walls, as things are left where they're used.
+  const nClutter = tier === 'outpost' ? 5 : tier === 'camp' ? 10 : 18;
+  const by = pieces.filter((p) => p.r >= 0.8 && Math.hypot(p.x, p.z) < R * 0.8);
   for (let i = 0; i < nClutter; i++) {
     const kind = pick(rng, kit.clutter);
     const [r] = PIECES[kind];
     for (let k = 0; k < 20; k++) {
+      const near = by.length ? by[Math.floor(rng() * by.length)] : { x: 0, z: 0, r: 2 };
       const a = rng() * Math.PI * 2;
-      const d = R * (0.2 + rng() * 0.6);
-      const x = Math.sin(a) * d;
-      const z = Math.cos(a) * d;
+      const x = near.x + Math.sin(a) * (near.r + r + 0.9 + rng() * 1.2);
+      const z = near.z + Math.cos(a) * (near.r + r + 0.9 + rng() * 1.2);
+      if (Math.hypot(x, z) + r > R * 0.85) continue;
       if (!clear(x, z, r, 0.8) || spawners.some((sp) => Math.hypot(sp.x - x, sp.z - z) < 3)) continue;
       add(kind, x, z, rng() * Math.PI * 2);
       break;

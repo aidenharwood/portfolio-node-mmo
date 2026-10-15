@@ -3,6 +3,7 @@
 //   await t.tour('landmark')     one tile per landmark kind
 //   await t.tour('settlement')   one per settlement kind
 //   await t.tour('biome')        one per biome, from above a region's centre
+//   await t.tour('camp')         one per camp style and tier, and a stronghold per race
 // Sheets land in .shots/ (tour_<what>.png).
 import * as THREE from 'three';
 import { LANDMARKS, SETTLEMENTS, BIOMES, WATER_LEVEL } from '../src/world/Gen.js';
@@ -12,7 +13,7 @@ const g = window.game;
 // Every POI or region matching `test`, nearest the hub first, one per key.
 function find(keys, keyOf) {
   const out = new Map();
-  for (let ring = 1; ring < 16 && out.size < keys.length; ring++) {
+  for (let ring = 1; ring < 20 && out.size < keys.length; ring++) {
     for (let rx = -ring; rx <= ring; rx++) {
       for (let rz = -ring; rz <= ring; rz++) {
         if (Math.max(Math.abs(rx), Math.abs(rz)) !== ring) continue;
@@ -70,7 +71,10 @@ export async function tour(what, { cols = 4, w = 480, h = 360 } = {}) {
   let items;
   if (what === 'landmark') items = find(Object.keys(LANDMARKS), (p) => (p.type === 'landmark' ? p.kind : null));
   else if (what === 'settlement') items = find(Object.keys(SETTLEMENTS), (p) => (p.type === 'settlement' ? p.kind : null));
-  else items = find(BIOMES, (r) => (r.key && r.biome && !r.hub ? r.biome : null));
+  else if (what === 'camp') {
+    const keys = [...['scav', 'salvage', 'nest', 'relay', 'den'].flatMap((s) => ['outpost', 'camp', 'base'].map((t) => `${s}:${t}`)), 'fort:scav', 'fort:hive', 'fort:synth', 'fort:fauna'];
+    items = find(keys, (p) => (p.type === 'camp' && !p.story ? (p.stronghold ? `fort:${p.race}` : `${p.style}:${p.tier}`) : null));
+  } else items = find(BIOMES, (r) => (r.key && r.biome && !r.hub ? r.biome : null));
   const list = [...items.entries()];
   const rows = Math.ceil(list.length / cols);
   const sheet = document.createElement('canvas');
@@ -83,7 +87,7 @@ export async function tour(what, { cols = 4, w = 480, h = 360 } = {}) {
       const y = g.world.groundHeight(it.x, it.z);
       src = view(it.x, it.z, new THREE.Vector3(it.x - 60, y + 38, it.z - 60), new THREE.Vector3(it.x + 20, y, it.z + 20));
     } else {
-      const r = it.r ?? 18;
+      const r = it.r ?? it.radius ?? 18;
       const a = (it.rot ?? 0) + 0.6;
       const y = g.world.groundHeight(it.x, it.z);
       const d = r * 2.6 + 12;

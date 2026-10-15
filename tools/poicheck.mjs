@@ -10,11 +10,12 @@ import { HAMLETS, DISTRICTS, SIZES } from '../src/world/places.js';
 import { storyPlaces, storyKeys, storyRef } from '../src/world/story.js';
 import { OBJECT_MODELS } from '../src/world/StorySites.js';
 import { campUnits } from '../src/combat/races.js';
+import { campLayout } from '../src/world/campLayout.js';
 import { mulberry32, mulberry32 as rngOf } from '../src/core/rng.js';
 
 const seed = Number(process.argv[2] ?? 12345);
 const w = new HeadlessWorld(seed);
-const CAMPS = ['scav', 'salvage', 'nest', 'relay', 'den', 'fort:scav', 'fort:hive', 'fort:synth', 'fort:fauna'];
+const CAMPS = [...['scav', 'salvage', 'nest', 'relay', 'den'].flatMap((s) => ['outpost', 'camp', 'base'].map((t) => `${s}:${t}`)), 'fort:scav', 'fort:hive', 'fort:synth', 'fort:fauna'];
 const want = new Map([
   ['hub:', null],
   ['hubtown:', null],
@@ -27,7 +28,7 @@ const want = new Map([
   ...DISTRICTS.map((k) => [`district:${k}`, null]),
   ...CAMPS.map((k) => [`camp:${k}`, null]),
 ]);
-const keyOf = (p) => (p.type === 'camp' ? `camp:${p.stronghold ? `fort:${p.race}` : p.style}` : `${p.type}:${p.kind ?? ''}`);
+const keyOf = (p) => (p.type === 'camp' ? `camp:${p.stronghold ? `fort:${p.race}` : `${p.style}:${p.tier}`}` : `${p.type}:${p.kind ?? ''}`);
 for (let ring = 0; ring < 24 && [...want.values()].some((v) => !v); ring++) {
   for (let rx = -ring; rx <= ring; rx++) {
     for (let rz = -ring; rz <= ring; rz++) {
@@ -61,7 +62,12 @@ for (const [k, p] of want) {
   const o = w.pois.get(p.id);
   let meshes = 0;
   o.group.traverse?.((m) => { if (m.isMesh) meshes++; });
-  console.log(`${k.padEnd(22)} ${(performance.now() - t0).toFixed(1).padStart(6)} ms  ${String(o.colliders.length).padStart(4)} colliders  ${p.name ?? ''}`);
+  console.log(`${k.padEnd(22)} ${(performance.now() - t0).toFixed(1).padStart(6)} ms  ${String(o.colliders.length).padStart(4)} colliders  ${String(meshes).padStart(4)} meshes  ${p.name ?? ''}`);
+  // A camp is built from its layout (world/campLayout.js): everything solid there blocks.
+  if (p.type === 'camp') {
+    const solid = campLayout(p, w.gen.campProbe).pieces.filter((q) => q.r > 0).length;
+    if (o.colliders.length < solid) fail(k, `${o.colliders.length} colliders for the ${solid} solid pieces of its layout`);
+  }
   // Services and folk.
   const need = NEEDS[p.type];
   if (need) {

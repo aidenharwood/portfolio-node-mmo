@@ -4,6 +4,7 @@
 // Run: node tools/campcheck.mjs [--seed N] [--fingerprint]
 import { WorldGen, ACTS } from '../src/world/Gen.js';
 import { TIERS, campLayout } from '../src/world/campLayout.js';
+import { PIECE_BUILDERS } from '../src/world/build/campKit.js';
 
 const arg = (k) => { const i = process.argv.indexOf(k); return i === -1 ? null : process.argv[i + 1]; };
 const SEEDS = arg('--seed') ? [Number(arg('--seed'))] : [12345, 1, 777, 4242, 90210];
@@ -172,6 +173,9 @@ function layouts() {
     if (![...wet.posts, ...wet.spawners, ...wet.pieces].every((q) => q.x <= 5)) fail('nothing stands in the water', def);
     if (!wet.spawners.length) fail('a spawner even with water', def);
   }
+  const kinds = new Set(defs.flatMap((def) => { const L = campLayout(def); return [...L.pieces.map((p) => p.kind), ...L.spawners.map((sp) => sp.kind)]; }));
+  const missing = [...kinds].filter((k) => !PIECE_BUILDERS[k]);
+  check(!missing.length, `every piece a layout lays out has a builder (${kinds.size} kinds${missing.length ? `; missing ${missing.join(', ')}` : ''})`);
   for (const what of ['deterministic', 'tier and radius', 'pieces inside R + 2', 'enough posts', 'spawner count', 'spawner ids', 'posts clear of pieces', 'posts 1.2 m apart', 'gates by tier', 'a throne only in a stronghold', 'nothing stands in the water', 'a spawner even with water']) {
     check(!bad[what], `${what} (${defs.length} layouts${bad[what] ? `; e.g. ${bad[what].slice(0, 3).join(', ')} of ${bad[what].length}` : ''})`);
   }
