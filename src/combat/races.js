@@ -5,6 +5,7 @@
 // grow into hordes led by named elites and champions (HORDE), and strongholds put a race boss on
 // the throne with an honour guard and reinforcements to call.
 import { ENEMY_TYPES } from './bestiary.js';
+import { TIERS } from '../world/campLayout.js';
 
 // Camp size by level: [from level, size [min, max], elites [min, max], chance of a champion].
 const HORDE = [
@@ -66,12 +67,22 @@ function band(table, level, rng, n, elites, champion) {
   return out;
 }
 
+// How many hold a camp of a tier (world/campLayout.js TIERS): within its garrison range, toward
+// the top of it as the level rises.
+const BUMP = [[18, 0.3], [10, 0.2], [5, 0.1], [1, 0]];
+function garrisonOf(def, rng) {
+  const [lo, hi] = TIERS[def.tier].garrison;
+  const bump = Math.round((hi - lo) * BUMP.find(([min]) => def.level >= min)[1]);
+  return between(rng, [lo + bump, hi]);
+}
+
 export function campUnits(def, rng) {
   const level = def.level;
-  // A stronghold: the boss, an honour guard of 10–14 (with elites from level 10), and more to
-  // call when the alarm goes up (strongholdWave).
+  // A stronghold: the boss, an honour guard (with elites from level 10), and more to call when
+  // the alarm goes up (strongholdWave). (A camp without a tier — an event's garrison — keeps the
+  // sizes it was tuned to.)
   if (def.stronghold) {
-    const n = 10 + Math.floor(rng() * 5);
+    const n = def.tier ? garrisonOf(def, rng) : 10 + Math.floor(rng() * 5);
     const elites = level >= 18 ? 2 : level >= 10 ? 1 : 0;
     return [{ type: BOSS[def.race], opts: { boss: true } }, ...band(guardsOf(def.race), level, rng, n, elites, false)];
   }
@@ -79,12 +90,19 @@ export function campUnits(def, rng) {
   const [, size, eliteRange, championChance] = bandOf(level);
   // Hounds and crawlers come in bigger groups; juggernaut yards in smaller ones.
   const extra = table === DENS[0] || table === DENS[1] ? 1 : def.style === 'salvage' ? -2 : 0;
-  const n = Math.max(3, between(rng, size) + extra);
+  const n = def.tier ? garrisonOf(def, rng) : Math.max(3, between(rng, size) + extra);
   const champion = rng() < championChance;
   const elites = Math.min(n - 1, between(rng, eliteRange));
   const pack = band(table, level, rng, n, elites, champion);
   // A story camp led by a named foe of its own (Act II's Psion): it stands at the head of the pack.
   return def.boss?.type ? [{ type: def.boss.type, opts: { boss: true } }, ...pack] : pack;
+}
+
+// A reinforcement squad for a camp (sim/WorldSim.js): `n` off its roster, no boss among them,
+// now and then an elite in a camp of level 10 and up.
+export function campSquad(def, n, rng) {
+  const table = def.race === 'fauna' ? DENS[0] : def.style === 'salvage' ? SALVAGE : CAMP[def.race] ?? CAMP.scav;
+  return band(table, def.level, rng, n, def.level >= 10 && rng() < 0.2 ? 1 : 0, false);
 }
 
 // Reinforcements for a stronghold under attack: a squad from its guard roster.

@@ -5,7 +5,8 @@
 import * as THREE from 'three';
 import { HeadlessWorld } from '../server/world.js';
 import { WorldSim } from '../src/sim/WorldSim.js';
-import { campUnits } from '../src/combat/races.js';
+import { campUnits, campSquad } from '../src/combat/races.js';
+import { TIERS } from '../src/world/campLayout.js';
 import { mulberry32 } from '../src/core/rng.js';
 import { AFFIX_IDS } from '../src/sim/affixes.js';
 
@@ -29,20 +30,25 @@ for (const ring of [1, 2, 3, 4, 5, 6, 7, 8, 12, 16, 20]) {
     }
   }
 }
-const bands = [[1, 4], [5, 9], [10, 17], [18, 99]];
-for (const [lo, hi] of bands) {
-  const list = camps.filter((c) => !c.stronghold && c.level >= lo && c.level <= hi);
-  if (!list.length) { console.log(`  levels ${lo}–${hi}: no camps found`); continue; }
+// By tier: every camp's roster within its tier's garrison (a stronghold's, plus its boss).
+let offRoster = 0;
+for (const tier of Object.keys(TIERS)) {
+  const list = camps.filter((c) => c.tier === tier && !c.story);
+  if (!list.length) { console.log(`  ${tier}: none found`); continue; }
   const rows = list.map((c) => campUnits(c, mulberry32(c.seed)));
-  const size = rows.map((r) => r.length);
+  const size = rows.map((r) => r.filter((u) => !u.opts.boss).length);
   const elites = rows.map((r) => r.filter((u) => u.opts.elite).length);
   const champs = rows.filter((r) => r.some((u) => u.opts.champion)).length;
-  console.log(`  levels ${String(lo).padStart(2)}–${String(hi).padEnd(2)}  ${String(list.length).padStart(3)} camps  size ${Math.min(...size)}–${Math.max(...size)}  elites ${Math.min(...elites)}–${Math.max(...elites)}  champions in ${Math.round((champs / list.length) * 100)}%`);
+  const [lo, hi] = TIERS[tier].garrison;
+  offRoster += size.filter((n) => n < lo || n > hi).length;
+  console.log(`  ${tier.padEnd(8)} ${String(list.length).padStart(3)} camps  size ${Math.min(...size)}–${Math.max(...size)}  elites ${Math.min(...elites)}–${Math.max(...elites)}  champions in ${Math.round((champs / list.length) * 100)}%  strongholds ${list.filter((c) => c.stronghold).length}`);
 }
-const forts = camps.filter((c) => c.stronghold);
-if (forts.length) {
-  const guards = forts.map((c) => campUnits(c, mulberry32(c.seed)).length - 1);
-  console.log(`  strongholds  ${forts.length}, guards ${Math.min(...guards)}–${Math.max(...guards)} (+ the boss)`);
+const forts = camps.filter((c) => c.stronghold && !c.story);
+check(offRoster === 0, `every camp's garrison is within its tier's range (${offRoster} outside)`);
+{
+  const def = camps.find((c) => c.tier === 'base') ?? camps[0];
+  const squad = campSquad(def, 5, mulberry32(9));
+  check(squad.length === 5 && !squad.some((u) => u.opts.boss), 'a reinforcement squad: 5 off the roster, no boss among them');
 }
 
 // ---------------------------------------------------------------- a sim with one stand-in player
@@ -170,7 +176,7 @@ console.log('Strongholds:');
 const fort = forts[0];
 if (!fort) console.log('  (no stronghold found)');
 else {
-  place(fort.x + fort.radius + 30, fort.z);
+  place(fort.x + fort.radius + 20, fort.z);
   run(1);
   const camp = sim.encounters.camps.get(fort.id);
   check(camp?.state === 'active', `${fort.name} is up (level ${fort.level}, ${camp?.enemies.length} enemies)`);
