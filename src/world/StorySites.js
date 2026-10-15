@@ -630,8 +630,12 @@ export const STORY_BUILDERS = {
       const [x, z] = out(p.x, p.z, a, R);
       const [x3, y3, z3] = local(g, x, z, w);
       piece(g, G.box(0.12, 2.2, 0.12), C.metalDark, { pos: [x3, y3 + 1.1, z3], outline: 0.008 });
-      piece(g, G.box(2 * R * Math.sin(Math.PI / 16) + 0.1, 1.6, 0.05), C.metal, { pos: [x3, y3 + 1.0, z3], rot: [0, a + Math.PI / 2, 0], outline: 0.006 });
-      w.addCollider(x, z, 0.3, 2.2);
+      piece(g, G.box(2 * R * Math.sin(Math.PI / 16) + 0.1, 1.6, 0.05), C.metal, { pos: [x3, y3 + 1.0, z3], rot: [0, a, 0], outline: 0.006 });
+      // A panel blocks along its length: a row of small colliders on the ring.
+      for (const t of [-0.08, -0.04, 0, 0.04, 0.08]) {
+        const [cx, cz] = out(p.x, p.z, a + t, R);
+        w.addCollider(cx, cz, 0.45, 2.2);
+      }
     }
     // A gutted Synth hull, on its side at the back, its seams long dark.
     {

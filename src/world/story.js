@@ -197,7 +197,7 @@ export function storyIn(gen, rx, rz) {
       // The kneeling titan (world/Landmarks.js titan), its control core's housing torn out and left
       // at its knees, in front, where the salvagers dropped it.
       poi = { ...base, type: 'landmark', id: `p:${key}:titan`, kind: 'titan', r: P.r, tag: 'stt' };
-      poi.npcs = [folkFor(poi, rng, 0, 'object', P.rot, 8, { object: 'titan:core', model: 'titancore', facing: P.rot + Math.PI })];
+      poi.npcs = [folkFor(poi, rng, 0, 'object', P.rot, 8, { object: 'titan:core', model: 'titancore', facing: P.rot })];
     } else if (P.key === 'salvage') {
       // The Synths stripping the titan (Act III): a relay camp, whatever race holds the region.
       poi = { ...base, type: 'camp', id: `sc:${key}:salvage`, radius: 11, race: 'synth', style: 'relay', level: Math.max(19, P.level), tag: 'ssr' };
