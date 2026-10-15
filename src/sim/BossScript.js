@@ -422,7 +422,7 @@ export class BossScript {
       const u = (i + Math.random() * 0.6) / total;
       const per = 2 * (A.x1 - A.x0 + A.z1 - A.z0);
       let d = u * per;
-      const inset = 2.2;
+      const inset = 3;
       const W = A.x1 - A.x0;
       const H = A.z1 - A.z0;
       if (d < W) return { x: A.x0 + d, z: A.z0 + inset };
@@ -450,8 +450,10 @@ export class BossScript {
       }
     }
     const foes = this.enc.players();
+    // (Nudged clear of pillars and the like, but never out through the arena's walls.)
+    const keep = (x, z) => x >= A.x0 + 1.5 && x <= A.x1 - 1.5 && z >= A.z0 + 1.5 && z <= A.z1 - 1.5;
     for (const { u, at } of spots) {
-      const e = this.sim.spawnEnemy(u.type, _v.set(at.x, 0, at.z), { level: b.level, variant: u.variant ?? null, elite: u.elite ?? null, summoner: b });
+      const e = this.sim.spawnEnemy(u.type, _v.set(at.x, 0, at.z), { level: b.level, variant: u.variant ?? null, elite: u.elite ?? null, summoner: b, keep });
       e.hidden = false;
       const foe = foes.length ? foes[Math.floor(Math.random() * foes.length)] : b.foe;
       if (foe) e.aggro(true, foe);

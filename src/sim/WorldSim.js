@@ -41,6 +41,13 @@ const FORGET_DIST = 400;
 const RESPAWN_CLEARANCE = 26; // no player within this of a slot for it to refill
 const ROAMERS_PER_PLAYER = 3;
 const ROAM_DESPAWN = 95;
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const FORT_INNER = 12.5;     // a stronghold's walls stand 15 m out from its middle (world/World.js buildFort)
+
+// Where a camp's enemies may be put: inside a fort's walls, for a stronghold; anywhere otherwise.
+const campKeep = (def) => (def?.style === 'fort'
+  ? (x, z) => Math.abs(x - def.x) <= FORT_INNER && Math.abs(z - def.z) <= FORT_INNER
+  : null);
 
 export class WorldSim {
   constructor(host) {
@@ -153,6 +160,11 @@ export class WorldSim {
 
   spawnEnemy(type, position, opts) {
     const e = new EnemySim(this, this.nextId++, type, position, opts);
+    // Never inside a rock, a tent or a wall: the nearest spot nearby with room for it.
+    if (this.world.clearSpot) {
+      const at = this.world.clearSpot(e.position.x, e.position.z, e.radius, { height: e.height, keep: opts?.keep ?? campKeep(opts?.camp?.def) });
+      if (at.moved) e.place(at.x, at.z);
+    }
     this.enemies.push(e);
     this.byId.set(e.id, e);
     this.host.onSpawn?.(e);
@@ -413,10 +425,18 @@ export class Encounters {
     const units = strongholdWave(def, Math.random);
     const away = Math.atan2(def.x - foe.position.x, def.z - foe.position.z);
     const n = units.length;
+    // A fort's come out of its keep, inside the walls on the side away from the fight (from
+    // outside they'd have no way in but the gate); an open camp's march in from beyond its edge.
+    const keep = campKeep(def);
+    const out = keep ? FORT_INNER - 1.5 : def.radius + 5;
     units.forEach((u, i) => {
-      const a = away + (i - (n - 1) / 2) * 0.16;
-      let x = def.x + Math.sin(a) * (def.radius + 5);
-      let z = def.z + Math.cos(a) * (def.radius + 5);
+      const a = away + (i - (n - 1) / 2) * (keep ? 0.35 : 0.16);
+      let x = def.x + Math.sin(a) * out;
+      let z = def.z + Math.cos(a) * out;
+      if (keep) {
+        x = def.x + clamp(x - def.x, -FORT_INNER + 1, FORT_INNER - 1);
+        z = def.z + clamp(z - def.z, -FORT_INNER + 1, FORT_INNER - 1);
+      }
       if (this.world.isWater(x, z)) { x = def.x; z = def.z; }
       const e = this.sim.spawnEnemy(u.type, new THREE.Vector3(x, 0, z), { level: def.level, camp, elite: u.opts.elite, variant: u.opts.variant, transient: true });
       camp.enemies.push(e);

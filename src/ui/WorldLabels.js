@@ -6,8 +6,24 @@ import { esc } from './cards.js';
 import { AFFIXES } from '../sim/affixes.js';
 
 const css = (hex) => `#${(hex ?? 0xffd23f).toString(16).padStart(6, '0')}`;
-// A marker's state: '!' a quest to take, '?' one to hand in, '…' someone a quest wants.
-const MARK = { '?': 'turnin', '…': 'talk' };
+// A marker's state: '!' a quest to take, '?' one to hand in, '…' someone a quest wants. Its
+// colour says what kind of quest (the story's gold, side quests' blue, work and bounties white),
+// its glyph what to do, and up close a caption spells both out.
+const MARK = { '!': 'offer', '?': 'turnin', '…': 'talk' };
+const MARK_TEXT = { '!': 'New quest', '?': 'Turn in', '…': 'Talk' };
+const KIND_TEXT = { story: 'Story', side: 'Side', contract: 'Contract', hunt: 'Hunt', errand: 'Errand', job: 'Job' };
+const LABEL_NEAR = 26;  // names and titles this close...
+const MARKER_FAR = 80;  // ...and quest markers out to here (folk are built from 85 m: main.js FOLK_NEAR)
+const CAPTION_NEAR = 14; // a marker's caption this close
+
+function markerHtml(marker, kind) {
+  const tone = kind === 'story' ? 'story' : kind === 'side' ? 'side' : 'work';
+  const what = MARK_TEXT[marker] ?? 'Quest';
+  const label = KIND_TEXT[kind] ? `${KIND_TEXT[kind]} quest: ${what}` : what;
+  return `<div class="qm qm-${MARK[marker] ?? 'offer'} qm-${tone}" role="img" aria-label="${label}">`
+    + `<div class="qm-badge"><span class="qm-glyph">${marker === '…' ? '<i></i><i></i><i></i>' : marker}</span></div>`
+    + `<div class="qm-cap">${KIND_TEXT[kind] ? `<b>${KIND_TEXT[kind]}</b> ` : ''}${what}</div></div>`;
+}
 
 const _v = new THREE.Vector3();
 
@@ -87,22 +103,27 @@ export class WorldLabels {
 
       for (const n of [...game.npcs, ...(game.props?.values() ?? [])]) {
         const d = n.position.distanceTo(p.position);
-        if (d > (n.role === 'flavor' ? 12 : 26)) continue;
+        if (d > (n.role === 'flavor' ? 12 : MARKER_FAR)) continue;
+        // (What the quest log says of them, asked a few times a second rather than every frame.)
+        if (!n._mark || game.time - n._mark.t > 0.25 || game.time < n._mark.t) n._mark = { t: game.time, marker: n.marker ?? null, kind: n.markerKind ?? null };
+        const { marker, kind: markerKind } = n._mark;
+        // Past the names' reach, only those with a marker over them.
+        if (d > LABEL_NEAR && !marker) continue;
         const el = this.el(n, 'npc-label');
         seen.add(n);
-        const marker = n.marker;
-        const markerKind = n.markerKind;
         // What they call out as you come near (main.js updateBarks), for a few seconds.
         const say = n.bark && n.bark.until > game.time ? n.bark.text : '';
         const key = `${marker ?? ''}|${markerKind ?? ''}|${say}`;
         if (el._key !== key) {
           el._key = key;
-          const typeClass = markerKind === 'story' ? 'story' : markerKind === 'side' ? 'side' : '';
-          const typeLabel = markerKind === 'story' ? 'Story quest' : markerKind === 'side' ? 'Side quest' : '';
-          el.innerHTML = `${say ? `<div class="np-say">${esc(say)}</div>` : ''}${marker ? `<div class="marker ${MARK[marker] ?? ''} ${typeClass}" aria-label="${typeLabel || 'Quest'}">${typeLabel || marker}</div>` : ''}<div class="np-name">${esc(n.name)}</div><div class="np-title">${esc(n.title)}</div>`;
+          el.innerHTML = `${say ? `<div class="np-say">${esc(say)}</div>` : ''}${marker ? markerHtml(marker, markerKind) : ''}<div class="np-name">${esc(n.name)}</div><div class="np-title">${esc(n.title ?? '')}</div>`;
         }
         // (Touch layouts show the titles of townsfolk only up close.)
         el.classList.toggle('far', d > 10 && !marker);
+        // Far off, just the marker (smaller with distance); its caption only up close.
+        el.classList.toggle('marker-only', d > LABEL_NEAR);
+        el.classList.toggle('captioned', d <= CAPTION_NEAR);
+        el.style.setProperty('--qm-scale', d > LABEL_NEAR ? Math.max(0.6, 1 - (d - LABEL_NEAR) / 90).toFixed(2) : '1');
         this.place(el, this.project(n.position, n.height + 0.3, w, h));
       }
 

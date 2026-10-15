@@ -438,7 +438,7 @@ export function componentForSweep(enemy, attacker, attack) {
     let nearestDistance = Infinity;
     const halfArc = (attack.arc * Math.PI) / 360;
     const minY = attacker.position.y - 0.4;
-    const maxY = attacker.position.y + attacker.height * 0.9;
+    const maxY = attacker.position.y + Math.max(attacker.height * 0.9, 1.5); // (Damage.js SWEEP_UP)
     attacker.forward(_forward);
     const ax = attacker.position.x;
     const az = attacker.position.z;
@@ -454,7 +454,6 @@ export function componentForSweep(enemy, attacker, attack) {
         const ex = Math.max(box[0] - ax, 0, ax - box[3]);
         const ez = Math.max(box[2] - az, 0, az - box[5]);
         if (Math.hypot(ex, ez) > attack.range + 0.08) return;
-        const cosHalf = Math.cos(halfArc);
         for (let i = 0, n = positions.count; i < n; i++) {
           const y = pos[i * 3 + 1];
           if (y < minY || y > maxY) continue;
@@ -462,7 +461,7 @@ export function componentForSweep(enemy, attacker, attack) {
           const dz = pos[i * 3 + 2] - az;
           const distance = Math.hypot(dx, dz);
           if (distance > attack.range + 0.08 || distance >= nearestDistance) continue;
-          if (attack.arc < 360 && distance > 1e-3 && (_forward.x * dx + _forward.z * dz) / distance < cosHalf) continue;
+          if (attack.arc < 360 && distance > 1e-3 && (_forward.x * dx + _forward.z * dz) / distance < Math.cos(halfArc + Math.atan2(0.2, distance))) continue;
           nearestDistance = distance;
           nearest = (nearest ?? new THREE.Vector3()).set(pos[i * 3], y, pos[i * 3 + 2]);
         }

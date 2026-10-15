@@ -19,6 +19,7 @@ import { anyComponentSpec, legDamageProfile } from '../combat/HitComponents.js';
 import { rollAffixes, affixCount, SHIELD, RALLY, VAMPIRIC_REGEN, OVERCHARGE, VOLATILE } from './affixes.js';
 import { inPocket } from '../world/dungeons.js';
 import { stopAgainst } from '../world/MeshCollision.js';
+import { OpenNav } from './OpenNav.js';
 
 const _to = new THREE.Vector3();
 const _desired = new THREE.Vector3();
@@ -34,6 +35,7 @@ const randIn = ([a, b]) => a + Math.random() * (b - a);
 const wrapAngle = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 const r3 = (v) => [Math.round(v.x * 100) / 100, Math.round(v.y * 100) / 100, Math.round(v.z * 100) / 100];
 const MAX_SLOPE = 1.25;
+const STEP_UP = 0.45;      // the most it steps straight up onto something (a kerb, a plank, a low rock)
 const CORPSE_LIFETIME = 9.5;
 
 const AGGRO_RADIUS = 13;
@@ -120,6 +122,9 @@ export class EnemySim {
     this.stuckCount = 0;
     this.detour = null;
     this.detourTime = 0;
+    this.path = null;                 // outdoors, the corners round what's in the way (sim/OpenNav.js)
+    this.feetY = null;                // what it stands on (the ground, or something on it)...
+    this.feetAt = null;               // ...and where
     this.blinkCd = 0;
     this.frenzy = 0;
     this.ward = null;
@@ -139,6 +144,15 @@ export class EnemySim {
 
   get behavior() { return this.type.behavior; }
   get isRanged() { return KITERS.has(this.type.behavior); }
+
+  // Puts it down somewhere else on the ground (a clear spot at spawn, out of something it ended
+  // up inside): home and its idea of where it was go with it.
+  place(x, z) {
+    this.position.set(x, this.sim.world.groundHeight(x, z), z);
+    this.home.copy(this.position);
+    this.wanderTarget.copy(this.position);
+    this.lastPos.copy(this.position);
+  }
 
   forward(out = new THREE.Vector3()) { return out.set(Math.sin(this.facing), 0, Math.cos(this.facing)); }
   angleTo(pos) { return Math.atan2(pos.x - this.position.x, pos.z - this.position.z); }
@@ -291,6 +305,19 @@ export class EnemySim {
     this.lastPos.copy(this.position);
     if (!wantsToMove || moved > 0.5) { this.stuckCount = 0; return; }
     this.stuckCount++;
+    this.path = null; // whatever way it had isn't working: look again
+    // Inside something (a collider that streamed in round it after it spawned): out to the nearest
+    // clear spot.
+    const world = this.sim.world;
+    if (world.fits && !this.hover && !world.fits(this.position.x, this.position.z, this.radius * 0.8, this.height)) {
+      const at = world.clearSpot(this.position.x, this.position.z, this.radius, { maxR: 4, height: this.height });
+      if (at.moved) {
+        this.position.set(at.x, world.groundHeight(at.x, at.z), at.z);
+        this.lastPos.copy(this.position);
+        this.feetAt = null;
+        return;
+      }
+    }
     if (this.state === 'return' && this.stuckCount >= 3 && !this.nearestPlayer(25)) {
       this.position.copy(this.home);
       this.stuckCount = 0;
@@ -301,7 +328,6 @@ export class EnemySim {
     const step = (Math.random() < 0.5 ? 1 : -1) * (Math.PI / 2 + Math.random() * 0.9);
     const a = away + step;
     const dir = new THREE.Vector3(Math.sin(a), 0, Math.cos(a));
-    const world = this.sim.world;
     const clear = world.standable(this.position.x + dir.x * 2.2, this.position.z + dir.z * 2.2) && !world.blocks(new THREE.Vector3(this.position.x + dir.x * 2.2, world.groundHeight(this.position.x + dir.x * 2.2, this.position.z + dir.z * 2.2) + 0.5, this.position.z + dir.z * 2.2));
     this.detour = clear ? dir : new THREE.Vector3(Math.sin(Math.atan2(this.velocity.x, this.velocity.z) + step), 0, Math.cos(Math.atan2(this.velocity.x, this.velocity.z) + step));
     this.detourTime = clear ? 1.2 : 0.7;
@@ -322,13 +348,39 @@ export class EnemySim {
 
   // Indoors (a dungeon's rooms: world/Interior.js) the way to a point goes round walls and through
   // open doors (sim/Nav.js): { x, z, via, dist } — the next point to make for (the point itself
-  // when it's in sight: `via` false) and how far it is by the way there. Null outdoors.
+  // when it's in sight: `via` false) and how far it is by the way there. Outdoors, chasing or
+  // going home, round whatever's in the straight line (openWay); null when nothing is.
   wayTo(target) {
-    if (!inPocket(this.position.x)) return null;
+    if (!inPocket(this.position.x)) return this.state === 'chase' || this.state === 'return' ? this.openWay(target) : null;
     const it = this.sim.world.interiorAt(this.position.x, this.position.z);
     if (!it) return null;
     const w = it.nav.next(this.position.x - it.x0, this.position.z - it.z0, target.x - it.x0, target.z - it.z0, this.sim.time);
     return w && { x: w.x + it.x0, z: w.z + it.z0, via: w.via, dist: w.dist };
+  }
+
+  // Outdoors: the next corner on the way round rocks, trees, walls and slopes too steep to climb
+  // (sim/OpenNav.js), worked out when the target has moved on or every second or so.
+  openWay(target) {
+    const world = this.sim.world;
+    if (this.hover > 1.5 || !world.fits) return null;
+    const nav = (this.sim.openNav ??= new OpenNav(world, MAX_SLOPE));
+    nav.tick(this.sim.time);
+    const t = this.sim.time;
+    let P = this.path;
+    if (!P || t >= P.until || Math.hypot(P.tx - target.x, P.tz - target.z) > 2.5) {
+      P = this.path = { tx: target.x, tz: target.z, until: t + 0.7 + Math.random() * 0.5, pts: nav.route(this.position, target, this.radius), i: 0 };
+    }
+    const pts = P.pts;
+    if (!pts) return null;
+    const px = this.position.x;
+    const pz = this.position.z;
+    while (P.i < pts.length && Math.hypot(pts[P.i].x - px, pts[P.i].z - pz) < 0.8) P.i++;
+    if (P.i >= pts.length) return null;
+    let dist = Math.hypot(pts[P.i].x - px, pts[P.i].z - pz);
+    for (let k = P.i + 1; k < pts.length; k++) dist += Math.hypot(pts[k].x - pts[k - 1].x, pts[k].z - pts[k - 1].z);
+    const last = pts[pts.length - 1];
+    dist += Math.hypot(target.x - last.x, target.z - last.z);
+    return { x: pts[P.i].x, z: pts[P.i].z, via: true, dist };
   }
 
   // Can it see `p`? Indoors, only along the grid with nothing in the way.
@@ -451,21 +503,38 @@ export class EnemySim {
     const p = this.position;
     const ox = p.x;
     const oz = p.z;
-    const oy = world.groundHeight(ox, oz);
+    const og = world.groundHeight(ox, oz);
+    // Where it stood last step (on the ground, or a kerb or rock it stepped up onto) — unless it's
+    // been put somewhere else since (a blink, a spawn, back home).
+    const oy = this.feetAt && Math.abs(this.feetAt.x - ox) + Math.abs(this.feetAt.z - oz) < 1e-6 ? Math.max(og, this.feetY) : og;
     p.y = oy;
     // Swept in short steps, so a charge or a knockback can't carry it through a wall.
     _push.set(0, 0, 0);
-    world.move(p, (this.velocity.x + this.knockback.x) * dt, (this.velocity.z + this.knockback.z) * dt, this.radius, 0, this.height, _push);
+    world.move(p, (this.velocity.x + this.knockback.x) * dt, (this.velocity.z + this.knockback.z) * dt, this.radius, STEP_UP, this.height, _push);
     stopAgainst(_push, this.velocity, this.knockback);
     this.knockback.multiplyScalar(Math.exp(-7 * dt));
-    let ny = world.groundHeight(p.x, p.z);
     const dist = Math.hypot(p.x - ox, p.z - oz);
-    if (dist > 1e-4 && (ny - oy) / dist > MAX_SLOPE) {
+    if (dist > 1e-4 && (world.groundHeight(p.x, p.z) - og) / dist > MAX_SLOPE) {
+      // Too steep straight on: slide along the hill (whichever part of the move climbs gently
+      // enough, the bigger first) rather than stopping dead against it.
+      const mx = p.x - ox;
+      const mz = p.z - oz;
       p.x = ox;
       p.z = oz;
-      ny = oy;
+      for (const [sx, sz] of Math.abs(mx) >= Math.abs(mz) ? [[mx, 0], [0, mz]] : [[0, mz], [mx, 0]]) {
+        const d = Math.abs(sx + sz);
+        if (d < 1e-4 || (world.groundHeight(ox + sx, oz + sz) - og) / d > MAX_SLOPE) continue;
+        p.x = ox + sx;
+        p.z = oz + sz;
+        world.resolve(p, this.radius, STEP_UP, this.height, _o.set(ox, oy, oz));
+        break;
+      }
     }
+    const ny = world.supportHeight ? world.supportHeight(p.x, p.z, oy + STEP_UP, oy + STEP_UP) : world.groundHeight(p.x, p.z);
     p.y = ny;
+    this.feetY = ny;
+    (this.feetAt ??= { x: 0, z: 0 }).x = p.x;
+    this.feetAt.z = p.z;
   }
 
   updateIdle(dt) {
@@ -658,7 +727,8 @@ export class EnemySim {
       if (this.attackDisabled(a)) continue;
       if (a.minLevel && this.level < a.minLevel) continue;
       if (a.hpBelow && this.hp / this.maxHp > a.hpBelow) continue;
-      const reach = CLOSE_KINDS.has(a.kind) ? a.range + p.radius - 0.2 : a.range;
+      // (A blow with a lunge behind it can start from a little further out.)
+      const reach = CLOSE_KINDS.has(a.kind) ? a.range + p.radius - 0.2 + (a.lunge ?? 0) * a.active * 0.4 : a.range;
       if (dist > reach || dist < (a.min ?? 0)) continue;
       const tk = this.tokenKind(a);
       if (tk && !this.sim.tokenAvailable(this, tk)) continue;
@@ -725,9 +795,19 @@ export class EnemySim {
   updateWindup(dt, p) {
     const a = this.cur;
     const kind = a.kind;
-    if (kind !== 'charge') this.damp(dt);
     const ranged = RANGED_KINDS.has(kind) || kind === 'charge' || kind === 'pounce';
-    this.turnTowards(this.angleTo(p.position), (ranged ? 6 : this.hitIndex > 0 ? 6 : 3) * dt);
+    const close = CLOSE_KINDS.has(kind) || kind === 'bash';
+    if (close) {
+      // Keeps closing while it winds up — a quick bite at a run, a heavy blow at a walk — so just
+      // backing off doesn't dodge it; stepping aside, rolling or blocking still do.
+      const dist = this.dist2(p);
+      const want = a.range * 0.5 + p.radius;
+      const quick = a.windup < 0.5;
+      const at = this.angleTo(p.position);
+      _desired.set(Math.sin(at), 0, Math.cos(at)).multiplyScalar(dist > want ? this.moveSpeed * (quick ? 0.75 : 0.35) : 0);
+      this.velocity.lerp(_desired, 1 - Math.exp(-8 * dt));
+    } else if (kind !== 'charge') this.damp(dt);
+    this.turnTowards(this.angleTo(p.position), (ranged || this.hitIndex > 0 ? 6 : close && a.windup < 0.5 ? 7 : 4) * dt);
     this.mark.copy(p.position);
     if (kind === 'bash' || kind === 'shield') this.guarding = true;
     if (this.stateTime < this.windupTime()) return;
@@ -739,10 +819,16 @@ export class EnemySim {
     // A blow at something an event's defenders hold (no screen takes it: the sim counts it).
     if (p.structure) p.event.director.strike(p, this, L);
     switch (a.kind) {
-      case 'swing': case 'combo': case 'bite': case 'bash':
+      case 'swing': case 'combo': case 'bite': case 'bash': {
         this.landed = false;
+        // The lunge carries it as far as it takes to bring its target well into reach (within
+        // limits): a fixed step fell short of anyone who'd taken a pace back.
+        const lunge = a.lunge ?? 0;
+        const travel = this.dist2(p) - (a.range * 0.55 + p.radius);
+        this.lungeK = lunge > 0 ? clamp(travel / (lunge * a.active * 0.5), 0.5, 1.8) : 1;
         this.setState('attack');
         return;
+      }
       case 'charge':
         this.landed = false;
         this.forward(this.chargeDir ?? (this.chargeDir = new THREE.Vector3()));
@@ -791,7 +877,9 @@ export class EnemySim {
     switch (a.kind) {
       case 'swing': case 'combo': case 'bite': case 'bash': {
         this.forward(_fwd);
-        const lunge = a.lunge ?? 0;
+        const lunge = (a.lunge ?? 0) * (this.lungeK ?? 1);
+        // A little homing through the first half (a bite snaps round at a dodge; a blade less so).
+        if (t < a.active * 0.5) this.turnTowards(this.angleTo(p.position), (a.kind === 'bite' ? 5 : 2.5) * dt);
         this.velocity.copy(_fwd).multiplyScalar((a.kind === 'bash' ? lunge * (1 - 0.5 * t / a.active) : lunge * (1 - t / a.active)) * this.locomotionMultiplier);
         if (a.kind === 'bash') this.guarding = !a.stab;
         if (!this.landed && this.reaches(a.arc, a.range, p)) this.landed = true;

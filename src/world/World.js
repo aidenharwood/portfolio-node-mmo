@@ -228,6 +228,8 @@ const _v = new THREE.Vector3();
 const _s = new THREE.Vector3();
 const _col = new THREE.Color();
 const _from = new THREE.Vector3();
+const _fit = new THREE.Vector3();
+const _fitAt = new THREE.Vector3();
 // How far past its outline a prop's mesh is asked whether a point is inside it.
 const MESH_REACH = 0.6;
 
@@ -647,6 +649,37 @@ export class World {
       if (colliderCovers(c, pos.x, pos.z, -1e-9)) return true;
     }
     return false;
+  }
+
+  // Is there room for a body of `radius` (and `height`) standing on the ground at (x, z)? Not in
+  // water or off a pocket's floor, and not inside or against anything solid it couldn't step up
+  // onto (a rock, a tent, a crate, a wall).
+  fits(x, z, radius, height = 1.8) {
+    if (!this.standable(x, z)) return false;
+    const y = this.groundHeight(x, z);
+    _fit.set(x, y, z);
+    this.resolve(_fit, radius, 0.3, height, null);
+    if (Math.abs(_fit.x - x) + Math.abs(_fit.z - z) > 0.02) return false;
+    for (const dy of [0.4, Math.min(1.2, height * 0.7)]) if (this.blocks(_fitAt.set(x, y + dy, z))) return false;
+    return true;
+  }
+
+  // The nearest spot to (x, z), out to `maxR`, where such a body fits — in rings outward, `keep`
+  // (x, z) → bool saying where it may go (inside a fort's walls, say). (x, z) itself if nothing does.
+  clearSpot(x, z, radius, { maxR = 8, height = 1.8, keep = null } = {}) {
+    if (this.fits(x, z, radius, height)) return { x, z, moved: false };
+    for (let r = 0.75; r <= maxR; r += 0.75) {
+      const n = Math.max(8, Math.round((2 * Math.PI * r) / 0.75));
+      const a0 = (x * 12.9898 + z * 78.233) % (Math.PI * 2); // a different start for each spot, not always east
+      for (let i = 0; i < n; i++) {
+        const a = a0 + (i / n) * Math.PI * 2;
+        const px = x + Math.cos(a) * r;
+        const pz = z + Math.sin(a) * r;
+        if (keep && !keep(px, pz)) continue;
+        if (this.fits(px, pz, radius, height)) return { x: px, z: pz, moved: true };
+      }
+    }
+    return { x, z, moved: false };
   }
 
   inBounds(pos) {

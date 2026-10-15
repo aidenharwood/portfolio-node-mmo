@@ -9,6 +9,7 @@ import { componentSpec, componentForSweep } from './HitComponents.js';
 const _d = new THREE.Vector3();
 const _f = new THREE.Vector3();
 const ZERO = new THREE.Vector3();
+export const SWEEP_UP = 1.5; // the least height a melee sweep reaches up to, from the attacker's feet
 
 /**
  * @param o.attacker   Character dealing damage
@@ -86,7 +87,8 @@ export function performSweep(game, attacker, attack, targets, hitSet, weapon = n
     const dist = _d.length();
     if (dist - t.radius > attack.range) continue;
     // Vertical reach: can't sweep someone standing on a tower above you.
-    if (t.position.y > attacker.position.y + attacker.height * 0.9 || t.position.y + t.height < attacker.position.y - 0.4) continue;
+    // (A low animal still reaches the legs of someone a little uphill of it.)
+    if (t.position.y > attacker.position.y + Math.max(attacker.height * 0.9, SWEEP_UP) || t.position.y + t.height < attacker.position.y - 0.4) continue;
     if (attack.arc < 360 && dist > 0.001 && _f.angleTo(_d) > halfArc + Math.atan2(t.radius, dist)) continue;
     const component = t.rig ? componentForSweep(t, attacker, attack) : null;
     if (t.rig && component === null) continue;

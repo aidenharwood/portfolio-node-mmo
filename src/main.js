@@ -876,7 +876,8 @@ class Game {
       this.rig.pitch += (0.14 - this.rig.pitch) * Math.min(1, realDt * 1.5);
       this.rig.zoom += (1.45 - this.rig.zoom) * Math.min(1, realDt * 1.5);
     }
-    this.firstPerson = !!this.prefs.firstPerson && this.player.alive && this.state !== 'title';
+    // (A story moment frames the character from outside: their body shows, the viewmodel doesn't.)
+    this.firstPerson = !!this.prefs.firstPerson && this.player.alive && this.state !== 'title' && !this.moments.active;
     this.player.setFirstPerson(this.firstPerson);
     if (this.moments.active) this.moments.update(realDt, this.camera);
     else {
@@ -1075,7 +1076,9 @@ class Game {
         kind: 'object', id: n.id, place, n, title: this.placeName(place), name: O.name,
         position: new THREE.Vector3(n.x, this.world.groundHeight(n.x, n.z), n.z), height: n.model === 'vaultdoor' ? 7 : 1.6,
       };
-      Object.defineProperty(prop, 'marker', { get: () => (this.quests.wants(n.id) ? '!' : null) });
+      // (Something a quest wants used: the same '…' as someone it wants a word with — not a quest to take.)
+      Object.defineProperty(prop, 'marker', { get: () => (this.quests.wants(n.id) ? '…' : null) });
+      Object.defineProperty(prop, 'markerKind', { get: () => this.quests.wantedQuest(n.id)?.kind ?? null });
       return prop;
     }
     const P = PROPS[n.role];
@@ -1399,37 +1402,41 @@ class Game {
   // the conversation: what they say, a question to answer, quests to hand in or take on, and what
   // they're there for (wares, a bed, a talent reset).
   // `line`: what they say if the talk itself brings nothing (their thanks for a quest handed in).
-  async talk(npc, line = null) {
+  // `quest`: the quest that line belongs to (it's then the quest's step, not their usual menu).
+  async talk(npc, line = null, quest = null) {
     const log = this.quests;
     const involved = QUEST_ROLES.has(npc.role) || npc.role === 'story' || log.wants(npc.id);
     this.said = [];
     if (involved) await this.charLink.do({ op: 'talk', npc: npc.id });
     if (!this.dialogue.isOpen && this.state !== 'menu') return;
+    if (line && quest && !this.said.length) this.said.push({ text: line, quest });
     this.showTalk(npc, this.said.at(-1)?.text ?? line);
   }
 
-  showTalk(npc, said = null) {
+  // A conversation goes in two steps. First the quest's: when a quest has something for them now
+  // (a question to answer, a quest to hand in, a line its stage gives them), that alone — the
+  // line, the quest's own options, Continue. Then their usual menu: quests to take on or follow
+  // up, and what they're there for. `menu` skips straight to the second.
+  showTalk(npc, said = null, menu = false) {
     const log = this.quests;
     const ready = log.readyToTurnIn(npc.id);
     // The story's quests first: what they say is what they say first.
     const avail = (QUEST_ROLES.has(npc.role) || npc.role === 'story' ? log.available(npc.id) : []).sort((a, b) => (b.kind === 'story') - (a.kind === 'story'));
     const going = log.inProgress(npc.id);
     const choice = Object.keys(log.active).map((id) => [id, log.choiceAt(id, npc.id)]).find(([, c]) => c);
-    const options = [];
-    let contextQuest = choice ? log.defs.get(choice[0]) : null;
-    contextQuest ??= this.said.at(-1)?.quest ? log.defs.get(this.said.at(-1).quest) : null;
-    let text = said;
-    if (choice) {
-      const [qid, c] = choice;
-      c.options.forEach((opt, i) => options.push({
-        label: opt.label, action: `${questKindLabel(contextQuest)} · Choose`, cls: `quest ${contextQuest?.kind ?? ''}`,
-        onClick: () => {
-          this.said = [];
-          if (this.charLink.do({ op: 'choose', quest: qid, i, npc: npc.id }) && !this.moments.active) this.showTalk(npc, this.said.at(-1)?.text ?? null);
-        },
-      }));
-      text ??= log.fill(log.stageOf(qid)?.say?.[Object.keys(log.stageOf(qid).say ?? {})[0]] ?? '', log.defs.get(qid)) || null;
+    const saidQuest = this.said.at(-1)?.quest ? log.defs.get(this.said.at(-1).quest) : null;
+    const services = [];
+    if (npc.role === 'trader') services.push({ label: 'Browse wares', onClick: () => this.openShop(npc) });
+    if (npc.role === 'innkeeper') services.push({ label: 'Rest', onClick: () => this.restDialog(npc) });
+    if (npc.role === 'smith') services.push({ label: 'Reset talents', onClick: () => this.smithDialog(npc) });
+    if (!menu && (choice || ready.length || saidQuest)) {
+      this.showQuestStep(npc, said, { choice, ready, saidQuest, more: avail.length > 0 || going.length > 0 || services.length > 0 });
+      return;
     }
+    this.said = [];
+    const options = [];
+    let contextQuest = null;
+    let text = said;
     for (const q of ready) {
       contextQuest ??= q;
       options.push({ label: q.title, action: `${questKindLabel(q)} · Turn in`, cls: `quest ${q.kind ?? ''}`, onClick: () => this.completeQuest(q.id, npc) });
@@ -1443,7 +1450,8 @@ class Game {
         onClick: () => {
           if (!this.charLink.do({ op: 'accept', id: q.id }) || this.moments.active) return;
           const first = log.stageOf(q.id)?.text ?? q.progress;
-          this.showTalk(npc, first ? log.fill(first, q) : null);
+          this.said = [{ text: first ? log.fill(first, q) : q.title, quest: q.id }];
+          this.showTalk(npc, this.said[0].text);
         },
       });
     }
@@ -1451,21 +1459,49 @@ class Game {
     if (!text && going.length) text = log.fill(log.stageOf(going[0].id)?.text ?? going[0].progress ?? '', going[0]);
     contextQuest ??= going[0] ?? log.wantedQuest(npc.id);
     // What they're there for.
-    if (npc.role === 'trader') options.push({ label: 'Browse wares', onClick: () => this.openShop(npc) });
-    if (npc.role === 'innkeeper') options.push({ label: 'Rest', onClick: () => this.restDialog(npc) });
-    if (npc.role === 'smith') options.push({ label: 'Reset talents', onClick: () => this.smithDialog(npc) });
+    options.push(...services);
     if (!text) {
       text = npc.def.greeting ?? (npc.def.lines ? npc.def.lines[npc.lineIndex++ % npc.def.lines.length] : null)
         ?? (npc.role === 'trader' ? 'Steel, powder and sorcery — fair prices, mostly. Got anything to sell?' : 'Keep your blade sharp out there.');
     }
-    this.dialogue.open({ name: npc.name, title: npc.title, text, options, questKind: contextQuest?.kind ?? null });
+    this.dialogue.open({ name: npc.name, title: npc.title, text, options, questKind: contextQuest?.kind ?? null, step: options.length ? 'Choose a response' : '' });
+  }
+
+  // The quest's step: a question (answer it, and their reply is a page of its own), else what
+  // they have to say and anything to hand in, then Continue to their usual menu (when there's
+  // anything in it).
+  showQuestStep(npc, said, { choice, ready, saidQuest, more }) {
+    const log = this.quests;
+    const options = [];
+    let text = said;
+    let contextQuest = choice ? log.defs.get(choice[0]) : saidQuest ?? ready[0] ?? null;
+    if (choice) {
+      const [qid, c] = choice;
+      c.options.forEach((opt, i) => options.push({
+        label: opt.label, action: `${questKindLabel(contextQuest)} · Choose`, cls: `quest ${contextQuest?.kind ?? ''}`,
+        onClick: () => {
+          this.said = [];
+          if (this.charLink.do({ op: 'choose', quest: qid, i, npc: npc.id }) && !this.moments.active) this.showTalk(npc, this.said.at(-1)?.text ?? null);
+        },
+      }));
+      text ??= log.fill(log.stageOf(qid)?.say?.[Object.keys(log.stageOf(qid).say ?? {})[0]] ?? '', log.defs.get(qid)) || null;
+    } else {
+      for (const q of ready) options.push({ label: q.title, action: `${questKindLabel(q)} · Turn in`, cls: `quest ${q.kind ?? ''}`, onClick: () => this.completeQuest(q.id, npc) });
+      if (!text && ready.length) text = log.pick(ready[0].turnIn);
+      if (more) options.push({ label: 'Continue', onClick: () => { this.said = []; this.showTalk(npc, null, true); } });
+    }
+    text ||= log.fill(contextQuest?.progress ?? '', contextQuest) || '…';
+    this.dialogue.open({
+      name: npc.name, title: npc.title, text, options, questKind: contextQuest?.kind ?? null,
+      step: choice ? 'Choose a response' : ready.length ? 'Hand in' : '',
+    });
   }
 
   async completeQuest(id, npc) {
     const q = this.quests.defs.get(id);
     const ok = await this.charLink.do({ op: 'turnin', id });
     if (this.moments.active) return;
-    this.talk(npc, ok && q?.turnIn ? this.quests.fill(q.turnIn, q) : null);
+    this.talk(npc, ok && q?.turnIn ? this.quests.fill(q.turnIn, q) : null, id);
   }
 
   // A trader's wares: the shop shows what their stock covers (rpg/CharacterCore.js 'buy').

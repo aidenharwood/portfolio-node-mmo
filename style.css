@@ -332,19 +332,31 @@ kbd {
 .plate.targeted .np-bar { box-shadow: 0 0 0 1px #fff, 0 0 6px rgba(255, 255, 255, 0.6); }
 .npc-label .np-name { font-family: var(--display); font-weight: 600; font-size: 15px; letter-spacing: 2px; text-transform: uppercase; color: #a8e8ff; text-shadow: var(--outline); }
 .npc-label .np-title { font-size: 10px; letter-spacing: 1px; text-transform: uppercase; opacity: 0.8; text-shadow: var(--outline); }
-.npc-label .marker { width: 14px; height: 14px; margin: 0 auto 6px; font-size: 0; transform: rotate(45deg); background: var(--accent-2); box-shadow: 0 0 0 2px rgba(10, 12, 19, 0.8), 0 0 12px rgba(240, 198, 116, 0.9); animation: bob 1s ease-in-out infinite alternate; }
-@keyframes bob { to { translate: 0 -5px; } }
-.npc-label .marker.turnin { background: #9fffc0; box-shadow: 0 0 0 2px rgba(10, 12, 19, 0.8), 0 0 12px rgba(159, 255, 192, 0.9); }
-.npc-label .marker.talk { width: 11px; height: 11px; background: var(--accent); box-shadow: 0 0 0 2px rgba(10, 12, 19, 0.8), 0 0 12px rgba(94, 230, 255, 0.9); }
-.npc-label .marker.story, .npc-label .marker.side { display: grid; width: 20px; height: 20px; transform: none; place-items: center; border: 1px solid rgba(255,255,255,.8); font-size: 0; }
-.npc-label .marker.story { color: #17130a; background: #ffcf7a; clip-path: polygon(50% 0, 62% 29%, 94% 18%, 82% 50%, 100% 70%, 67% 74%, 50% 100%, 33% 74%, 0 70%, 18% 50%, 6% 18%, 38% 29%); box-shadow: 0 0 0 2px rgba(10,12,19,.8), 0 0 12px rgba(255,207,122,.9); }
-.npc-label .marker.side { border-radius: 50%; color: #07161a; background: #5ee6ff; box-shadow: 0 0 0 2px rgba(10,12,19,.8), 0 0 12px rgba(94,230,255,.85); }
-.npc-label .marker.story::before { content: '✦'; font: 700 13px/1 var(--ui); }
-.npc-label .marker.side::before { content: '!'; font: 800 14px/1 var(--ui); }
-.npc-label .marker.story.turnin { background: #9fffc0; box-shadow: 0 0 0 2px rgba(10,12,19,.8), 0 0 12px rgba(159,255,192,.9); }
-.npc-label .marker.side.turnin { background: #9fffc0; box-shadow: 0 0 0 2px rgba(10,12,19,.8), 0 0 12px rgba(159,255,192,.9); }
-.npc-label .marker.story.talk { width: 20px; height: 20px; background: #ffcf7a; }
-.npc-label .marker.side.talk { width: 20px; height: 20px; background: #5ee6ff; }
+.npc-label .qm { --qm: #ffcf7a; --qm-hi: #fff1cf; --qm-ink: #2a1a04; --qm-glow: rgba(255, 196, 92, 0.75); display: flex; flex-direction: column; align-items: center; margin: 0 auto 7px; scale: var(--qm-scale, 1); transform-origin: 50% 100%; }
+.npc-label .qm-side { --qm: #5ee6ff; --qm-hi: #dafaff; --qm-ink: #04232b; --qm-glow: rgba(94, 230, 255, 0.7); }
+.npc-label .qm-work { --qm: #e8ecf4; --qm-hi: #ffffff; --qm-ink: #141a26; --qm-glow: rgba(220, 228, 244, 0.55); }
+/* The badge: a faceted shield with a glow ring that breathes; its glyph says what to do. */
+.npc-label .qm-badge { position: relative; display: grid; place-items: center; width: 30px; height: 34px; animation: qm-bob 1.1s ease-in-out infinite alternate; filter: drop-shadow(0 0 7px var(--qm-glow)) drop-shadow(0 2px 2px rgba(0, 0, 0, 0.7)); }
+.npc-label .qm-badge::before { content: ''; position: absolute; inset: 0; background: #0a0c13; clip-path: polygon(50% 0, 100% 18%, 100% 62%, 50% 100%, 0 62%, 0 18%); }
+.npc-label .qm-badge::after { content: ''; position: absolute; inset: 2.5px; background: linear-gradient(160deg, var(--qm-hi) 0 22%, var(--qm) 52%, color-mix(in srgb, var(--qm) 70%, #000) 100%); clip-path: polygon(50% 0, 100% 18%, 100% 62%, 50% 100%, 0 62%, 0 18%); }
+.npc-label .qm-glyph { position: relative; z-index: 1; margin-top: -3px; font: 800 19px/1 var(--display); color: var(--qm-ink); }
+.npc-label .qm-talk .qm-glyph { display: flex; gap: 2.5px; margin-top: -2px; }
+.npc-label .qm-talk .qm-glyph i { width: 4px; height: 4px; border-radius: 50%; background: var(--qm-ink); animation: qm-dots 1.2s ease-in-out infinite; }
+.npc-label .qm-talk .qm-glyph i:nth-child(2) { animation-delay: 0.15s; }
+.npc-label .qm-talk .qm-glyph i:nth-child(3) { animation-delay: 0.3s; }
+/* Ready to hand in: the same colour, a '?' and a bright ring round it, so it can't be mistaken for an offer. */
+.npc-label .qm-turnin .qm-badge::before { inset: -3px; background: var(--qm-hi); animation: qm-ring 1.1s ease-in-out infinite alternate; }
+/* Someone (or something) a quest wants: a smaller speech-bubble badge, round rather than a shield. */
+.npc-label .qm-talk .qm-badge { width: 26px; height: 22px; }
+.npc-label .qm-talk .qm-badge::before, .npc-label .qm-talk .qm-badge::after { clip-path: none; border-radius: 9px 9px 9px 3px; }
+.npc-label .qm-cap { display: none; margin-top: 4px; padding: 1px 7px 2px; white-space: nowrap; font: 600 10.5px/1.3 var(--display); letter-spacing: 1.5px; text-transform: uppercase; color: var(--qm-hi); background: rgba(10, 12, 19, 0.72); box-shadow: inset 0 -1px 0 var(--qm); text-shadow: var(--outline); }
+.npc-label .qm-cap b { color: var(--qm); font-weight: 700; }
+.npc-label.captioned .qm-cap { display: block; }
+.npc-label.marker-only .np-name, .npc-label.marker-only .np-title, .npc-label.marker-only .np-say { display: none; }
+@keyframes qm-bob { from { translate: 0 0; } to { translate: 0 -4px; } }
+@keyframes qm-ring { from { opacity: 0.35; } to { opacity: 1; } }
+@keyframes qm-dots { 0%, 60%, 100% { translate: 0 0; } 30% { translate: 0 -2.5px; } }
+@media (prefers-reduced-motion: reduce) { .npc-label .qm-badge, .npc-label .qm-turnin .qm-badge::before, .npc-label .qm-talk .qm-glyph i { animation: none; } }
 .npc-label .np-say {
   width: max-content; max-width: 250px; margin: 0 auto 9px; padding: 6px 11px 7px; white-space: normal; font-size: 12.5px; font-weight: 500; line-height: 1.35;
   background: var(--glass); clip-path: var(--cut-s); box-shadow: inset 0 0 0 1px var(--line), inset 2px 0 0 var(--accent-2); text-shadow: var(--outline); animation: say-in 0.25s ease-out;

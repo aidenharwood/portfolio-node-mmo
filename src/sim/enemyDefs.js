@@ -73,7 +73,7 @@ export function sweepReaches(pos, facing, height, arc, range, t) {
   const dz = t.position.z - pos.z;
   const dist = Math.hypot(dx, dz);
   if (dist - t.radius > range) return false;
-  if (t.position.y > pos.y + height * 0.9 || t.position.y + t.height < pos.y - 0.4) return false;
+  if (t.position.y > pos.y + Math.max(height * 0.9, 1.5) || t.position.y + t.height < pos.y - 0.4) return false; // (as combat/Damage.js performSweep)
   if (arc >= 360 || dist < 0.001) return true;
   const fx = Math.sin(facing);
   const fz = Math.cos(facing);

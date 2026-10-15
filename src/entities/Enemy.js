@@ -139,6 +139,7 @@ export class Enemy extends Character {
     this.rallied = false;
     this.summoned = !!(src.summoner || src.split);
     this.displayName = src.displayName;
+    this.tag = src.tag ?? null; // a story enemy's quest tag (Ironjaw): offline, its kill is rolled from this view
     this.isBoss = !!type.boss;
     this.attacks = src.attacks;
     this.camp = src.camp ?? null;
