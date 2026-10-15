@@ -14,7 +14,7 @@ import { QuestLog } from '../src/rpg/Quests.js';
 import { CharacterCore } from '../src/rpg/CharacterCore.js';
 import { STORY } from '../src/rpg/storyline.js';
 import { SIDE_CHAINS } from '../src/rpg/sidequests.js';
-import { reachedPlaces, defenceAt, heldObjectives, questDrops } from '../src/rpg/questWatch.js';
+import { reachedPlaces, defenceAt, heldObjectives, questDrops, eventCalled, eventObjectives } from '../src/rpg/questWatch.js';
 import { storyRef } from '../src/world/story.js';
 
 const seed = Number(process.argv[2] ?? 12345);
@@ -87,6 +87,13 @@ function playStage(id) {
       const t = ref(o.at, q);
       go(t.x + 2, t.z + 2);
       watch();
+    } else if (o.type === 'event') {
+      // A public event the step calls (tools/eventcheck.mjs plays one through): here, called at
+      // its place and won with this character earning the chest, as the server reports it.
+      const t = ref(o.at, q);
+      go(t.x + 2, t.z + 2);
+      const call = eventCalled(quests, position.x, position.z);
+      if (call) for (const [qid, k] of eventObjectives(quests, { type: call.type, site: { id: call.site } })) give({ op: 'evwon', roll: { id: qid, i: k } });
     } else if (o.type === 'use') {
       const n = npc(quests.npcOf(o.object, q));
       by(n, 1.2);

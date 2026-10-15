@@ -217,7 +217,8 @@ Built beyond the plan:
     looks at each player's quests (`rpg/questWatch.js`) — a place a step sends them to, reached
     (`reach`); a place to hold, where the world's simulation starts the waves
     (`WorldSim Encounters.defend`: the local faction, wave after wave, given up if everyone leaves)
-    and, once the last is down, `defended`. Quest drops (a raider's orders, a lost patrol's tags)
+    and, once the last is down, `defended`; a public event the step calls, then `evwon` once it's
+    won (see [Public events](#public-events)). Quest drops (a raider's orders, a lost patrol's tags)
     are rolled into the kill's reward.
 - Achievements (gameplay phase 2) are counted from each character's records, which only these
   operations change, so both copies reach them together; the server's copy is the one saved.
@@ -396,11 +397,22 @@ shares it. Offline single-player runs the same director for one player.
 - **Overrun settlements:** `ovr { id, on }` goes to everyone on the layer, and `welcome` carries
   the list. While a place is overrun, the server's rules find none of its folk (no trading, resting
   or quests there), and screens hide them.
+- **Quest events** (`{ type: 'event', event: 'surge', at: ref }`, `rpg/questWatch.js`): every
+  second the server's quest watch checks whether someone on such a step is within 80 m of the
+  place's edge, and if so asks the director to start that event there (`WorldEvents.startStory`).
+  It starts at once, ignoring the director's spacing (the quiet time, the gap, the cap, the site's
+  rest). It is a normal public event, but its tier is locked at Normal: there's no vote, and `wev`
+  marks it `lk: 1` with no `v`. If an event is already running at the place, that one counts;
+  an overrun place has to be retaken first. When it's won, everyone who earned the chest gets
+  `evwon { id, i }` as a server op for each of their steps it counts for: any event of that kind
+  at that place, whoever started it. A lost or abandoned one moves nothing on, so the step can
+  call its event again once the place is free.
 - **Admins** start and settle events with `/admin event` ([DEPLOY.md](DEPLOY.md#admins)).
 - **Protocol:**
   - client → server: `evote { id, tier }`
-  - server → client: `wev { l: [{ id, k, nm, pl, st, x, z, r, lv, ti, bx, bz, n, tl?, s: [[id, kind, x, z, hp, max]], v?, w?, f?, c?, rx?, rz?, ct?, ph?, res? }], me: { id: [points, vote, chest] } }`
-    and `ovr { id, on }`
+  - server → client: `wev { l: [{ id, k, nm, pl, st, x, z, r, lv, ti, bx, bz, n, tl?, s: [[id, kind, x, z, hp, max]], v?, w?, f?, c?, rx?, rz?, ct?, ph?, res?, lk? }], me: { id: [points, vote, chest] } }`
+    (`lk: 1`: a quest's event, its tier locked at Normal, no vote), `ovr { id, on }`, and the
+    server op `evwon { id, i }`
 
 ## Known limits
 

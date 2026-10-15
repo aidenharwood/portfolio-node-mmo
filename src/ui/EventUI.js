@@ -133,7 +133,8 @@ export class EventUI {
     if (v.st === 'gather') {
       const [n, vet, el] = v.v ?? [0, 0, 0];
       step = `Gathering — ${v.tl ?? 0} s`;
-      rows.push(`<li>Vote the tier at the beacon (E): Normal ${n} · Veteran ${vet} · Elite ${el}${me[1] >= 0 ? ` — you: ${TIER_NAMES[me[1]]}` : ''}</li>`);
+      if (v.lk) rows.push('<li>Gather at the beacon · Normal tier (no vote)</li>');
+      else rows.push(`<li>Vote the tier at the beacon (E): Normal ${n} · Veteran ${vet} · Elite ${el}${me[1] >= 0 ? ` — you: ${TIER_NAMES[me[1]]}` : ''}</li>`);
     } else if (v.st === 'active') {
       step = fill(T.start, v);
       if (v.ph === 'engines' && v.f) rows.push(`<li>Siege engines: ${v.f[0]} of ${v.f[1]} left</li>`);
@@ -189,7 +190,8 @@ export class EventUI {
   interactables() {
     const out = [];
     for (const v of this.list) {
-      if (v.st !== 'gather') continue;
+      // A quest's event (`lk`: its tier locked at Normal) has no vote.
+      if (v.st !== 'gather' || v.lk) continue;
       out.push({ kind: 'beacon', id: v.id, name: 'Event Beacon', ev: v, position: new THREE.Vector3(v.bx, this.game.world.groundHeight(v.bx, v.bz), v.bz) });
     }
     return out;

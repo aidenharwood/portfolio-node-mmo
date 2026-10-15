@@ -17,6 +17,7 @@ import { itemFromRecipe } from '../src/items/items.js';
 import { RARITY } from '../src/items/rarity.js';
 import { SimHost } from '../server/simhost.js';
 import { loadCharacter } from '../server/characters.js';
+import { eventCalled, eventObjectives, EVENT_CALL } from '../src/rpg/questWatch.js';
 
 const seed = Number(process.argv[2] ?? 12345);
 const world = new HeadlessWorld(seed);
@@ -380,6 +381,89 @@ console.log('The event chest, through the character\'s rules:');
   sim.setPlayers([]);
 }
 
+// ---------------------------------------------------------------- a quest's event (A-2)
+// A story step ({ type: 'event', event: 'surge', at }) calls a Hive Surge at its place when someone
+// on it comes near (rpg/questWatch.js eventCalled → WorldEvents.startStory); winning it while
+// earning the chest moves the step on for each who did (eventObjectives → the 'evwon' op).
+console.log('A quest\'s event:');
+const questEvent = (id, home) => ({
+  id, kind: 'story', giver: 'warden', home, title: 'Hold the Line',
+  stages: [{ text: 'Hold {home}.', objectives: [{ type: 'event', event: 'surge', at: 'home', count: 1, text: 'Hold {home}' }] }],
+});
+const onQuest = (core, q) => { core.quests.defs.set(q.id, q); core.quests.begin(q.id); return core; };
+{
+  const site = settlement('hive') ?? settlement('scav');
+  const place = site.p;
+  const level = place.level ?? site.region.level;
+  const [a, b] = [player(81), player(82)];
+  sim.setPlayers([a, b]);
+  const q = questEvent('zev1', place.id);
+  const [ca, cb] = [onQuest(character(a, level), q), onQuest(character(b, level), q)];
+  put(a, place.x + 400, place.z);
+  check(!eventCalled(ca.quests, a.position.x, a.position.z), 'far from the place, the step calls nothing');
+  put(a, place.x + (place.radius ?? place.r ?? 12) + EVENT_CALL - 10, place.z);
+  const call = eventCalled(ca.quests, a.position.x, a.position.z);
+  check(call?.site === place.id && call.type === 'surge', `coming near ${place.name}, it calls a surge there`);
+  // The director's spacing doesn't hold it back: the site resting, the player just had one.
+  dir.rest.set(place.id, sim.time + 9999);
+  dir.last.set(a.id, sim.time);
+  const ev = dir.startStory(call.site, call.type);
+  check(!!ev && ev.story && ev.locked && ev.type === 'surge' && ev.site === place && ev.stage === 'gather',
+    `started at once, whatever the director's spacing (${ev?.name})`);
+  check(dir.startStory(call.site, call.type) === ev && dir.events.size === 1, 'called again (every second), it\'s the same event');
+  put(a, ev.bx, ev.bz);
+  check(!dir.vote(a.id, ev.id, 2) && dir.view(ev).lk === 1 && dir.view(ev).v === undefined, 'no vote: its tier is locked (lk), and nobody\'s told of one');
+  put(a, place.x, place.z);
+  put(b, place.x + 3, place.z);
+  step(GATHER + 0.5);
+  check(ev.stage === 'active' && ev.tier === 0, 'under way at Normal');
+  const each = all2(defend(a, ev, 20), hunt(b, ev, 20));
+  const t0 = sim.time;
+  step(900, () => { each(); if (ev.stage === 'over') return false; });
+  check(ev.res === 'won' && ev.result.people.length === 2, `two stand-in players won it in ${mins(sim.time - t0)} (${ev.result.people.map((p) => `${p.points} pts`).join(' · ')})`);
+  // What the host does as it ends (server/simhost.js onEventEnd; main.js offline): for each who
+  // earned the chest, the steps it counts for.
+  for (const person of ev.result.people) {
+    const core = person.id === a.id ? ca : cb;
+    for (const [id, i] of eventObjectives(core.quests, ev)) core.apply({ op: 'evwon', roll: { id, i } });
+  }
+  check(ca.quests.isComplete(q.id) && cb.quests.isComplete(q.id), 'the step moved on for both');
+  check(!ca.apply({ op: 'evwon', roll: { id: q.id, i: 0 } }).ok, 'and not twice');
+  check(!eventCalled(ca.quests, place.x, place.z), 'done, it calls nothing more');
+  const other = onQuest(character(player(83), level), questEvent('zev2', place.id));
+  check(!eventObjectives(other.quests, { type: 'siege', site: place }).length && eventObjectives(other.quests, { type: 'surge', site: { id: 'elsewhere' } }).length === 0,
+    'a different kind of event, or one somewhere else, doesn\'t count');
+  reset();
+  sim.setPlayers([]);
+}
+{
+  // Lost (abandoned): no step, the place overrun; once it's retaken, the step can call it again.
+  const site = settlement('hive') ?? settlement('scav');
+  const place = site.p;
+  const level = place.level ?? site.region.level;
+  const me = player(84);
+  sim.setPlayers([me]);
+  const q = questEvent('zev3', place.id);
+  const core = onQuest(character(me, level), q);
+  put(me, place.x, place.z);
+  const ev = dir.startStory(eventCalled(core.quests, me.position.x, me.position.z)?.site, 'surge');
+  step(GATHER + 1);
+  put(me, place.x + 600, place.z);
+  step(120, () => { if (ev.stage === 'over') return false; });
+  check(ev.res === 'lost' && !ev.result.people.length && eventObjectives(core.quests, ev).length === 1 &&!core.quests.isComplete(q.id),
+    `abandoned, it's lost (${ev.res}) and the step stays where it was`);
+  check(dir.overrun.has(place.id) && dir.startStory(place.id, 'surge') === null, `${place.name} overrun: no story surge there till it's retaken`);
+  const retake = [...dir.events.values()].find((e) => e.type === 'retake' && e.site === place);
+  put(me, place.x, place.z);
+  const retaking = hunt(me, retake);
+  step(600, () => { retaking(); if (retake.stage === 'over') return false; });
+  check(retake.res === 'won' && !dir.overrun.has(place.id), 'retaken');
+  const again = dir.startStory(eventCalled(core.quests, me.position.x, me.position.z)?.site, 'surge');
+  check(!!again && again !== ev && again.story && again.stage === 'gather', 'and the step calls its surge again');
+  reset();
+  sim.setPlayers([]);
+}
+
 // ---------------------------------------------------------------- the server's side
 // The realm's sim host as the server runs it, with a stand-in realm and two players: what they're
 // told (wev, ovr), the vote over the wire, the tier on their characters, the chest as a server op.
@@ -430,6 +514,37 @@ console.log('On the server (server/simhost.js):');
   for (const e of [...hd.events.values()].find((x) => x.type === 'retake').foes) hd.sim.applyHit(e.id, { by: a.id, damage: e.maxHp * 2, source: 'melee', dir: { x: 0, z: 1 } });
   tick(0.2);
   check(b.out.some((m) => m.t === 'ovr' && m.on === 0) && !host.overrun.length, 'and that it\'s free again once retaken');
+
+  // A quest's event, online: the server's watch starts it, and moves the step on for each who
+  // earned the chest (a server op, evwon); someone on the same step who wasn't there waits.
+  for (const x of [...hd.events.values()]) hd.remove(x);
+  hd.rest.clear();
+  const hive = settlement('hive') ?? site;
+  const q = questEvent('zev4', hive.p.id);
+  const [c, d, e] = [session(73), session(74), session(75)];
+  for (const s of [c, d, e]) { s.core.stats.level = hive.p.level ?? hive.region.level; onQuest(s.core, q); }
+  move(a, site.p.x + 900, site.p.z + 900);
+  move(b, site.p.x + 900, site.p.z + 900);
+  move(c, hive.p.x, hive.p.z);
+  move(d, hive.p.x + 3, hive.p.z);
+  move(e, hive.p.x + 900, hive.p.z);
+  tick(2);
+  const sev = [...hd.events.values()].find((x) => x.story);
+  check(!!sev && sev.site.id === hive.p.id && sev.locked, `the server's quest watch starts it for the players on the step (${sev?.name})`);
+  const sw = c.out.filter((m) => m.t === 'wev').at(-1)?.l.find((v) => v.id === sev?.id);
+  check(sw?.lk === 1 && sw.v === undefined, 'they\'re told of it, its tier locked (wev lk)');
+  if (sev) {
+    move(c, sev.bx, sev.bz);
+    host.vote(c, { id: sev.id, tier: 2 });
+    move(c, hive.p.x, hive.p.z);
+    tick(GATHER + 2);
+    check(sev.stage === 'active' && sev.tier === 0 && c.core.tier === 0, 'under way at Normal, whatever was voted');
+    tick(ELIGIBLE + 5);
+    hd.finish(sev, true);
+  }
+  const won = (s) => s.out.some((m) => m.t === 'sop' && m.op?.op === 'evwon' && m.op.roll.id === q.id);
+  check(won(c) && won(d) && c.core.quests.isComplete(q.id) && d.core.quests.isComplete(q.id), 'won: the step moved on for both who took part (evwon)');
+  check(!won(e) && !e.core.quests.isComplete(q.id), 'not for the one on the same step who wasn\'t there');
 }
 
 console.log(failed ? `eventcheck: ${failed} failed` : 'eventcheck: all good');
