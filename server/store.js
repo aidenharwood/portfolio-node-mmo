@@ -174,6 +174,8 @@ const PG_SCHEMA = `
 `;
 
 const json = (v) => (v ? JSON.parse(v) : null);
+class NotHeld extends Error {}  // backs a transaction out (see Store.together)
+class Rollback extends Error {}
 const marks = (list) => list.map(() => '?').join(', ');
 
 export class Store {
@@ -252,7 +254,50 @@ export class Store {
     const now = Date.now();
     return (await this.db.get('INSERT INTO characters (account_id, name, look, created, updated) VALUES (?, ?, ?, ?, ?) RETURNING id', [accountId, name, JSON.stringify(look), now, now])).id;
   }
-  async saveCharacter(id, data, level) { await this.db.run('UPDATE characters SET data = ?, level = ?, updated = ? WHERE id = ?', [JSON.stringify(data), level, Date.now(), id]); }
+  // A character is written only by the layer holding their presence: a layer that stalled and
+  // lost them to another can't write its old copy over the new one. False if it didn't hold them.
+  async saveCharacter(id, data, level, layer, db = this.db) {
+    return (await db.run('UPDATE characters SET data = ?, level = ?, updated = ? WHERE id = ? AND EXISTS (SELECT 1 FROM presence WHERE character_id = ? AND layer = ?)',
+      [JSON.stringify(data), level, Date.now(), id, id, layer])) > 0;
+  }
+  // Writes that hand things from one place to another land together or not at all (a layer can
+  // die between any two writes). `rows`: [{ id, data, level }].
+  saveCharacters(rows, layer) {
+    return this.together(async (t) => {
+      for (const r of rows) if (!await this.saveCharacter(r.id, r.data, r.level, layer, t)) throw new NotHeld();
+      return true;
+    });
+  }
+  // A letter, and its sender without what it carries.
+  postMail(from, layer, toId, fromName, body, gold, item) {
+    return this.together(async (t) => {
+      if (!await this.saveCharacter(from.id, from.data, from.level, layer, t)) throw new NotHeld();
+      await this.sendMail(toId, fromName, body, gold, item, t);
+      return true;
+    });
+  }
+  // A letter claimed, and its claimer with what it carried: `take()` gives it to them (on the
+  // server's copy) and returns their row, or null if it can't (then nothing is written: null).
+  claimMailInto(id, toId, layer, take) {
+    return this.together(async (t) => {
+      if (!await this.claimMail(id, toId, t)) return null;
+      const row = take();
+      if (!row) throw new Rollback();
+      if (!await this.saveCharacter(row.id, row.data, row.level, layer, t)) throw new NotHeld();
+      return true;
+    });
+  }
+  // A transaction that may back out: false if another layer holds a character in it (NotHeld),
+  // null if there was nothing to do (Rollback).
+  async together(fn) {
+    try {
+      return await this.db.tx(fn);
+    } catch (err) {
+      if (err instanceof NotHeld) return false;
+      if (err instanceof Rollback) return null;
+      throw err;
+    }
+  }
   async deleteCharacter(id, accountId) { return (await this.db.run('DELETE FROM characters WHERE id = ? AND account_id = ?', [id, accountId])) > 0; }
 
   // ---------------------------------------------------------------- social graph
@@ -289,15 +334,15 @@ export class Store {
   }
   async unread(charId) { return (await this.db.get('SELECT COUNT(*) AS n FROM mail WHERE to_id = ? AND read = 0', [charId])).n; }
   async mailCount(charId) { return (await this.db.get('SELECT COUNT(*) AS n FROM mail WHERE to_id = ?', [charId])).n; }
-  async sendMail(toId, fromName, body, gold, item) {
-    await this.db.run('INSERT INTO mail (to_id, from_name, body, gold, item, sent) VALUES (?, ?, ?, ?, ?, ?)', [toId, fromName, body, gold, item ? JSON.stringify(item) : null, Date.now()]);
+  async sendMail(toId, fromName, body, gold, item, db = this.db) {
+    await db.run('INSERT INTO mail (to_id, from_name, body, gold, item, sent) VALUES (?, ?, ?, ?, ?, ?)', [toId, fromName, body, gold, item ? JSON.stringify(item) : null, Date.now()]);
   }
   async mailOne(id, toId) {
     const m = await this.db.get('SELECT id, gold, item, claimed FROM mail WHERE id = ? AND to_id = ?', [id, toId]);
     return m ? { ...m, item: json(m.item) } : null;
   }
   async readMail(id, toId) { await this.db.run('UPDATE mail SET read = 1 WHERE id = ? AND to_id = ?', [id, toId]); }
-  async claimMail(id, toId) { return (await this.db.run('UPDATE mail SET claimed = 1, read = 1 WHERE id = ? AND to_id = ? AND claimed = 0', [id, toId])) > 0; }
+  async claimMail(id, toId, db = this.db) { return (await db.run('UPDATE mail SET claimed = 1, read = 1 WHERE id = ? AND to_id = ? AND claimed = 0', [id, toId])) > 0; }
   async deleteMail(id, toId) { await this.db.run('DELETE FROM mail WHERE id = ? AND to_id = ?', [id, toId]); }
 
   // ---------------------------------------------------------------- reports
