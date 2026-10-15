@@ -210,7 +210,28 @@ function crossings(f, R) {
 
 // A wall round the place at radius R: panels on a footing with a glowing band, a tower every so
 // often, and a gate — two towers and a beam over the road — wherever a road comes through.
-function ringWall(f, R, { ht = 3.2, thick = 0.8, gate = 4.8, tower = 1.8, every = 9, color = C.stone, cap = C.stoneDark, band = HEARTH, roof = C.metalDark }) {
+// Farcall's dressing (Act II), on a wall tower at (x, z) whose top is at local height `top`: a
+// gate tower flies the Wardens' banner, its sigil outward; every other tower carries a signal
+// mast, lattice and dish, a red light at its tip. Above the tower's own collider: none of its own.
+function mastOn(f, x, z, a, top, T, big, mast) {
+  const h = f.put(x, z, a);
+  const y = top - f.gy(x, z);
+  if (big) {
+    piece(h, G.box(0.08, 2.6, 0.08), C.metalDark, { pos: [0, y - 1.4, T / 2 + 0.25], outline: 0.006 });
+    piece(h, G.box(1.1, 2.4, 0.05), WARDEN, { pos: [0, y - 1.9, T / 2 + 0.3], outline: 0.012 });
+    piece(h, G.octa(0.26), 0xf0c75e, { pos: [0, y - 1.6, T / 2 + 0.34], scale: [1, 1.25, 0.3], outline: 0.006 });
+    return;
+  }
+  if (!mast) return;
+  const M = 9;
+  for (const [mx, mz] of [[-0.35, -0.3], [0.35, -0.3], [0, 0.4]]) piece(h, G.box(0.09, M, 0.09), C.metalDark, { pos: [mx, y + M / 2, mz], outline: 0.006 });
+  for (let k = 1; k < 5; k++) piece(h, G.cyl(0.42, 0.42, 0.06, 3), C.metal, { pos: [0, y + k * 2, 0], rot: [0, Math.PI / 6, 0], outline: 0.004 });
+  piece(h, G.dome(0.9, 12, 6, 0.32), C.hab, { pos: [0, y + M - 1.8, 0.7], rot: [Math.PI / 2 + 0.3, 0, 0], scale: [1, 0.55, 1], outline: 0.015 });
+  piece(h, G.box(0.06, 1.2, 0.06), C.metal, { pos: [0, y + M + 0.6, 0], outline: 0.004 });
+  piece(h, G.sphere(0.14, 8, 6), 0xff4a3a, { pos: [0, y + M + 1.25, 0], glow: true, outline: 0 });
+}
+
+function ringWall(f, R, { ht = 3.2, thick = 0.8, gate = 4.8, tower = 1.8, every = 9, color = C.stone, cap = C.stoneDark, band = HEARTH, roof = C.metalDark, masts = false }) {
   const gates = crossings(f, R);
   const half = (gate / 2 + tower / 2) / R;
   const n = Math.max(12, Math.round((TAU * R) / 3.4));
@@ -227,7 +248,9 @@ function ringWall(f, R, { ht = 3.2, thick = 0.8, gate = 4.8, tower = 1.8, every 
     piece(f.g, G.cone(T * 0.85, 1.3, 4), roof, { pos: at(th + 0.8), rot: [0, a + Math.PI / 4, 0], outline: 0.02 });
     piece(f.g, G.box(0.3, 0.3, 0.3), LAMP, { pos: [x - f.p.x - Math.sin(a) * (T / 2 + 0.1), y + th - 0.7, z - f.p.z - Math.cos(a) * (T / 2 + 0.1)], glow: true, outline: 0.008 });
     f.col(x, z, T * 0.72, th);
+    if (masts) mastOn(f, x, z, a, y + th + 0.4, T, big, (towers++) % 2 === 0);
   };
+  let towers = 0;
   for (let i = 0; i < n; i++) {
     const a = i * step + step / 2;
     if (gates.some((g) => Math.abs(wrap(a - g)) < half)) continue;
@@ -750,7 +773,8 @@ export function buildCityWall(w, p) {
     piece(t, G.ico(1.5, 0), C.leaf, { pos: [0, 3.1, 0], outline: 0.04 });
     f.col(x, z, 0.35, 3);
   }
-  ringWall(f, p.wall, { ht: 5.6, thick: 1.4, gate: 6.4, tower: 3, every: 7, color: C.stone, cap: C.stoneDark, roof: st.roofs[0] });
+  // Farcall (Act II) is the city of signal masts: they stand on its wall towers.
+  ringWall(f, p.wall, { ht: 5.6, thick: 1.4, gate: 6.4, tower: 3, every: 7, color: C.stone, cap: C.stoneDark, roof: st.roofs[0], masts: p.act === 2 });
   flatten(f.g);
   w.finish(f.g);
 }

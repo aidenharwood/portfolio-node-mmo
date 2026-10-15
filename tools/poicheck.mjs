@@ -7,9 +7,10 @@
 import { HeadlessWorld } from '../server/world.js';
 import { LANDMARKS, SETTLEMENTS } from '../src/world/Gen.js';
 import { HAMLETS, DISTRICTS, SIZES } from '../src/world/places.js';
-import { storyPlaces, storyKeys } from '../src/world/story.js';
+import { storyPlaces, storyKeys, storyRef } from '../src/world/story.js';
+import { OBJECT_MODELS } from '../src/world/StorySites.js';
 import { campUnits } from '../src/combat/races.js';
-import { mulberry32 } from '../src/core/rng.js';
+import { mulberry32, mulberry32 as rngOf } from '../src/core/rng.js';
 
 const seed = Number(process.argv[2] ?? 12345);
 const w = new HeadlessWorld(seed);
@@ -128,6 +129,42 @@ if (city) {
   if (districts.length !== DISTRICTS.length) fail('city:', `${districts.length} districts`);
   for (const d of districts) if (Math.hypot(d.x - city.x, d.z - city.z) + d.r > city.wall - 2) fail('city:', `${d.kind} district outside the walls`);
   console.log(`city: ${city.name} — ${districts.length} districts, ${folk} folk, walls at ${city.wall} m (≥ ${SIZES.city.r} m heart)`);
+}
+// The Farcall Array (Act II, story.js): near Farcall, the same from its seed every time, on the
+// map in gold; the objects quests use (b4's console, b9's transmitter) reachable from the apron,
+// and the apron open ground to hold (`defend at: 'array'`). No other landmark takes its name.
+{
+  const k = 'story:array';
+  const A = storyPlaces(w.gen).array;
+  const [nm, farcall] = w.gen.cities();
+  if (!A) fail(k, 'not a story place');
+  else {
+    const again = storyPlaces(new HeadlessWorld(seed).gen).array;
+    if (again.x !== A.x || again.z !== A.z) fail(k, 'placed two ways from one seed');
+    if (Math.hypot(A.x - farcall.x, A.z - farcall.z) > Math.hypot(A.x - nm.x, A.z - nm.z)) fail(k, 'nearer New Meridian than Farcall');
+    const p = w.gen.region(A.rx, A.rz).pois.find((q) => q.story === 'array');
+    if (!p?.story || p.type !== 'story') fail(k, 'not a story POI (the map draws those in gold)');
+    const hold = storyRef(w, 'array');
+    if (!hold || hold.r < 12) fail(k, `no ground to hold (${hold?.r})`);
+    for (const ref of ['array:console', 'array:transmitter']) {
+      const t = storyRef(w, ref);
+      const n = p?.npcs.find((m) => m.object === ref);
+      if (!t || !n || !OBJECT_MODELS[n.model]) { fail(k, `no ${ref}`); continue; }
+      // Its use spot, a step and a half toward the apron, is open.
+      const d = Math.hypot(p.x - n.x, p.z - n.z);
+      const [ux, uz] = [n.x + ((p.x - n.x) / d) * 1.9, n.z + ((p.z - n.z) / d) * 1.9];
+      if (w.blocks({ x: ux, z: uz, y: w.groundHeight(ux, uz) + 0.9 })) fail(k, `${ref} can't be reached from the apron`);
+    }
+    let shut = 0;
+    for (let r = 0; r <= 5; r += 1.25) for (let a = 0; a < Math.PI * 2; a += 0.3) {
+      const [x, z] = [p.x + Math.sin(a) * r, p.z + Math.cos(a) * r];
+      if (w.blocks({ x, z, y: w.groundHeight(x, z) + 0.9 })) shut++;
+    }
+    if (shut) fail(k, `${shut} spots on the apron are blocked`);
+    console.log(`${k.padEnd(22)} ${Math.round(Math.hypot(A.x - farcall.x, A.z - farcall.z))} m from ${farcall.name}, holds ${hold?.r} m, objects ${p?.npcs.map((n) => n.object).join(', ')}`);
+  }
+  const rng = rngOf(seed);
+  for (let i = 0; i < 400; i++) if (/Farcall/.test(LANDMARKS.array.name(rng))) { fail('landmark:array', 'a landmark can be named Farcall Array'); break; }
 }
 console.log(failed ? `${failed} problem(s)` : 'poicheck: ok');
 process.exit(failed ? 1 : 0);
