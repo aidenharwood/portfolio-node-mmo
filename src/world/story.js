@@ -34,10 +34,10 @@ export const STORY_PLACES = {
   sporefield: { name: 'The Spore Field', from: 'city2', turn: -1.2, dist: CITY_WALL + 140, r: 12, flat: [8, 14], act: 2 },
   psionnest: { name: 'Psion\'s Nest', from: 'city2', turn: 0.9, dist: CITY_WALL + 220, r: 12, flat: [8, 14], act: 2 },
   // Act III round Ironreach: the Fallen Titan, kneeling where it fell in the old war, facing the
-  // city built from its kin; the Synth salvagers' camp between it and the city; and Isa Brannock's
+  // city built from its kin; the Synth salvagers' camp just beyond it (reached after it); and Isa Brannock's
   // salvage yard just outside the walls.
   titan: { name: 'The Fallen Titan', from: 'city3', turn: 1.3, dist: CITY_WALL + 300, r: 14, flat: [10, 16], act: 3, face: 'city3' },
-  salvage: { name: 'Salvage Rig', from: 'titan', toward: 'city3', dist: 70, r: 11, flat: [8, 14], act: 3, keep: 0.08 },
+  salvage: { name: 'Salvage Rig', from: 'titan', away: 'city3', dist: 70, r: 11, flat: [8, 14], act: 3, keep: 0.3, around: [0, 0.6, -0.6, 1.2, -1.2] },
   yard: { name: 'Brannock\'s Yard', from: 'city3', turn: -0.6, dist: CITY_WALL + 50, r: 12, flat: [8, 14], act: 3, face: 'city3' },
 };
 // (New places go on the end: each draws from the seed in turn, so the earlier ones stay put.)
@@ -93,27 +93,37 @@ export function storyPlaces(gen) {
     const from = anchor[S.from] ?? out[S.from];
     let tx;
     let tz;
+    let a = 0;
     if (S.frac) {
       tx = city.x * S.frac + Math.sin(main + Math.PI / 2) * S.turn * 60;
       tz = city.z * S.frac + Math.cos(main + Math.PI / 2) * S.turn * 60;
     } else {
+      // `toward` a place, `away` from one (beyond `from`, seen from it), or on a bearing of its own.
       const to = S.toward ? anchor[S.toward] ?? out[S.toward] : null;
-      const a = to ? Math.atan2(to.x - from.x, to.z - from.z) : main + S.turn + (rng() - 0.5) * 0.2;
+      const off = S.away ? anchor[S.away] ?? out[S.away] : null;
+      a = to ? Math.atan2(to.x - from.x, to.z - from.z) : off ? Math.atan2(from.x - off.x, from.z - off.z) : main + S.turn + (rng() - 0.5) * 0.2;
       tx = from.x + Math.sin(a) * S.dist;
       tz = from.z + Math.cos(a) * S.dist;
     }
+    // Where to look: round the spot it's wanted at. `around` (a place that belongs beside another):
+    // also at bearings either side of it, the same distance out, each searched close in — so rough
+    // ground just there sends it a little round, not far off.
+    const centres = S.around ? S.around.map((da) => [from.x + Math.sin(a + da) * S.dist, from.z + Math.cos(a + da) * S.dist, Math.abs(da) * S.dist]) : [[tx, tz, 0]];
     let best = null;
-    for (let i = 0; i < 40; i++) {
-      const d = i ? 6 + i * 4 : 0;
-      const x = tx + Math.sin(i * 2.4) * d;
-      const z = tz + Math.cos(i * 2.4) * d;
-      if (!clearOf(gen, x, z, S.r, out)) continue;
-      // `keep`: a place that belongs beside another pays for each metre it strays from where it
-      // was wanted, so a flatter spot further off doesn't win by default (places without it are
-      // scored as they always were).
-      const s = gen.flatness(x, z, S.flat) + (S.keep ?? 0) * d;
-      if (!best || s < best.s) best = { x, z, s };
-      if (s < 2.5) break;
+    for (const [cx, cz, arc] of centres) {
+      for (let i = 0; i < (S.around ? 10 : 40); i++) {
+        const d = i ? 6 + i * 4 : 0;
+        const x = cx + Math.sin(i * 2.4) * d;
+        const z = cz + Math.cos(i * 2.4) * d;
+        if (!clearOf(gen, x, z, S.r, out)) continue;
+        // `keep`: a place that belongs beside another pays for each metre it strays from where it
+        // was wanted, so a flatter spot further off doesn't win by default (places without it are
+        // scored as they always were).
+        const s = gen.flatness(x, z, S.flat) + (S.keep ?? 0) * (d + arc);
+        if (!best || s < best.s) best = { x, z, s };
+        if (s < 2.5) break;
+      }
+      if (best && best.s < 2.5) break;
     }
     best ??= { x: tx, z: tz, s: Infinity };
     const [rx, rz] = cellAt(gen, best.x, best.z);
@@ -204,7 +214,7 @@ export function storyIn(gen, rx, rz) {
       poi.npcs = [];
     } else if (P.key === 'yard') {
       // Isa's yard: the cradle at the back, under the crane, facing the gap toward the city.
-      poi = { ...base, type: 'story', kind: 'yard', id: `p:${key}:yard`, r: P.r, tag: 'sy' };
+      poi = { ...base, type: 'story', kind: 'yard', id: `p:${key}:yard`, r: P.r, tag: 'sy', gate: P.rot };
       poi.npcs = [folkFor(poi, rng, 0, 'object', P.rot + Math.PI, 2.5, { object: 'yard:cradle', model: 'cradle', facing: P.rot })];
     } else if (P.key === 'relicdig') {
       poi = { ...base, type: 'story', kind: 'relicdig', id: `p:${key}:relicdig`, r: P.r, tag: 'sr' };
@@ -232,7 +242,8 @@ function nearest(world, x, z, range, types, pred = () => true) {
 }
 const npcOf = (p, pred) => p?.npcs?.find(pred) ?? null;
 // `rot`: which way a place (or a person) faces, for framing story moments (ui/Moments.js).
-const target = (p, extra = {}) => p && { x: p.x, z: p.z, r: p.radius ?? p.r ?? 3, name: p.name, poi: p.id, rot: p.rot ?? 0, ...extra };
+// `gate`: the bearing a place's only way in faces (a fenced yard), for what comes to attack it.
+const target = (p, extra = {}) => p && { x: p.x, z: p.z, r: p.radius ?? p.r ?? 3, name: p.name, poi: p.id, rot: p.rot ?? 0, ...(p.gate !== undefined ? { gate: p.gate } : {}), ...extra };
 const person = (n, place) => n && { x: n.x, z: n.z, r: 3, name: place?.name, npc: n.id, rot: n.facing ?? 0 };
 
 // What a quest's reference names: { x, z, r, name, rot, npc?, poi?, camp? }, or null. `ctx.home`:

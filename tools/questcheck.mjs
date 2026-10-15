@@ -17,7 +17,7 @@ import { ACTS, STORY } from '../src/rpg/storyline.js';
 import * as storyline from '../src/rpg/storyline.js';
 import { SIDE_CHAINS } from '../src/rpg/sidequests.js';
 import { reachedPlaces, defenceAt, heldObjectives, questDrops, eventCalled, eventObjectives } from '../src/rpg/questWatch.js';
-import { storyRef } from '../src/world/story.js';
+import { storyRef, storyPlaces } from '../src/world/story.js';
 import { settlementFolk } from '../src/world/settlements.js';
 import { flagUses, flagProblems, storyFolk, STORY_FLAGS } from './storyflags.mjs';
 import { roadRoute } from '../src/sim/Routes.js';
@@ -207,6 +207,18 @@ console.log('Act III\'s people and places:');
     if (!sp || home) squares.push(`seed ${s}: ${sp ? `${sp.name} is in ${home.name}` : 'no stone'}`);
   }
   check(!squares.length, `the stone stands out in the open on every world tried${squares.length ? ` (not: ${squares.join('; ')})` : ''}`);
+  // The salvagers' rig stands beside the Titan, on its far side from Ironreach, on every world
+  // tried: so the Titan is reached first (c6's first step) and the rig cleared after (its second).
+  const rigs = [];
+  for (const s of [seed, 95028, 777, 1, 4]) {
+    const ws = s === seed ? w : new HeadlessWorld(s);
+    const sp = storyPlaces(ws.gen);
+    const c = ws.gen.cities()[2];
+    const d = Math.hypot(sp.salvage.x - sp.titan.x, sp.salvage.z - sp.titan.z);
+    const far = Math.hypot(sp.salvage.x - c.x, sp.salvage.z - c.z) > Math.hypot(sp.titan.x - c.x, sp.titan.z - c.z);
+    if (d > 100 || !far) rigs.push(`seed ${s}: ${Math.round(d)} m${far ? '' : ', city side'}`);
+  }
+  check(!rigs.length, `the salvagers' rig stands beside the Titan, beyond it from the city, on every world tried${rigs.length ? ` (not: ${rigs.join('; ')})` : ''}`);
   // The Fallen Titan (B-2): the kneeling titan landmark, its core to pull, the salvagers' camp by
   // it, and Isa's yard just outside the walls where the core is woken.
   const poiOf = (r) => { const t = storyRef(w, r); return t && w.poiById(t.poi ?? t.camp ?? ''); };

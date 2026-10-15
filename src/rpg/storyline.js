@@ -475,7 +475,7 @@ export const STORY = [
     offer: 'There\'s a titan down on its knees {titan:dir} of here — the biggest Synth there ever was, dead since before Ironreach had a wall. We built half the city out of what we cut off its kin. Its core\'s never been touched: too deep, too hot. Now Synth salvagers are stripping it, and they\'re going for the core. Get there first.',
     stages: [
       { text: 'Go to {titan}.', objectives: [{ type: 'goto', at: 'titan', count: 1, text: 'Reach {titan}' }], done: { moment: 'titan' } },
-      { text: 'Drive the Synth salvagers off the Titan.', objectives: [{ type: 'clear', camp: 'salvage', count: 1, text: 'Clear {salvage}' }] },
+      { text: 'The salvagers\' rig stands just beyond the Titan. Drive them off.', objectives: [{ type: 'clear', camp: 'salvage', count: 1, text: 'Clear {salvage}' }] },
       { text: 'Pull the Titan\'s core from its housing.', objectives: [{ type: 'use', object: 'titan:core', count: 1, text: 'Pull the Titan\'s core' }] },
     ],
     turnIn: 'Still warm. Dead since the old war, and still warm. Help me get it into the cradle — gently. I\'ve waited my whole life to open one of these.',
@@ -484,12 +484,12 @@ export const STORY = [
   },
   {
     id: 'c7', kind: 'story', act: 3, level: 20, giver: 'city3:engineer', requires: ['c6'], title: 'Reading the Core',
-    offer: 'The core\'s in the cradle at my yard, just outside the walls. When I wake it, every Synth for a mile will hear it — it\'ll call for help the only way it knows. Wake it, hold the yard while it boots, and we\'ll see what it remembers.',
+    offer: 'My yard\'s just outside the walls; the cradle\'s ready. Set the core in it and wake it — and when you do, every Synth for a mile will hear it, calling for help the only way it knows. Hold the yard while it boots, and we\'ll see what it remembers.',
     stages: [
-      { text: 'Wake the Titan\'s core in the cradle at {yard}.', objectives: [{ type: 'use', object: 'yard:cradle', count: 1, text: 'Wake the Titan\'s core' }] },
+      { text: 'Set the Titan\'s core in the cradle at {yard} and wake it.', objectives: [{ type: 'use', object: 'yard:cradle', count: 1, text: 'Wake the Titan\'s core' }] },
       { text: 'Synths are homing in on the core. Hold the yard while it boots.', objectives: [{ type: 'defend', at: 'yard', race: 'synth', waves: 3, count: 1, text: 'Hold {yard}' }], done: { moment: 'coreread' } },
     ],
-    turnIn: '"Containment held. Origin unknown." That titan didn\'t fall in our war, sleeper. It fell keeping something out of the network, long before the Pilgrim came down. Your voice isn\'t the first to get in. I want to know who was — and I want to know where they make these things.',
+    turnIn: '"Containment held. Origin unknown." It wasn\'t fighting us when it fell, sleeper. It was keeping something out of the network — long before the Pilgrim came down. Your voice isn\'t the first to get in. I want to know who was — and I want to know where they make these things.',
     rewards: { xp: 3600, gold: 1200, armor: { minTier: 3 } },
   },
 ];
@@ -589,7 +589,7 @@ export const MOMENTS = {
   },
   titan: {
     at: 'titan', title: ['The Fallen Titan', ''], shots: [
-      { from: [18, 10, 26], lift: 8, t: 5.5, line: ['', 'On its knees where it fell, one fist planted, its visor dark — and Synth salvagers swarming its chest.'] },
+      { from: [18, 10, 26], lift: 8, t: 5.5, line: ['', 'On its knees where it fell, one fist planted, its visor dark — its core torn half out of its chest, and the salvagers\' rig just beyond.'] },
     ],
   },
   coreread: {

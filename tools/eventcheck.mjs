@@ -21,6 +21,7 @@ import { eventCalled, eventObjectives, EVENT_CALL } from '../src/rpg/questWatch.
 import { roadRoute, RouteFollower } from '../src/sim/Routes.js';
 import { CITY_WALL } from '../src/world/places.js';
 import { storyRef } from '../src/world/story.js';
+import { OpenNav } from '../src/sim/OpenNav.js';
 
 const seed = Number(process.argv[2] ?? 12345);
 const world = new HeadlessWorld(seed);
@@ -463,6 +464,61 @@ console.log('The war-walker:');
     const ham = storyRef(world, 'ironhamlet');
     const c3 = ham?.poi && dir.startStory(ham.poi, 'walker');
     check(c3?.type === 'walker' && c3.site.id === ham.poi && c3.route?.length >= 360, `c3's walker starts at ${ham?.name ?? 'nowhere'} (${Math.round(c3?.route?.length ?? 0)} m of road)`);
+  }
+
+  // Act III's "Reading the Core" (c7) holds Brannock's Yard, fenced but for its gate toward the
+  // city: the Synths come at it from the gate's side, so they can get in (a wave from behind the
+  // fence would only press against it).
+  {
+    reset();
+    const yard = storyRef(world, 'yard');
+    const p = player('yardkeeper');
+    sim.setPlayers([p]);
+    put(p, yard.x, yard.z);
+    const d = sim.encounters.defend({ key: 'yardcheck', x: yard.x, z: yard.z, r: Math.max(12, yard.r), name: yard.name, race: 'synth', level: 20, waves: 3, gate: yard.gate });
+    let off = 0;
+    let n = 0;
+    for (let w = 0; w < 3; w++) {
+      step(12, () => { if (d.enemies.some((e) => e.alive)) return false; });
+      for (const e of d.enemies) {
+        if (!e.alive) continue;
+        const a = Math.atan2(e.home.x - yard.x, e.home.z - yard.z);
+        off = Math.max(off, Math.abs(Math.atan2(Math.sin(a - yard.rot), Math.cos(a - yard.rot))));
+        n++;
+        e.dissolve();
+      }
+      step(0.1);
+    }
+    check(yard.gate === yard.rot && n > 0 && off < 0.3, `the yard's waves come from its gate side (${n} Synths, within ${off.toFixed(2)} rad of the gate)`);
+    sim.setPlayers([]);
+    reset();
+    // …and from there they make it in: chasers walked by the world's own pathing (sim/OpenNav.js,
+    // the fence's colliders) from the wave's spawn line reach someone at the cradle.
+    world.loadPoi(world.poiById(yard.poi));
+    const cradle = storyRef(world, 'yard:cradle');
+    const goal = { x: cradle.x + Math.sin(yard.rot) * 1.8, z: cradle.z + Math.cos(yard.rot) * 1.8 };
+    const stuck = [];
+    for (const da of [-0.18, 0, 0.18]) {
+      const nav = new OpenNav(world, 1.2);
+      const out = Math.max(12, yard.r) + 16;
+      const q = new THREE.Vector3(yard.x + Math.sin(yard.rot + da) * out, 0, yard.z + Math.cos(yard.rot + da) * out);
+      let pts = null;
+      let i = 0;
+      let t = 0;
+      for (let next = 0; t < 40; t += 0.05) {
+        nav.tick(t);
+        if (t >= next) { pts = nav.route(q, goal, 0.45); i = 0; next = t + 1; }
+        while (pts && i < pts.length && Math.hypot(pts[i].x - q.x, pts[i].z - q.z) < 0.8) i++;
+        const to = pts && i < pts.length ? pts[i] : goal;
+        if (Math.hypot(goal.x - q.x, goal.z - q.z) < 2) break;
+        const dd = Math.hypot(to.x - q.x, to.z - q.z);
+        if (dd > 0.01) { q.x += ((to.x - q.x) / dd) * 0.2; q.z += ((to.z - q.z) / dd) * 0.2; }
+        q.y = world.groundHeight(q.x, q.z);
+        world.resolve(q, 0.45, 0.3, 2, null);
+      }
+      if (t >= 40) stuck.push(da);
+    }
+    check(!stuck.length, `and they get in through the gate to the cradle${stuck.length ? ` (not from ${stuck.join(', ')} rad)` : ''}`);
   }
 
   // Overrun already: no walker can be called there.

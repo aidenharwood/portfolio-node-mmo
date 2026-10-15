@@ -332,11 +332,12 @@ export const OBJECT_MODELS = {
     });
     place(on, wa);
     place(off, wa);
-    return 1.0;
+    return 1.3;
   },
 
   // Isa Brannock's cradle (Act III): a steel frame on a workbench, cables run out to the yard's
-  // generator. The Titan's core rests in it cold until it's woken, then turns, lit, in its rings.
+  // generator. Empty, its clamps open, until the Titan's core is set in it and woken; then the core
+  // turns, lit, in its rings. (Empty, not a cold core, so it never shows the core before c6's done.)
   cradle(w, p, n, g, wa) {
     piece(g, G.box(2.2, 0.9, 1.2), C.metalDark, { pos: [0, 0.45, 0], outline: 0.025 });
     piece(g, G.box(2.4, 0.1, 1.4), C.steel, { pos: [0, 0.95, 0], outline: 0.012 });
@@ -346,14 +347,14 @@ export const OBJECT_MODELS = {
     }
     piece(g, G.box(1.7, 0.12, 0.12), C.metal, { pos: [0, 2.45, 0], outline: 0.008 });
     const { on, off } = parts(w, n.id, (onG, offG) => {
-      piece(offG, G.sphere(0.55, 14, 10), 0x4a505c, { pos: [0, 1.6, 0], outline: 0.012 });
+      for (const s of [-1, 1]) piece(offG, G.box(0.1, 0.4, 0.5), 0x4a505c, { pos: [s * 0.62, 1.6, 0], rot: [0, 0, s * 0.5], outline: 0.008 });
       piece(onG, G.sphere(0.55, 14, 10), SYNTH, { pos: [0, 1.6, 0], glow: true, outline: 0.01 });
       piece(onG, G.torus(0.85, 0.05), 0xe6f6ff, { pos: [0, 1.6, 0], rot: [Math.PI / 2, 0, 0], glow: true, outline: 0 });
       piece(onG, G.torus(0.75, 0.04), SYNTH, { pos: [0, 1.6, 0], rot: [0.4, 0.6, 0], glow: true, outline: 0 });
     });
     place(on, wa);
     place(off, wa);
-    return 1.0;
+    return 1.3;
   },
 };
 
