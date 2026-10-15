@@ -13,7 +13,7 @@
 // Operations: move, select, equip, unequip, scrap, sell, buy, learn, respec, slot, filter, threat,
 // title, feat, accept, attune, respawn, use, choose (predicted) · pick, drop, chest, turnin, talk,
 // rest, travel, enter, leave, dloot, dchest (rolled by the authority) · reward, bonus, visit, camp,
-// stock, reach, defended, dclear, rclear, event (sent by the server).
+// stock, reach, defended, evwon, dclear, rclear, event (sent by the server).
 // Public events (gameplay phase 6, sim/WorldEvents.js): an event's chest is an 'event' op, rolled
 // by the authority for each participant who earned it; inside an event under way its voted tier
 // is the character's Threat (the host plugs in `eventTier`).
@@ -406,6 +406,8 @@ export class CharacterCore {
         fx.push({ k: 'toast', text: 'Held!' });
         return true;
       }
+      // A public event a quest called for, won with this character taking part (chest-worthy).
+      case 'evwon': return !!op.roll && this.quests.bump(op.roll.id, op.roll.i, 'event');
       // ---- the world
       case 'attune': {
         const w = this.world?.poiById?.(op.id);

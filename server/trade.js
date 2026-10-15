@@ -134,8 +134,9 @@ export class Trades {
     run(B, ob, oa, A);
     metrics.inc('trades');
     log.info('trade', `${A.name} ⇄ ${B.name}`, { gave: [oa.items.length, oa.gold], got: [ob.items.length, ob.gold] });
-    this.realm.saveCharacter(A);
-    this.realm.saveCharacter(B);
+    // Both saved in one go: a layer dying between two saves would leave one side's items twice.
+    const rows = [this.realm.row(A), this.realm.row(B)];
+    this.realm.saveTogether([A, B], () => this.realm.store.saveCharacters(rows, this.realm.layer));
     this.close(t, null, true);
   }
 

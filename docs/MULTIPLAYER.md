@@ -92,7 +92,13 @@ about 110 players. Gateways put players on them.
 - **One copy of a character.** A layer holds each of its characters in the presence table, saves
   them before letting go, and refreshes its hold. A layer that crashes loses its hold within 45 s,
   or straight away once it's gone from the layer list. So a character can't be loaded in two
-  places, or loaded before it's saved.
+  places, or loaded before it's saved. Saves only land while the layer still holds the
+  character: one that stalled long enough to lose them can't write its old copy over the new
+  layer's (it lets the player go unsaved instead).
+- **Hand-overs land whole.** A trade writes both characters in one transaction, a letter goes in
+  the same transaction as its sender without what it carries, and a claim marks the letter and
+  saves the claimer together. A layer dying part-way leaves all of it or none of it, never an item
+  in two places (`tools/persistcheck.mjs` crashes each one at every write).
 - **Rolling restarts.** A closing layer marks itself as draining (gateways stop sending players
   there), sends each party whole to another layer, saves everyone and lets them go. The party is
   put back together where it lands.
@@ -111,7 +117,7 @@ about 110 players. Gateways put players on them.
 | 2 | Server-run world at 20 Hz with area of interest | ✅ |
 | 2 | Hits judged on screen, validated by server; statuses on server | ✅ |
 | 2 | Shared kill credit, instanced loot, health scaling with players | ✅ |
-| 3 | Inventory, gold, XP, attributes, trader, quests, chests on the server | ✅ predicted and rolled ops, hash checks |
+| 3 | Inventory, gold, XP, talents, trader, quests, chests on the server | ✅ predicted and rolled ops, hash checks |
 | 3 | Movement validation with corrections; travel done by the server | ✅ one speed bank rather than a per-move envelope |
 | 3 | Rate limits and sanity checks on every message | ✅ |
 | 4 | Parties | ✅ except below |
@@ -124,7 +130,7 @@ about 110 players. Gateways put players on them.
 | 5 | Binary delta snapshots | 🟡 deltas and distance tiers, but JSON with compression rather than binary |
 | 5 | Per-region simulation in worker threads | 🟡 scaled out with layers (processes) instead; regions within a layer are still a [next step](DEPLOY.md#further-not-built) |
 | 5 | Database hot standby, or Postgres | ✅ Postgres for the cluster (SQLite stays for one process), nightly dumps; no standby |
-| 5 | Container image; TLS through a reverse proxy | ✅ Dockerfile, Compose with Caddy, and Kubernetes manifests with CI for the portfolio cluster (the image hasn't been built here: no Docker) |
+| 5 | Container image; TLS through a reverse proxy | ✅ Dockerfile, Compose with Caddy, and Kubernetes manifests (in `portfolio-helm-website`) with CI for the portfolio cluster; CI builds and pushes the image on every push to `main` |
 | 5 | Health checks, metrics, structured logs | ✅ |
 | 5 | Crash reporting | 🟡 caught and logged, not sent to an external service |
 | — | PvP areas | ➖ left out for now |
@@ -217,7 +223,8 @@ Built beyond the plan:
     looks at each player's quests (`rpg/questWatch.js`) — a place a step sends them to, reached
     (`reach`); a place to hold, where the world's simulation starts the waves
     (`WorldSim Encounters.defend`: the local faction, wave after wave, given up if everyone leaves)
-    and, once the last is down, `defended`. Quest drops (a raider's orders, a lost patrol's tags)
+    and, once the last is down, `defended`; a public event the step calls, then `evwon` once it's
+    won (see [Public events](#public-events)). Quest drops (a raider's orders, a lost patrol's tags)
     are rolled into the kill's reward.
 - Achievements (gameplay phase 2) are counted from each character's records, which only these
   operations change, so both copies reach them together; the server's copy is the one saved.
@@ -250,7 +257,10 @@ Built beyond the plan:
 - Raids (gameplay phase 7) are copies to the same instance manager (`world/raids.js`), private only.
   - **Who shares a copy:** a raid copy belongs to a [raid group](#raid-groups), or to the party
     or player if they're not in one. It holds 12 at most, and is entered at a city's raid gate
-    (`via: 'gate'`), from level 14.
+    (`via: 'gate'`) once the story has opened it (the raid's `needs: { flag }`; the Brood Mother's
+    is `broodgate_open`, from Act II's "The Gate Opens"). There's no level floor. The server
+    checks the flag on the character going in or on any other member of their raid group (else
+    their party) who's online, so one who has it takes the rest in. A refusal says why.
   - **Encounters** (`sim/RaidRun.js`): each arena is idle until its boss is pulled. Its gate then
     shuts, and the boss's script (`sim/BossScript.js`) runs the fight. Everyone down or out of
     the arena for 3 s is a wipe: the boss resets and the gate opens. Its bosses down beat the
@@ -396,11 +406,22 @@ shares it. Offline single-player runs the same director for one player.
 - **Overrun settlements:** `ovr { id, on }` goes to everyone on the layer, and `welcome` carries
   the list. While a place is overrun, the server's rules find none of its folk (no trading, resting
   or quests there), and screens hide them.
+- **Quest events** (`{ type: 'event', event: 'surge', at: ref }`, `rpg/questWatch.js`): every
+  second the server's quest watch checks whether someone on such a step is within 80 m of the
+  place's edge, and if so asks the director to start that event there (`WorldEvents.startStory`).
+  It starts at once, ignoring the director's spacing (the quiet time, the gap, the cap, the site's
+  rest). It is a normal public event, but its tier is locked at Normal: there's no vote, and `wev`
+  marks it `lk: 1` with no `v`. If an event is already running at the place, that one counts;
+  an overrun place has to be retaken first. When it's won, everyone who earned the chest gets
+  `evwon { id, i }` as a server op for each of their steps it counts for: any event of that kind
+  at that place, whoever started it. A lost or abandoned one moves nothing on, so the step can
+  call its event again once the place is free.
 - **Admins** start and settle events with `/admin event` ([DEPLOY.md](DEPLOY.md#admins)).
 - **Protocol:**
   - client → server: `evote { id, tier }`
-  - server → client: `wev { l: [{ id, k, nm, pl, st, x, z, r, lv, ti, bx, bz, n, tl?, s: [[id, kind, x, z, hp, max]], v?, w?, f?, c?, rx?, rz?, ct?, ph?, res? }], me: { id: [points, vote, chest] } }`
-    and `ovr { id, on }`
+  - server → client: `wev { l: [{ id, k, nm, pl, st, x, z, r, lv, ti, bx, bz, n, tl?, s: [[id, kind, x, z, hp, max]], v?, w?, f?, c?, rx?, rz?, ct?, ph?, res?, lk? }], me: { id: [points, vote, chest] } }`
+    (`lk: 1`: a quest's event, its tier locked at Normal, no vote), `ovr { id, on }`, and the
+    server op `evwon { id, i }`
 
 ## Known limits
 
@@ -414,7 +435,9 @@ shares it. Offline single-player runs the same director for one player.
   who aren't in a party may land on different ones.
 - A layer that crashes (rather than closing) loses its parties and up to 30 seconds of its
   players' progress (characters are saved every 30 seconds and on leaving). Its players reconnect
-  to another layer by themselves.
+  to another layer by themselves. What's lost goes together: a chest's loot, its daily or weekly
+  lockout and any legendary in it are in the same character row, so a crash can lose the loot
+  with its lockout (the chest can be opened again) but never keep one without the other.
 - Each layer simulates its whole world on one core, so a layer holds ~110 players. See
   [DEPLOY.md](DEPLOY.md#capacity).
 

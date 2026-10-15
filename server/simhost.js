@@ -14,6 +14,8 @@
 //                     reach / defended { id, i } — a quest's place reached, a place held (each
 //                     second the server checks where everyone is against their quests:
 //                     rpg/questWatch.js; a defence is the world sim's, shared by whoever's there)
+//                     evwon { id, i } — a public event a quest called for (questWatch eventCalled
+//                     → WorldEvents.startStory), won with them earning its chest
 //                     dun { id, st: { open, key, nodes, mini, boss, cleared, lift, raid? }, say?, big? }
 //                     — a dungeon or raid copy's state (sim/Dungeons.js), to everyone in it whenever
 //                     it changes (raid: each encounter's state and its bosses' fights, sim/RaidRun.js)
@@ -33,7 +35,7 @@ import { HeadlessWorld } from './world.js';
 import { WorldSim, strongholdXp } from '../src/sim/WorldSim.js';
 import { STATE_CODE, FLAG } from '../src/sim/enemyDefs.js';
 import { rewardRoll, bonusRoll, visitRoll, eventRoll } from '../src/rpg/CharacterCore.js';
-import { reachedPlaces, defenceAt, heldObjectives, questDrops } from '../src/rpg/questWatch.js';
+import { reachedPlaces, defenceAt, heldObjectives, questDrops, eventCalled, eventObjectives } from '../src/rpg/questWatch.js';
 import { maxHit } from './characters.js';
 import { PARTY_RANGE } from './parties.js';
 import { Grid, metrics, log } from './ops.js';
@@ -113,12 +115,15 @@ export class SimHost {
   }
 
   // ---------------------------------------------------------------- public events
-  // An event won: each participant who earned it gets the chest, rolled for them.
+  // An event won: each participant who earned it gets the chest, rolled for them, and any quest
+  // step that called for an event like it there moves on (rpg/questWatch.js eventObjectives).
   onEventEnd(ev) {
     metrics.inc(ev.res === 'won' ? 'events_won' : 'events_lost');
     for (const person of ev.result.people) {
       const s = this.realm.sessions.get(person.id);
-      if (s?.core) this.give(s, { op: 'event', roll: eventRoll(ev, person, s.core.stats.level, () => s.core.gid()) });
+      if (!s?.core) continue;
+      this.give(s, { op: 'event', roll: eventRoll(ev, person, s.core.stats.level, () => s.core.gid()) });
+      for (const [id, i] of eventObjectives(s.core.quests, ev)) this.give(s, { op: 'evwon', roll: { id, i } });
     }
   }
 
@@ -211,6 +216,16 @@ export class SimHost {
     }
   }
 
+  // The story flags of the others going in with someone (their raid group, else their party): one
+  // who has opened a raid's gate opens it for them all (DEC-4, sim/Dungeons.js opened).
+  matesFlags(s) {
+    const raids = this.realm.raids;
+    const group = raids?.groupOf?.(s);
+    const party = this.realm.parties.partyOf(s);
+    const others = group ? raids.sessions(group) : party ? this.realm.parties.members(party) : [];
+    return others.filter((o) => o !== s && o.core).map((o) => o.core.quests.flags);
+  }
+
   // The instance manager as one character's operations see it (rpg/CharacterCore.js `dungeons`):
   // going in with their party (or alone, or with their raid group), coming out, and the chests
   // that are theirs.
@@ -219,6 +234,7 @@ export class SimHost {
     const who = () => ({
       id: s.id, position: s.proxy.position, party: this.realm.parties.partyOf(s)?.id ?? `solo:${s.charId}`,
       raid: this.realm.raids?.keyOf(s) ?? null, level: s.core?.stats.level ?? 1, flags: s.core?.quests.flags ?? {},
+      mates: this.matesFlags(s),
     });
     return {
       enter: (ask) => d.enter(who(), ask),
@@ -342,7 +358,7 @@ export class SimHost {
         if (roll) this.give(s, { op: 'visit', roll });
       }
     }
-    // Every second: quests' places reached, and places to hold (rpg/questWatch.js).
+    // Every second: quests' places reached, places to hold, events called (rpg/questWatch.js).
     if ((this.questTimer = (this.questTimer ?? 0) - dt) <= 0) {
       this.questTimer = 1;
       for (const s of this.realm.sessions.values()) {
@@ -351,6 +367,8 @@ export class SimHost {
         for (const [id, i] of reachedPlaces(s.core.quests, p.position.x, p.position.z)) this.give(s, { op: 'reach', roll: { id, i } });
         const d = defenceAt(s.core.quests, this.world, p.position.x, p.position.z);
         if (d) this.sim.encounters.defend(d);
+        const e = eventCalled(s.core.quests, p.position.x, p.position.z);
+        if (e) this.sim.director.startStory(e.site, e.type);
       }
     }
     // The world round everyone, those who just arrived first (in what the last tick left spare);

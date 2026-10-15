@@ -14,7 +14,8 @@
 //                      salvage runs, waystone surveys and deliveries
 //   bounty             repeatable: slay any dozen monsters
 // Objective types: talk · goto · use · kill (enemy type, story tag, race, near a place) · killRace ·
-// killAny · clear (a camp) · collect (quest drops) · defend (hold a place) · choose · attune · chest.
+// killAny · clear (a camp) · collect (quest drops) · defend (hold a place) · event (a public event
+// the step calls at a place, won while taking part: rpg/questWatch.js) · choose · attune · chest.
 // Rewards: xp, gold, weapon / armor (generator options). Generated quests are saved whole.
 // What happens (stages done, lines said, moments to play) collects in `events`, which the
 // character's rules (rpg/CharacterCore.js) hand to the screen.

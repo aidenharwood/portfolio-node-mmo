@@ -1,8 +1,9 @@
 // What the authority watches on a character's quests (the server for everyone online —
 // server/simhost.js; the game itself offline): the places they've reached, the places they should
-// be holding (a defence the world sim runs: src/sim/WorldSim.js Encounters.defend), and the quest
-// drops off the enemies they kill. Each result is the [quest id, objective index] pairs the
-// character's rules move on ('reach', 'defended', and a reward's `quest`).
+// be holding (a defence the world sim runs: src/sim/WorldSim.js Encounters.defend), the public
+// events their quests call for (sim/WorldEvents.js startStory), and the quest drops off the
+// enemies they kill. Each result is the [quest id, objective index] pairs the character's rules
+// move on ('reach', 'defended', 'evwon', and a reward's `quest`).
 
 // Every current 'goto' objective whose place (x, z) is within.
 export function reachedPlaces(quests, x, z) {
@@ -51,6 +52,44 @@ export function heldObjectives(quests, key) {
     const q = quests.defs.get(id);
     quests.objectivesOf(id).forEach((o, i) => {
       if (o.type === 'defend' && quests.active[id][i] < (o.count ?? 1) && defenceKey(quests, o, q) === key) out.push([id, i]);
+    });
+  }
+  return out;
+}
+
+// An 'event' objective ({ type: 'event', event: 'surge', at: ref }) calls a public event at a
+// place: the director's site is the place's poi (a hamlet, a settlement or a town for a surge or a
+// siege; a landmark or a ruin for an anomaly). Coming within this many metres of the place's edge
+// starts it (sim/WorldEvents.js startStory), so there's time to reach the beacon while it gathers.
+export const EVENT_CALL = 80;
+
+export function eventSite(quests, o, q) { return quests.ref(o.at, q)?.poi ?? null; }
+
+// The event this character's quests call for, standing where they are: the first current 'event'
+// objective whose place they're near, as { site, type } for the director.
+export function eventCalled(quests, x, z) {
+  for (const id of Object.keys(quests.active)) {
+    const q = quests.defs.get(id);
+    const prog = quests.active[id];
+    const objectives = quests.objectivesOf(id);
+    for (let i = 0; i < objectives.length; i++) {
+      const o = objectives[i];
+      if (o.type !== 'event' || prog[i] >= (o.count ?? 1) || !quests.within(o, q, x, z, EVENT_CALL)) continue;
+      const site = eventSite(quests, o, q);
+      if (site) return { site, type: o.event ?? 'surge' };
+    }
+  }
+  return null;
+}
+
+// The current 'event' objectives an event won counts for (`ev`: { type, site: { id } }), for
+// someone who earned its chest — any event of that kind at that place, whoever started it.
+export function eventObjectives(quests, ev) {
+  const out = [];
+  for (const id of Object.keys(quests.active)) {
+    const q = quests.defs.get(id);
+    quests.objectivesOf(id).forEach((o, i) => {
+      if (o.type === 'event' && quests.active[id][i] < (o.count ?? 1) && (o.event ?? 'surge') === ev.type && eventSite(quests, o, q) === ev.site?.id) out.push([id, i]);
     });
   }
   return out;
