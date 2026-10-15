@@ -36,12 +36,15 @@ export const STORY_FLAGS = {
   krell_captured: { means: 'Krell was sent to New Meridian in chains (the choice at a6).', setBy: ['a6 stage 3 choices'], readBy: ['a6 turnIn', 'a7 offer', 'achievement story_krell', 'b1 offer'] },
   krell_freed: { means: 'Krell was let go (the choice at a6).', setBy: ['a6 stage 3 choices'], readBy: ['achievement story_krell', 'bark sporefield:krell', 'folk sporefield:krell'] },
   vault_open: { means: 'The player opened the Sunken Vault, so it can be gone into.', setBy: ['a7 setFlags'], readBy: ['dungeon vault'] },
-  trusted_ysolde: { means: 'The player told Ysolde the voice warned them at the vault (the choice at a8).', setBy: ['a8 stage 1 choices'], readBy: [] },
+  trusted_ysolde: { means: 'The player told Ysolde the voice warned them at the vault (the choice at a8).', setBy: ['a8 stage 1 choices'], readBy: ['b5 stage 1 say'] },
   kept_secret: { means: 'The player kept the voice to themselves (the choice at a8).', setBy: ['a8 stage 1 choices'], readBy: [] },
   act1_done: { means: 'Act I is over.', setBy: ['a8 setFlags'], readBy: ['achievement story_act1'] },
   // ---------------------------------------------------------------- Act II: The Brood
   act2_started: { means: 'The player reached Farcall and its captain of the watch (b1).', setBy: ['b1 setFlags'], readBy: [] },
   hamlets_cleared: { means: 'The hamlets gone quiet were found and the spore pods burned (b2).', setBy: ['b2 setFlags'], readBy: [] },
+  array_found: { means: 'The player found the Farcall Array calling the Hive, with Warden marks on it (b4).', setBy: ['b4 setFlags'], readBy: [] },
+  told_ashe: { means: "The player chose to tell Ashe the Wardens' forgotten purpose (the choice at b5).", setBy: ['b5 stage 1 choices'], readBy: ['b5 turnIn'] },
+  kept_wardens_secret: { means: "The player kept the Wardens' secret between themselves and Ysolde (the choice at b5).", setBy: ['b5 stage 1 choices'], readBy: ['b5 turnIn'] },
   broodgate_open: {
     means: 'The Wardens opened the Brood Mother\'s raid gate to the player (DEC-4: one in a raid group or party who has it takes the rest in).',
     setBy: [], readBy: ['raid broodmother'], pending: 'A-7: quest 11 "The Gate Opens" sets it',

@@ -218,6 +218,8 @@ check(quests.flags.act1_done && quests.flags.ironjaw_fell && quests.flags.vault_
 check(quests.flags.krell_captured && !quests.flags.krell_freed && quests.flags.trusted_ysolde, 'choices set their flags (Krell taken in chains, Ysolde told)');
 check(quests.flags.act2_started && quests.flags.hamlets_cleared, 'Act II under way: Farcall reached, the quiet hamlets answered');
 check(quests.completed.has('b3'), 'the surge on the quiet hamlet held (b3, a public event the quest called)');
+check(quests.flags.array_found, 'the Farcall Array found, Warden marks on Maker work');
+check(!!quests.flags.told_ashe !== !!quests.flags.kept_wardens_secret, `Ysolde's confession: one choice made (${quests.flags.told_ashe ? 'told Ashe' : quests.flags.kept_wardens_secret ? 'kept it' : 'neither'})`);
 {
   // A character who finished Act I before Act II existed: Ashe has the next step for them.
   const later = new QuestLog(host);

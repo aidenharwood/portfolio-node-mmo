@@ -251,6 +251,50 @@ export const STORY = [
     turnIn: 'Held. Good. But here\'s what bothers me: the masts tracked the ones that got past you. They didn\'t scatter. They turned — all together, the same way, like they\'d heard their name called. Toward something out past the masts.',
     rewards: { xp: 1400, gold: 500, armor: { minTier: 3 } },
   },
+  {
+    id: 'b4', kind: 'story', act: 2, level: 11, giver: 'city2:captain', requires: ['b3'], returnTo: 'sage', title: 'The Farcall Array',
+    offer: 'I followed the swarm\'s heading on the masts. It ends at the old Maker dish out past the city — the Array, we call it. Nobody goes there. Nobody\'s needed to. Go and see what\'s calling them, and if it has an off switch, find it.',
+    stages: [
+      { text: 'Follow the swarms to {array}.', objectives: [{ type: 'goto', at: 'array', count: 1, text: 'Reach {array}' }] },
+      {
+        text: 'The Array is calling the Hive. Power down its console while you hold them off.',
+        objectives: [
+          { type: 'use', object: 'array:console', count: 1, text: 'Power down the Array\'s console' },
+          { type: 'defend', at: 'array', race: 'hive', waves: 2, count: 1, text: 'Hold {array}' },
+        ],
+        done: { moment: 'array' },
+      },
+    ],
+    turnIn: 'Warden marks. On Maker work. ...Sit down, dear. No — sit. There\'s something I should have told you before I ever sent you to that vault.',
+    setFlags: ['array_found'],
+    rewards: { xp: 1550, gold: 540, weapon: { minTier: 3 } },
+  },
+  {
+    id: 'b5', kind: 'story', act: 2, level: 11, giver: 'sage', requires: ['b4'], title: 'Ysolde\'s Confession',
+    offer: 'Hear an old woman out. Then decide what to do with what you hear.',
+    stages: [{
+      text: 'Hear Old Ysolde out.',
+      objectives: [{ type: 'choose', npc: 'sage', count: 1, text: 'Hear Ysolde\'s confession' }],
+      say: {
+        sage: {
+          trusted_ysolde: 'You told me about the voice. I owe you the same. The first Wardens weren\'t soldiers, dear. They were keepers. When the Hive got loose off the Pilgrim, they found that Maker dish and taught it a lullaby to keep the brood asleep — and locked its workings behind a seal, so no one could ever turn it. Open the seal, and the song turns to a call. I knew what the vault might be. I let you go anyway. I hoped I was wrong.',
+          default: 'You saw the marks. I won\'t insult you. The first Wardens weren\'t soldiers, dear. They were keepers. When the Hive got loose off the Pilgrim, they found that Maker dish and taught it a lullaby to keep the brood asleep — and locked its workings behind a seal, so no one could ever turn it. Open the seal, and the song turns to a call. I knew what the vault might be. I let you go anyway. I hoped I was wrong.',
+        },
+      },
+      choices: {
+        npc: 'sage',
+        options: [
+          { label: 'Ashe has to know', set: 'told_ashe', reply: '"Yes. Yes, she does. The Wardens have been guarding a story they forgot the end of. Tell her — all of it. And tell her it was me who kept it."' },
+          { label: 'Keep it between us', set: 'kept_wardens_secret', reply: '"Between us, then. I\'ll carry it a while longer. But we stop that song, you and I — whatever it costs me."' },
+        ],
+      },
+    }],
+    turnIn: {
+      told_ashe: 'Go on to Ashe, then. I\'ll not be welcome at the Wardens\' table after this. That\'s as it should be.',
+      kept_wardens_secret: 'Go back to Farcall. Whatever that dish is singing, it\'s our song — the Wardens\' — and we\'ll be the ones to end it.',
+    },
+    rewards: { xp: 1600, gold: 560, armor: { minTier: 3 } },
+  },
 ];
 
 // Short scenes, played on screen when a quest asks (ui/Moments.js): a few shots, each a camera
@@ -311,6 +355,12 @@ export const MOMENTS = {
       { from: [8, 6, 10], lift: 1.6, t: 5.5, line: ['High Warden Ashe', 'Farcall\'s masts have gone silent. Whatever came out of that vault, I\'d wager it went that way.'] },
     ],
   },
+  array: {
+    at: 'array', title: ['The Farcall Array', ''], shots: [
+      { from: [6, 4, 9], lift: 2.5, t: 5, line: ['', 'Warden sigils, welded onto Maker machinery — old, and deliberate.'] },
+      { from: [-14, 12, 18], lift: 4, t: 6, line: ['The Pilgrim', 'They built a lullaby. You woke it screaming.'] },
+    ],
+  },
   act1end: {
     at: 'player', title: ['Act I complete', 'Signal Fire'], shots: [
       { from: [8, 5, 10], lift: 1.6, t: 6, line: ['', 'The Sunken Vault lies open under Ironjaw\'s dig — and its gate in New Meridian stands sealed, for now.'] },
@@ -329,4 +379,5 @@ export const BARKS = [
   { npc: 'foundry:krell', when: { quest: 'a6', stage: 2 }, line: 'Mercy! I yield, I yield!' },
   { npc: 'city2:captain', when: { quest: 'b1', stage: 1 }, line: 'You — the one from New Meridian? Up here.' },
   { npc: 'sporefield:krell', when: { quest: 'b2', stage: 1, flag: 'krell_freed' }, line: 'Sleeper! Over here — I didn\'t forget.' },
+  { npc: 'sage', when: { quest: 'b5', stage: 0 }, line: 'Come in, dear. Close the door.' },
 ];
