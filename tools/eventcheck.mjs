@@ -128,11 +128,31 @@ console.log('Routes:');
 const routeSite = all.find(({ p, region }) => ['hamlet', 'settlement', 'town'].includes(p.type) && region.level >= 6 && roadRoute(world.gen, p));
 const route = routeSite && roadRoute(world.gen, routeSite.p);
 check(!!route, 'a road route to a settlement');
-check(route?.length >= 300 && route?.length <= 480, `its length is in band (${Math.round(route?.length)} m)`);
+check(route?.length >= 360 && route?.length <= 480, `its length is in band (${Math.round(route?.length)} m)`);
 check(route?.regions >= 2, `it crosses regions (${route?.regions})`);
 const [lx, lz] = route?.points.at(-1) ?? [Infinity, Infinity];
 check(Math.hypot(lx - routeSite?.p.x, lz - routeSite?.p.z) <= (routeSite?.p.r ?? 0) + 6, 'it ends at the settlement');
 const towns = world.gen.cities();
+// Every settlement in the rings: a route or none, never a throw (a region can lack a waystone);
+// every route in band, and none through a city that isn't where it's going, or the hub.
+{
+  let threw = 0;
+  let none = 0;
+  let bad = 0;
+  const routes = [];
+  for (const { p } of all) {
+    if (!['hamlet', 'settlement', 'town'].includes(p.type)) continue;
+    let r = null;
+    try { r = roadRoute(world.gen, p); } catch { threw++; continue; }
+    if (!r) { none++; continue; }
+    routes.push(r);
+    const inBand = r.length >= 360 && r.length <= 480;
+    const clear = r.points.every(([x, z]) => Math.hypot(x, z) > 60 && towns.every((c) => Math.hypot(c.x - p.x, c.z - p.z) < CITY_WALL || Math.hypot(c.x - x, c.z - z) > CITY_WALL + 10));
+    if (!inBand || !clear) bad++;
+  }
+  check(!threw, `no settlement's route throws (${routes.length} routes, ${none} with none${threw ? `, ${threw} threw` : ''})`);
+  check(routes.length > 20 && !bad, `every route in band and clear of the cities and the hub${bad ? ` (${bad} not)` : ''}`);
+}
 check(!!route && route.points.every(([x, z]) => towns.every((c) => Math.hypot(c.x - routeSite.p.x, c.z - routeSite.p.z) < CITY_WALL || Math.hypot(c.x - x, c.z - z) > CITY_WALL + 10) && Math.hypot(x, z) > 60), 'it keeps out of the cities and the hub');
 // Walked at 1.5 m/s it arrives in length / speed.
 const walk = (pts, canStand) => { const f = new RouteFollower(pts, { speed: 1.5, canStand }); let t = 0; while (f.step(0.05) === 'moving' && t < 2000) t += 0.05; return { f, t }; };
@@ -332,6 +352,7 @@ console.log('The war-walker:');
     hit(one, W, 500);
     check(W.hp === hp0 && said.some((e) => e.k === 'rimm' && e.id === W.id), 'immune while a coupling lives');
     check(!W.elite && !W.affixes.length, 'a plain machine, not an elite: no affixes, no elite tint on a hull that size');
+    check(W.immune === true, 'screens are told it is shielded (immune) while its couplings hold');
 
     // Won: someone rides with it, breaks the couplings, then the walker.
     const t0 = sim.time;
@@ -347,7 +368,7 @@ console.log('The war-walker:');
       if (ev.stage === 'over') return false;
     });
     check(ev.res === 'won', `won in ${mins(sim.time - t0)}, ${Math.round(ev.lead.follower.left)} m short of ${wsite.p.name}`);
-    check(said.some((e) => e.k === 'evstep' && e.id === ev.id && /shield is down/.test(e.text)), 'its shield came down with the last coupling');
+    check(said.some((e) => e.k === 'evstep' && e.id === ev.id && /shield is down/.test(e.text)) && W.immune === false, 'its shield came down with the last coupling (no longer immune)');
     check(!dir.overrun.has(wsite.p.id), 'nothing overrun');
     check(ev.enemies.every(gone), 'what was left of it melted away');
     check(ev.result.people.some((p) => p.id === 'w1'), 'the one who stopped it earned the chest');
@@ -358,6 +379,11 @@ console.log('The war-walker:');
     const retake = [...dir.events.values()].find((x) => x.type === 'retake' && x.site.id === wsite.p.id);
     check(ev.res === 'lost' && dir.overrun.has(wsite.p.id), `it arrived and ${wsite.p.name} is overrun`);
     check(retake?.race === 'synth', 'a Synth garrison holds it: the Retake');
+
+    // Waiting for it at the beacon, as the event asks, isn't abandoning it: it comes all the way.
+    ev = call([one]);
+    step(ev.route.length / 1.5 + 30, () => { if (ev.stage === 'over') return false; });
+    check(ev.res === 'lost', `someone who waits at the beacon sees it arrive (${ev.res})`);
 
     // Abandoned: nobody stays near it; it turns back, and nothing's overrun.
     ev = call([one]);
@@ -397,19 +423,36 @@ console.log('The war-walker:');
     for (const p of [one, p2, p3]) put(p, ev.walker.position.x + 6, ev.walker.position.z);
     step(2);
     check(Math.abs(ev.walker.maxHp - before * 2.2) <= 1, `two joining toughen the hull by the crowd rule alone (×${(ev.walker.maxHp / before).toFixed(2)})`);
+    // Half its hull down, then they step back out of its reach a while and come again: it hasn't
+    // healed (a walker doesn't go home to mend).
+    for (const c of ev.couplings) hit(one, c, c.maxHp + (c.shield ?? 0));
+    step(0.1);
+    hit(one, ev.walker, Math.ceil(ev.walker.hp / 2));
+    const half = ev.walker.hp / ev.walker.maxHp;
+    const max0 = ev.walker.maxHp;
+    for (const p of [one, p2, p3]) put(p, ev.walker.position.x + 90, ev.walker.position.z);
+    step(4);
+    for (const p of [one, p2, p3]) put(p, ev.walker.position.x + 6, ev.walker.position.z);
+    step(2);
+    check(ev.stage === 'active' && ev.walker.maxHp >= max0 && ev.walker.hp / ev.walker.maxHp <= half + 0.01, `stepping back doesn't heal it (${Math.round(half * 100)}% → ${Math.round((ev.walker.hp / ev.walker.maxHp) * 100)}%)`);
   }
 
-  // Its hull is about two and a half Colossus fights (the power curve's 60–90 s boss), so one
-  // player who keeps at it can bring it down before it's walked its road (about four minutes).
+  // One player alone can stop it on the shortest road: run out to meet it (from the beacon, at a
+  // run, as it comes on), break its couplings, then its hull (in Colossus fights: the power curve's
+  // 60–90 s boss, 75 s), with its escort taking a sixth of their time — inside the walk.
   {
     const at = new THREE.Vector3(wsite.p.x, 0, wsite.p.z);
     const level = wsite.p.level ?? wsite.region.level;
     const hull = sim.spawnEnemy('warwalker', at, { level });
     const boss = sim.spawnEnemy('colossus', at, { level });
+    const cp = sim.spawnEnemy('walkercoupling', at, { level });
     const k = hull.maxHp / boss.maxHp;
-    check(k >= 2 && k <= 3 && route.length / EVENT_TYPES.walker.speed >= k * 75 + 30, `its hull is ${k.toFixed(2)} Colossus fights: about ${mins(k * 75 + 40)} alone, against a ${mins(route.length / EVENT_TYPES.walker.speed)} walk`);
-    sim.removeEnemy(hull);
-    sim.removeEnemy(boss);
+    const speed = EVENT_TYPES.walker.speed;
+    const shortest = 360 / speed;
+    const meet = 360 / (6 + speed); // at worst it starts as far off as its road is long
+    const fight = (k + (EVENT_TYPES.walker.couplings * cp.maxHp) / boss.maxHp) * 75 * 1.15;
+    check(meet + fight <= shortest, `alone: about ${mins(meet + fight)} to meet it and bring it down (hull ${k.toFixed(2)} Colossus fights), against at least a ${mins(shortest)} walk`);
+    for (const e of [hull, boss, cp]) sim.removeEnemy(e);
   }
 
   // Overrun already: no walker can be called there.

@@ -318,6 +318,11 @@ export class WorldEvents {
       ev.couplings.push(c);
     }
     this.carryCouplings(ev);
+    // They never go home to mend: home is wherever the road has got to, and giving up the fight
+    // there would let the crowd rule start their health over (EnemySim.leash, then 'idle').
+    for (const e of [w, ...ev.couplings]) e.leash = () => {};
+    // Screens show the shield (no damage numbers, the ward) while it holds (EnemySim.immune).
+    w.immune = true;
     const hit = w.applyHit.bind(w);
     let tell = -Infinity;
     w.applyHit = (h) => {
@@ -467,8 +472,11 @@ export class WorldEvents {
       ev.n = n;
     }
     // Nobody left within reach: a settlement falls, an anomaly fades, a walker turns back (nobody
-    // saw it come), a garrison stays put.
-    if (near > ABANDON.reach && ev.type !== 'retake') {
+    // saw it come), a garrison stays put. Someone waiting for a walker at the settlement it's
+    // coming for is still there for it.
+    let guard = Infinity;
+    if (ev.T.walker) for (const p of this.sim.players) guard = Math.min(guard, Math.hypot(p.position.x - ev.site.x, p.position.z - ev.site.z));
+    if (Math.min(near, guard) > ABANDON.reach && ev.type !== 'retake') {
       if ((ev.idle += dt) > ABANDON.after) {
         if (ev.T.walker) this.recall(ev);
         this.finish(ev, false, ev.T.settlement && !ev.T.walker ? 'lost' : 'faded');
@@ -589,6 +597,7 @@ export class WorldEvents {
     this.carryCouplings(ev);
     if (!ev.unshielded && !ev.couplings.some((c) => c.alive)) {
       ev.unshielded = true;
+      w.immune = false;
       this.sim.emit({ k: 'shield', id: w.id, at: w.position });
       this.sim.emit({ k: 'evstep', at: new THREE.Vector3(ev.x, 0, ev.z), id: ev.id, text: 'The war-walker\'s shield is down — bring it down!' });
     }

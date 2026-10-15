@@ -249,7 +249,7 @@ export const ENEMY_TYPES = {
   warwalker: {
     race: 'synth', name: 'Synth War-walker', model: 'synth:warwalker', rig: 'quad', behavior: 'lobber', hover: 0, muzzle: { y: 0.8, f: 0.5 },
     lure: 60,
-    hp: 4500, radius: 2.6, height: 9, speed: 0, mass: 60, poise: 99999, staggerTime: 0.1,
+    hp: 2880, radius: 2.6, height: 9, speed: 0, mass: 60, poise: 99999, staggerTime: 0.1,
     xp: 400, gold: [60, 100], dropChance: 1, cooldown: [0.8, 1.4],
     attacks: [
       { id: 'stomp', kind: 'stomp', range: 7, windup: 1.1, active: 0.1, recover: 1.0, damage: 60, radius: 7, knockback: 18, cooldown: 5 },
@@ -258,7 +258,7 @@ export const ENEMY_TYPES = {
     ],
   },
   walkercoupling: {
-    race: 'synth', name: 'Power Coupling', model: 'synth:coupling', rig: 'hover', behavior: 'support', hover: 5.5,
+    race: 'synth', name: 'Power Coupling', model: 'synth:coupling', rig: 'hover', behavior: 'support', hover: 3.2,
     hp: 320, radius: 0.7, height: 1.2, speed: 0, mass: 60, poise: 99999, staggerTime: 0.1,
     xp: 30, gold: [4, 8], dropChance: 0.2, cooldown: [1.5, 2.5],
     attacks: [{ id: 'arc', kind: 'nova', range: 5, windup: 1.0, active: 0.1, recover: 1.8, damage: 24, radius: 5, knockback: 8, element: 'shock', cooldown: 6 }],

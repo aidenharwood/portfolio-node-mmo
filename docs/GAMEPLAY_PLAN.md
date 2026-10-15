@@ -492,20 +492,27 @@ route across regions with whoever follows it told all the way, and the walker wo
 and a Synth Retake), abandoned, stuck, killed on the tick it arrives, its couplings, scaling, pace
 and hull, and its state on the wire.
 - **Routes** (`sim/Routes.js`): from a waystone up to three regions off, along the roads between
-  waystones, to the settlement's waystone and in by its spur; 300–480 m long. They keep out of
+  waystones, to the settlement's waystone and in by its spur; 360–480 m long (at least four
+  minutes' walk). A settlement with no such road (or whose region has no waystone) gets no walker. They keep out of
   the cities and the hub unless the city is where they're going *(default)*. A follower walks a
   route at a steady pace, jumps ground it can't stand on if there's footing within 30 m, and is
   otherwise stuck.
 - **An event can lead something** along a route, a structure or an enemy. Its centre moves with
   it, so `wev`, participation, stragglers and abandonment follow it without other changes.
-- **The Synth War-walker** (`walker`): a settlement event. It sets out 300–480 m off and walks at
-  1.5 m/s (about four minutes). Three power couplings (one more per three extra defenders) ride
+- **The Synth War-walker** (`walker`): a settlement event. It sets out 360–480 m off and walks at
+  1.5 m/s (four to five and a half minutes). Three power couplings (one more per three extra defenders) ride
   round its hull, which can't be hurt while any holds; an escort wave drops off behind it every
   24 s. Win: bring it down. Lost: it arrives, and the settlement is overrun with a Synth Retake.
-  Abandoned or stuck: it turns back and nothing is overrun *(default)*.
-  - *Toughness:* not an elite (the elite tint and affixes don't suit it). Its hull is about two
-    and a half Colossus fights, so one player who keeps at it can stop it in about 3¾ minutes;
-    more players toughen it by the usual crowd rule, not on top of it.
+  Abandoned (nobody within 200 m of it or of the settlement for 45 s) or stuck: it turns back
+  and nothing is overrun *(default)*. Waiting for it at the beacon counts as being there.
+  - *Toughness:* not an elite (the elite tint and affixes don't suit it). Its hull is about 1.6
+    Colossus fights. `eventcheck` budgets one player alone: running out to meet it, its three
+    couplings, its hull, and a sixth more for its escort comes to about 3:50, inside the shortest
+    walk (4:00). It's tight alone and comfortable for a group. More players toughen it by the
+    usual crowd rule, not on top of it, and it never goes home to mend: stepping back out of
+    reach doesn't heal it.
+  - *Shielded:* while its couplings hold, screens show it immune (the ward, no damage numbers).
+    The couplings ride 3.2 m up beside its legs, within a jump of a melee swing.
   - *For now* only a quest (A-2's hook, Act III's "The Walker") or the console starts one; the
     director, `/admin event walker` and the dev panel come with P-4.
 

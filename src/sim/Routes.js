@@ -51,10 +51,13 @@ const lengthOf = (pts) => {
   return L;
 };
 
-// A route to `site` ({ x, z, r }) along the roads, between `min` and `max` metres long, from at
+// A route to `site` ({ x, z, r }) along the roads, between `min` and `max` metres long (at least
+// four minutes at a war-walker's pace, so one player has time to stop it), from at
 // most `hops` waystones off: { points: [[x, z], ...], length, regions } — or null if none fits.
-export function roadRoute(gen, site, { min = 300, max = 480, hops = 3 } = {}) {
+export function roadRoute(gen, site, { min = 360, max = 480, hops = 3 } = {}) {
   const home = gen.regionAt(site.x, site.z);
+  // A region with no waystone has no roads in: nothing comes that way.
+  if (!gen.peekWaystone(home.rx, home.rz)) return null;
   const cities = gen.cities();
   const ok = (rx, rz) => {
     const w = gen.peekWaystone(rx, rz);
