@@ -8,13 +8,17 @@
 //
 // Objective types (all the quest log knows): talk · goto · use · kill (type, tag, race, near) ·
 // killRace · killAny · clear (camp) · collect (quest drops) · defend (hold a place against waves) ·
-// choose (answer someone) · attune · chest · dungeon (`d`: a world/dungeons.js id, beaten at any tier).
+// choose (answer someone) · attune · chest · dungeon (`d`: a world/dungeons.js id, beaten at any tier;
+// `at`: its way in, for the waypoint).
 
 export const ACTS = [
   { act: 0, title: 'Prologue', sub: 'The Last Sleeper', levels: '1–3' },
   { act: 1, title: 'Act I', sub: 'Signal Fire', levels: '3–8' },
   { act: 2, title: 'Act II', sub: 'The Brood', levels: '8–16' },
 ];
+
+// What the journal says once every act there is has been played: the next one is still to come.
+export const storyToldText = () => `The story so far is told. Act ${['I', 'II', 'III', 'IV', 'V'][ACTS.at(-1).act]} comes in a later update.`;
 
 export const STORY = [
   // ---------------------------------------------------------------- Prologue
@@ -320,7 +324,7 @@ export const STORY = [
     offer: 'The Pits go down further than anyone\'s walked. There\'s something at the bottom the brood calls Matron. Go down, and end it.',
     stages: [
       { text: 'Reach {broodpits}.', objectives: [{ type: 'goto', at: 'broodpits', count: 1, text: 'Reach {broodpits}' }] },
-      { text: 'Go down through the Brood Pits and kill the Brood Matron.', objectives: [{ type: 'dungeon', d: 'brood', count: 1, text: 'Clear the Brood Pits' }] },
+      { text: 'Go down through the Brood Pits and kill the Brood Matron.', objectives: [{ type: 'dungeon', d: 'brood', at: 'broodpits:mouth', count: 1, text: 'Clear the Brood Pits' }] },
     ],
     turnIn: 'You came back up. Not everyone who\'s gone into those tunnels can say that. What did you see at the bottom?',
     rewards: { xp: 1850, gold: 640, armor: { minTier: 3 } },

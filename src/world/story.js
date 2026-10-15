@@ -154,11 +154,12 @@ export function storyIn(gen, rx, rz) {
         folkFor(poi, rng, 1, 'object', P.rot + 1.2, 6, { object: 'broodpits:node', model: 'console', facing: P.rot + 1.2 + Math.PI }),
       ];
     } else if (P.key === 'sporefield') {
-      // Three spore pods rooted round the field, and Krell (if he was let go in Act I), whose crew
-      // the Hive hit too.
-      poi = { ...base, type: 'story', kind: 'sporefield', id: `p:${key}:sporefield`, r: P.r, tag: 'ssf' };
+      // A Hive nest grown round three spore pods (the Hive the quest asks you to kill live here,
+      // whatever race holds the region), and Krell (if he was let go in Act I), whose crew the Hive
+      // hit too.
+      poi = { ...base, type: 'camp', id: `sc:${key}:spore`, radius: 12, race: 'hive', style: 'nest', level: 9, tag: 'ssf' };
       poi.npcs = [
-        ...[0, 1, 2].map((i) => folkFor(poi, rng, i, 'object', P.rot + i * 2.1, 7, { object: `sporefield:pod${i + 1}`, model: 'strongbox' })),
+        ...[0, 1, 2].map((i) => folkFor(poi, rng, i, 'object', P.rot + i * 2.1, 7, { object: `sporefield:pod${i + 1}`, model: 'sporepod' })),
         folkFor(poi, rng, 3, 'story', P.rot + 1.05, 4, { folk: 'krell', when: { quest: 'b2', flag: 'krell_freed' } }),
       ];
     } else if (P.key === 'psionnest') {

@@ -14,6 +14,7 @@ import { Inventory } from '../src/items/Inventory.js';
 import { QuestLog } from '../src/rpg/Quests.js';
 import { CharacterCore } from '../src/rpg/CharacterCore.js';
 import { ACTS, STORY } from '../src/rpg/storyline.js';
+import * as storyline from '../src/rpg/storyline.js';
 import { SIDE_CHAINS } from '../src/rpg/sidequests.js';
 import { reachedPlaces, defenceAt, heldObjectives, questDrops, eventCalled, eventObjectives } from '../src/rpg/questWatch.js';
 import { storyRef } from '../src/world/story.js';
@@ -192,6 +193,32 @@ console.log('Dungeon objectives:');
   check(dlog.active.zd[0] === 0, 'nor does clearing a different one');
   clear('brood');
   check(dlog.isComplete('zd'), 'clearing it with the step under way does');
+}
+
+// ---------------------------------------------------------------- the story, as the live world has it
+// What questcheck's made-up kills and clears can't show: that the world itself provides them.
+console.log('The story, as the live world has it:');
+{
+  // Kills a story step asks for "near" a place come from a camp of that race standing there
+  // (roaming packs follow the region's race, which the story doesn't choose).
+  const unhosted = [];
+  for (const q of STORY) {
+    for (const st of quests.stagesOf(q)) {
+      for (const o of st.objectives) {
+        if (o.type !== 'killRace' || !o.near) continue;
+        const camp = w.poiById(storyRef(w, o.near)?.camp ?? '');
+        if (camp?.type !== 'camp' || camp.race !== o.race) unhosted.push(`${q.id} ${o.race} near ${o.near}`);
+      }
+    }
+  }
+  check(!unhosted.length, `every "kill near a place" step has a camp of that race there${unhosted.length ? ` (not: ${unhosted.join(', ')})` : ''}`);
+  // A dungeon step names where its way in is, for the compass and the map.
+  const lost = STORY.flatMap((q) => quests.stagesOf(q).flatMap((st) => st.objectives.filter((o) => o.type === 'dungeon' && !storyRef(w, o.at ?? '')).map(() => q.id)));
+  check(!lost.length, `every dungeon step points at its entrance${lost.length ? ` (not: ${lost.join(', ')})` : ''}`);
+  // When the last act is done, the journal names the act still to come.
+  const told = storyline.storyToldText?.() ?? '';
+  const coming = ACTS.at(-1).act + 1;
+  check(told.includes(['Prologue', 'Act I', 'Act II', 'Act III', 'Act IV'][coming] + ' ') && !ACTS.some((A) => told.includes(`${A.title} comes`)), `the journal, story told, looks ahead to the next act ("${told}")`);
 }
 
 // ---------------------------------------------------------------- the story

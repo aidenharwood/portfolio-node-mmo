@@ -130,6 +130,20 @@ export const OBJECT_MODELS = {
     return 0.65;
   },
 
+  // A Hive spore pod (Act II, the Spore Field): a swollen resin bulb on a chitin root, its sacs
+  // glowing; once burned, a charred husk.
+  sporepod(w, p, n, g, wa) {
+    piece(g, G.cone(0.5, 0.7, 6), C.chitin, { pos: [0, 0.35, 0], outline: 0.02 });
+    const { on, off } = parts(w, n.id, (onG, offG) => {
+      piece(offG, G.dodeca(0.8), C.resin, { pos: [0, 1.15, 0], scale: [1, 1.35, 1], outline: 0.03 });
+      for (let k = 0; k < 4; k++) piece(offG, G.sphere(0.2, 10, 8), 0xc46aff, { pos: [Math.sin(k * 1.6) * 0.62, 0.9 + (k % 2) * 0.5, Math.cos(k * 1.6) * 0.62], glow: true, outline: 0.01 });
+      piece(onG, G.dodeca(0.7), C.metalDark, { pos: [0, 0.95, 0], scale: [1, 0.8, 1], rot: [0.3, 0.7, 0], outline: 0.03 });
+    });
+    place(on, wa);
+    place(off, wa);
+    return 0.8;
+  },
+
   // The Sunken Vault's door: a ring of Maker stone in the dig's far wall — sealed, until it isn't.
   vaultdoor(w, p, n, g, wa) {
     for (let k = 0; k < 7; k++) {

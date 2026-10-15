@@ -17,7 +17,7 @@ import { armorReduction, TIERS, tierOf } from '../rpg/balance.js';
 import { RARITY } from '../items/rarity.js';
 import { ARMOR_SLOTS, ARMOR_SLOT_IDS } from '../items/armorTypes.js';
 import { setInfo } from '../items/describe.js';
-import { ACTS, STORY } from '../rpg/storyline.js';
+import { ACTS, STORY, storyToldText } from '../rpg/storyline.js';
 
 const TABS = [
   { id: 'character', label: 'Character', key: 'P' },
@@ -482,7 +482,7 @@ export class GameMenu {
     const log = this.game.quests;
     const q = STORY.find((s) => !log.completed.has(s.id) && !log.active[s.id] && log.requirementsMet(s));
     if (q) return `Next: <b>${esc(q.title)}</b> — ${esc(log.giverName(log.giverId(q)))} has it.`;
-    return STORY.every((s) => log.completed.has(s.id)) ? 'The story so far is told. Act II comes in a later update.' : 'Finish what\'s under way to go on.';
+    return STORY.every((s) => log.completed.has(s.id)) ? storyToldText() : 'Finish what\'s under way to go on.';
   }
 
   // The story act by act: quests done, the one under way, the next, and how many more to come.

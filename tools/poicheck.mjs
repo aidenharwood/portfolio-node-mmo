@@ -86,6 +86,9 @@ for (const S of Object.values(storyPlaces(w.gen))) {
     continue;
   }
   const o = w.pois.get(p.id);
+  // Quest objects (pods, consoles, doors…) are built, not just named: something stands there.
+  for (const n of p.npcs ?? []) if (n.role === 'object' && !OBJECT_MODELS[n.model]) fail(k, `${n.object}: no model '${n.model}'`);
+  if ((p.npcs ?? []).some((n) => n.role === 'object') && !o.colliders.length) fail(k, 'its quest objects were not built');
   console.log(`${k.padEnd(22)} ${(performance.now() - t0).toFixed(1).padStart(6)} ms  ${String(o.colliders.length).padStart(4)} colliders  ${p.name} (${Math.round(Math.hypot(p.x, p.z))} m out, level ${p.level})`);
 }
 // Act II's places (story.js): new ones go on the end, so nothing set before them moves (seed
