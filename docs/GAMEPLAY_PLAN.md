@@ -33,9 +33,9 @@ Anything marked *(default)* below is my assumption. Change it when you review.
   director's rules for walkers, escort quests and the close-out aren't.
 - **Phase 8 (Acts II–IV and the endgame):** Act II (8a) is built (b1–b12). Act III (8b) is under
   way: its story design ([the Act III spec](superpowers/specs/2026-10-15-act-iii-story-design.md))
-  is approved, and Ironreach and quests c1–c5 are built (WORK_PLAN B-1, branch `act-iii`, on top
-  of the war-walker branch `p-walker`). The Fallen Titan, the Foundry Below, the Colossus foundry
-  and the act's choice come next (B-2 to B-5).
+  is approved. Ironreach, quests c1–c7 and the Fallen Titan with Brannock's Yard are built (WORK_PLAN
+  B-1 and B-2, branch `act-iii`, on top of the war-walker branch `p-walker`). The Foundry Below, the
+  Colossus foundry and the act's choice come next (B-3 to B-5).
 - **Stabilising:** a pass over what the phases left open (WORK_PLAN S-1 to S-4): the server's
   scenery colliders matched to the client's, the deploy files and docs matched to the real
   pipeline, and trades and mail made safe against a layer crashing. Each is on its own branch
