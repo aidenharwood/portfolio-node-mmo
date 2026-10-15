@@ -92,6 +92,7 @@ const PROPS = {
 const OBJECTS = {
   console: { name: 'Bridge Console', prompt: 'Wake the console', idle: 'The console is dark.', done: 'The console glows quietly, waiting.' },
   beacon: { name: 'Signal Beacon', prompt: 'Light the beacon', idle: 'A cold beacon. Nobody has asked for it lit.', done: 'The beacon burns.' },
+  sporepod: { name: 'Spore Pod', prompt: 'Burn the spore pod', idle: 'A swollen Hive pod, pulsing faintly.', done: 'A charred husk.' },
   strongbox: { name: 'Strongbox', prompt: 'Open the strongbox', idle: 'A scav strongbox, locked tight.', done: 'Empty now.' },
   vaultdoor: { name: 'Vault Door', prompt: 'Fit the key to the door', idle: 'A ring of Maker stone, sealed. Something in it hums.', done: 'The seal is broken.' },
   rubble: { name: 'Collapsed Shaft', prompt: 'Clear the rubble', idle: 'Rubble chokes the shaft.', done: 'Cleared.' },
@@ -1270,6 +1271,8 @@ class Game {
       if (o.type === 'use') { const t = at(o.object); if (t) return { ...t, kind: 'use' }; continue; }
       if (o.type === 'goto' || o.type === 'defend') { const t = at(o.at); if (t) return { ...t, kind: o.type }; continue; }
       if (o.type === 'event') { const t = at(o.at); if (t) return { ...t, kind: 'defend' }; continue; }
+      // A dungeon to beat: its way in.
+      if (o.type === 'dungeon') { const t = at(o.at); if (t) return { ...t, kind: 'goto' }; continue; }
       if (o.type === 'clear') {
         const c = this.world.poiById(o.camp) ?? this.world.poiById(this.quests.ref(o.camp, q)?.poi ?? '');
         if (c) return { x: c.x, z: c.z, radius: c.radius ?? 12, kind: 'clear' };

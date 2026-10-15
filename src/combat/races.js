@@ -82,7 +82,9 @@ export function campUnits(def, rng) {
   const n = Math.max(3, between(rng, size) + extra);
   const champion = rng() < championChance;
   const elites = Math.min(n - 1, between(rng, eliteRange));
-  return band(table, level, rng, n, elites, champion);
+  const pack = band(table, level, rng, n, elites, champion);
+  // A story camp led by a named foe of its own (Act II's Psion): it stands at the head of the pack.
+  return def.boss?.type ? [{ type: def.boss.type, opts: { boss: true } }, ...pack] : pack;
 }
 
 // Reinforcements for a stronghold under attack: a squad from its guard roster.

@@ -13,10 +13,12 @@ import { Stats } from '../src/rpg/Stats.js';
 import { Inventory } from '../src/items/Inventory.js';
 import { QuestLog } from '../src/rpg/Quests.js';
 import { CharacterCore } from '../src/rpg/CharacterCore.js';
-import { STORY } from '../src/rpg/storyline.js';
+import { ACTS, STORY } from '../src/rpg/storyline.js';
+import * as storyline from '../src/rpg/storyline.js';
 import { SIDE_CHAINS } from '../src/rpg/sidequests.js';
 import { reachedPlaces, defenceAt, heldObjectives, questDrops, eventCalled, eventObjectives } from '../src/rpg/questWatch.js';
 import { storyRef } from '../src/world/story.js';
+import { settlementFolk } from '../src/world/settlements.js';
 import { flagUses, flagProblems, storyFolk, STORY_FLAGS } from './storyflags.mjs';
 
 const seed = Number(process.argv[2] ?? 12345);
@@ -29,13 +31,24 @@ const check = (ok, what) => {
 };
 
 const position = new THREE.Vector3();
-const stats = new Stats();
+let stats = new Stats();
 const host = { hud: null, world: w, encounters: { isCleared: () => false }, stats, player: { position } };
-const quests = new QuestLog(host);
-const core = new CharacterCore({
+let quests = new QuestLog(host);
+const makeCore = () => new CharacterCore({
   stats, inventory: new Inventory(3), quests, attuned: new Set(['w-hub']), chests: new Set(), shop: { stock: [], fine: [] },
   settings: { lootFilter: 1 }, position, world: w, strict: true,
 });
+let core = makeCore();
+// Which option each 'choose' step takes (quest id → option index; 0 when not named).
+let choices = {};
+// A new character from scratch, for playing the story again another way.
+function fresh(pick) {
+  stats = new Stats();
+  host.stats = stats;
+  quests = new QuestLog(host);
+  core = makeCore();
+  choices = pick;
+}
 const op = (o) => runOp(core, { op: o });
 // The server's own (server-sent) ops: applied straight to the character.
 const give = (o) => core.apply(o).ok;
@@ -104,11 +117,13 @@ function playStage(id) {
       const n = npc(quests.npcOf(o.npc, q));
       by(n);
       run({ op: 'talk', npc: n.id });
-      run({ op: 'choose', quest: id, i: 0, npc: n.id });
+      run({ op: 'choose', quest: id, i: choices[id] ?? 0, npc: n.id });
     } else if (o.type === 'clear') {
       const t = ref(o.camp, q) ?? { poi: o.camp, x: position.x, z: position.z };
       go(t.x, t.z);
       give({ op: 'camp', id: typeof t.camp === 'string' ? t.camp : t.poi });
+    } else if (o.type === 'dungeon') {
+      give({ op: 'dclear', roll: { d: o.d, tier: 0, name: o.d } });
     } else if (o.type === 'attune') {
       const ws = w.poisNear(position.x, position.z, 900, ['waystone']).find((p) => !core.attuned.has(p.id));
       go(ws.x + 1, ws.z + 1);
@@ -120,6 +135,90 @@ function playStage(id) {
       for (let k = 0; k < 40 && left() > 0 && (quests.stage[id] ?? 0) === stage; k++) kill({ race: o.race ?? o.from?.race ?? 'scav', tag: o.tag ?? o.from?.tag });
     }
   }
+}
+
+// ---------------------------------------------------------------- lines keyed by story flags
+console.log('Lines keyed by story flags:');
+{
+  const log = new QuestLog(host);
+  log.defs.set('zz', { id: 'zz', kind: 'story', giver: 'warden', stages: [{ text: 't', objectives: [{ type: 'talk', npc: 'warden' }], say: { warden: { trusted_ysolde: 'A', default: 'B' } } }] });
+  const heard = (flag) => {
+    log.flags.trusted_ysolde = flag;
+    log.begin('zz');
+    log.events = [];
+    log.talkTo('warden');
+    return log.events.find((e) => e.k === 'say')?.text;
+  };
+  check(heard(true) === 'A', 'a line keyed by a flag the character has is the one said');
+  check(heard(false) === 'B', 'and without it, the default');
+  const act2 = ACTS.find((A) => A.act === 2);
+  check(act2?.title === 'Act II' && act2.sub === 'The Brood' && act2.levels === '8–16', 'Act II, The Brood (8–16), is in the journal\'s acts');
+}
+
+// ---------------------------------------------------------------- Act II's people and places
+console.log('Act II\'s people and places:');
+{
+  const vey = storyRef(w, 'city2:captain');
+  const veyNpc = vey?.npc && npc(vey.npc);
+  const shown = veyNpc && settlementFolk(w.placeOf(veyNpc), veyNpc);
+  check(shown?.name === 'Vey Okonta' && shown.title === 'Captain of the Watch', `Farcall's captain of the watch stands in the city (${shown?.name ?? 'nobody'})`);
+  const quiet = ['quiet1', 'quiet2', 'quiet3'].map((r) => storyRef(w, r));
+  check(quiet.every((h) => h?.poi && w.poiById(h.poi)?.type === 'hamlet') && new Set(quiet.map((h) => h?.poi)).size === 3, 'the three hamlets gone quiet are three different hamlets');
+  const krell = storyRef(w, 'sporefield:krell');
+  const k = krell?.npc && npc(krell.npc);
+  const log = new QuestLog(host);
+  log.active.b2 = [0];
+  log.flags.krell_freed = true;
+  check(!!k?.when && log.whenHolds(k.when), 'Krell, let go in Act I, turns up at the Spore Field');
+  log.flags.krell_freed = false;
+  log.flags.krell_captured = true;
+  check(!!k?.when && !log.whenHolds(k.when), 'but not if he was taken in chains');
+}
+
+// ---------------------------------------------------------------- dungeon objectives
+console.log('Dungeon objectives:');
+{
+  const dstats = new Stats();
+  const dlog = new QuestLog({ ...host, stats: dstats });
+  const dcore = new CharacterCore({
+    stats: dstats, inventory: new Inventory(3), quests: dlog, attuned: new Set(['w-hub']), chests: new Set(), shop: { stock: [], fine: [] },
+    settings: { lootFilter: 1 }, position, world: w, strict: true,
+  });
+  const clear = (d) => dcore.apply({ op: 'dclear', roll: { d, tier: 0, name: d } });
+  dlog.defs.set('zd', { id: 'zd', kind: 'story', giver: 'warden', stages: [{ text: 't', objectives: [{ type: 'dungeon', d: 'brood', count: 1 }] }] });
+  clear('brood');
+  dlog.begin('zd');
+  check(dlog.active.zd[0] === 0, 'a dungeon cleared before the step was taken doesn\'t count');
+  clear('foundry');
+  check(dlog.active.zd[0] === 0, 'nor does clearing a different one');
+  clear('brood');
+  check(dlog.isComplete('zd'), 'clearing it with the step under way does');
+}
+
+// ---------------------------------------------------------------- the story, as the live world has it
+// What questcheck's made-up kills and clears can't show: that the world itself provides them.
+console.log('The story, as the live world has it:');
+{
+  // Kills a story step asks for "near" a place come from a camp of that race standing there
+  // (roaming packs follow the region's race, which the story doesn't choose).
+  const unhosted = [];
+  for (const q of STORY) {
+    for (const st of quests.stagesOf(q)) {
+      for (const o of st.objectives) {
+        if (o.type !== 'killRace' || !o.near) continue;
+        const camp = w.poiById(storyRef(w, o.near)?.camp ?? '');
+        if (camp?.type !== 'camp' || camp.race !== o.race) unhosted.push(`${q.id} ${o.race} near ${o.near}`);
+      }
+    }
+  }
+  check(!unhosted.length, `every "kill near a place" step has a camp of that race there${unhosted.length ? ` (not: ${unhosted.join(', ')})` : ''}`);
+  // A dungeon step names where its way in is, for the compass and the map.
+  const lost = STORY.flatMap((q) => quests.stagesOf(q).flatMap((st) => st.objectives.filter((o) => o.type === 'dungeon' && !storyRef(w, o.at ?? '')).map(() => q.id)));
+  check(!lost.length, `every dungeon step points at its entrance${lost.length ? ` (not: ${lost.join(', ')})` : ''}`);
+  // When the last act is done, the journal names the act still to come.
+  const told = storyline.storyToldText?.() ?? '';
+  const coming = ACTS.at(-1).act + 1;
+  check(told.includes(['Prologue', 'Act I', 'Act II', 'Act III', 'Act IV'][coming] + ' ') && !ACTS.some((A) => told.includes(`${A.title} comes`)), `the journal, story told, looks ahead to the next act ("${told}")`);
 }
 
 // ---------------------------------------------------------------- the story
@@ -155,6 +254,23 @@ for (const q of STORY) {
 }
 check(quests.flags.act1_done && quests.flags.ironjaw_fell && quests.flags.vault_open, 'Act I complete: Ironjaw fell, the vault is open');
 check(quests.flags.krell_captured && !quests.flags.krell_freed && quests.flags.trusted_ysolde, 'choices set their flags (Krell taken in chains, Ysolde told)');
+check(quests.flags.act2_started && quests.flags.hamlets_cleared, 'Act II under way: Farcall reached, the quiet hamlets answered');
+check(quests.completed.has('b3'), 'the surge on the quiet hamlet held (b3, a public event the quest called)');
+check(quests.flags.array_found, 'the Farcall Array found, Warden marks on Maker work');
+check(quests.flags.psion_slain && quests.flags.matron_read && quests.flags.array_destroyed, 'the Psion slain, the Matron\'s nest read, the Array destroyed');
+check((core.records.dungeons.brood ?? []).some((n) => n > 0), 'the Brood Pits beaten along the way (the dungeon step)');
+check(quests.flags.broodgate_open && quests.flags.act2_done, 'Act II complete: the Brood Mother\'s gate open, the act done');
+check(!Object.keys(core.records.raids ?? {}).length, 'and all without a raid clear');
+check(npc(storyRef(w, 'city1:raidgate')?.npc ?? '')?.gate === 'raid', 'New Meridian\'s raid gate can be pointed at (city1:raidgate)');
+check(!!quests.flags.told_ashe !== !!quests.flags.kept_wardens_secret, `Ysolde's confession: one choice made (${quests.flags.told_ashe ? 'told Ashe' : quests.flags.kept_wardens_secret ? 'kept it' : 'neither'})`);
+{
+  // A character who finished Act I before Act II existed: Ashe has the next step for them.
+  const later = new QuestLog(host);
+  for (const q of STORY) if (q.act < 2) later.completed.add(q.id);
+  const b1 = STORY.find((q) => q.id === 'b1');
+  check(later.available(later.giverId(b1)).some((q) => q.id === 'b1'), 'a character past Act I is offered Act II by High Warden Ashe');
+  check(later.giverName(later.returnId(b1)) === 'Vey Okonta in Farcall', `the journal names Farcall's captain (${later.giverName(later.returnId(b1))})`);
+}
 check(quests.pick(STORY.find((q) => q.id === 'a6').turnIn).startsWith('Ironjaw dead, and his bookkeeper'), 'and what people say follows them');
 check(STORY.every((q) => quests.completed.has(q.id)) && !Object.keys(quests.active).length, `all ${STORY.length} story quests done, the log clear`);
 check(stats.level >= 5, `the story alone is worth some levels (level ${stats.level})`);
@@ -239,6 +355,47 @@ const outOfDate = [
   ...flags.wrong.map(({ flag, field, want }) => `${flag} ${field} should be ${quoted(want)}`),
 ];
 check(!outOfDate.length, outOfDate.length ? `registry out of date: ${outOfDate.join('; ')}` : 'and it names who sets and reads each one, as the game does');
+
+// ---------------------------------------------------------------- every way through the story
+// The story again, quietly, for each answer to its three choices (Krell at a6, the voice at a8,
+// Ysolde's confession at b5): each reaches the end of Act II with one flag of each pair, and every
+// line said or offered along the way resolves to real text.
+console.log('Every way through the story:');
+const LINE_OK = (t) => typeof t === 'string' && t.length > 0 && !t.includes('undefined') && !t.includes('[object');
+for (const a6 of [0, 1]) {
+  for (const a8 of [0, 1]) {
+    for (const b5 of [0, 1]) {
+      fresh({ a6, a8, b5 });
+      const lines = [];
+      let stuck = null;
+      for (const q of STORY) {
+        const giver = npc(quests.giverId(q));
+        if (!giver) { stuck = `${q.id}: no giver`; break; }
+        by(giver);
+        run({ op: 'talk', npc: giver.id });
+        lines.push([`${q.id} offer`, quests.fill(q.offer, q)]);
+        if (!run({ op: 'accept', id: q.id }).ok) { stuck = `${q.id}: not taken`; break; }
+        for (let s = 0; s < quests.stagesOf(q).length && !quests.isComplete(q.id); s++) {
+          said = [];
+          playStage(q.id);
+          for (const t of said) lines.push([`${q.id} said`, t]);
+        }
+        if (!quests.isComplete(q.id)) { stuck = `${q.id}: stuck at stage ${(quests.stage[q.id] ?? 0) + 1}`; break; }
+        lines.push([`${q.id} turnIn`, quests.fill(q.turnIn, q)]);
+        by(npc(quests.returnId(q)));
+        if (!op({ op: 'turnin', id: q.id }).ok) { stuck = `${q.id}: not handed in`; break; }
+      }
+      const f = quests.flags;
+      const pairs = [['krell_captured', 'krell_freed'], ['trusted_ysolde', 'kept_secret'], ['told_ashe', 'kept_wardens_secret']];
+      const picked = [a6, a8, b5];
+      const onePerPair = pairs.every((pair, k) => f[pair[picked[k]]] && !f[pair[1 - picked[k]]]);
+      const bad = lines.filter(([, t]) => !LINE_OK(t));
+      const name = `Krell ${a6 ? 'freed' : 'chained'}, voice ${a8 ? 'kept' : 'told'}, Wardens' secret ${b5 ? 'kept' : 'told Ashe'}`;
+      check(!stuck && f.act2_done && onePerPair && !bad.length,
+        `${name}: ${stuck ?? (bad.length ? `bad lines: ${bad.map(([w]) => w).join(', ')}` : `Act II done, ${lines.length} lines`)}`);
+    }
+  }
+}
 
 console.log(failed ? `questcheck: ${failed} failed` : 'questcheck: all good');
 process.exit(failed ? 1 : 0);

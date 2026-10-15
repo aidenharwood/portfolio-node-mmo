@@ -8,12 +8,17 @@
 //
 // Objective types (all the quest log knows): talk · goto · use · kill (type, tag, race, near) ·
 // killRace · killAny · clear (camp) · collect (quest drops) · defend (hold a place against waves) ·
-// choose (answer someone) · attune · chest.
+// choose (answer someone) · attune · chest · dungeon (`d`: a world/dungeons.js id, beaten at any tier;
+// `at`: its way in, for the waypoint).
 
 export const ACTS = [
   { act: 0, title: 'Prologue', sub: 'The Last Sleeper', levels: '1–3' },
   { act: 1, title: 'Act I', sub: 'Signal Fire', levels: '3–8' },
+  { act: 2, title: 'Act II', sub: 'The Brood', levels: '8–16' },
 ];
+
+// What the journal says once every act there is has been played: the next one is still to come.
+export const storyToldText = () => `The story so far is told. Act ${['I', 'II', 'III', 'IV', 'V'][ACTS.at(-1).act]} comes in a later update.`;
 
 export const STORY = [
   // ---------------------------------------------------------------- Prologue
@@ -195,6 +200,198 @@ export const STORY = [
     setFlags: ['act1_done'],
     rewards: { xp: 1000, gold: 400, weapon: { minTier: 3 } },
   },
+
+  // ---------------------------------------------------------------- Act II: The Brood
+  {
+    id: 'b1', kind: 'story', act: 2, level: 8, giver: 'city1:warden', requires: ['a8'], returnTo: 'city2:captain', title: 'The Road to Farcall', moments: { accept: 'act2' },
+    offer: {
+      krell_captured: 'Farcall\'s gone quiet — three weeks, not a word down the masts. And Krell\'s been talking in my cells: he says Ironjaw spoke of other "lids". I don\'t like that word any more. Go to Farcall, {city2:dir} of here, and find their captain of the watch.',
+      default: 'Farcall\'s gone quiet — three weeks, not a word down the masts, and Farcall is nothing but masts. Go, {city2:dir} of here, and find their captain of the watch. Tell them the Wardens haven\'t forgotten them.',
+    },
+    stages: [
+      { text: 'Travel to Farcall.', objectives: [{ type: 'goto', at: 'city2', count: 1, text: 'Reach Farcall' }] },
+      {
+        text: 'Find Farcall\'s captain of the watch.', objectives: [{ type: 'talk', npc: 'city2:captain', count: 1, text: 'Talk to Captain Vey Okonta' }],
+        say: { 'city2:captain': 'Ashe sent you? Good. Then someone down there still reads what we send. We\'ve been calling for three weeks — the masts carry it, but nothing comes back. Something\'s sitting on the signal.' },
+      },
+    ],
+    turnIn: 'The sleeper, in my watch room. Well. I asked for soldiers and they sent me a legend. I\'ll take it.',
+    setFlags: ['act2_started'],
+    rewards: { xp: 1100, gold: 420, armor: { minTier: 3 } },
+  },
+  {
+    id: 'b2', kind: 'story', act: 2, level: 9, giver: 'city2:captain', requires: ['b1'], title: 'Gone Quiet',
+    offer: 'Three hamlets out past the walls stopped answering the masts — {quiet1}, {quiet2} and {quiet3}. No smoke, no riders, no word. Go and see. And if you find something growing that shouldn\'t be, burn it.',
+    stages: [
+      {
+        text: 'Find out what happened to the quiet hamlets.',
+        objectives: [
+          { type: 'goto', at: 'quiet1', count: 1, text: 'Reach {quiet1}' },
+          { type: 'goto', at: 'quiet2', count: 1, text: 'Reach {quiet2}' },
+          { type: 'goto', at: 'quiet3', count: 1, text: 'Reach {quiet3}' },
+        ],
+      },
+      {
+        text: 'Spore pods have taken root at {sporefield}. Burn them, and the Hive feeding off them.',
+        objectives: [
+          { type: 'use', object: 'sporefield:pod1', count: 1, text: 'Burn the first spore pod' },
+          { type: 'use', object: 'sporefield:pod2', count: 1, text: 'Burn the second spore pod' },
+          { type: 'use', object: 'sporefield:pod3', count: 1, text: 'Burn the third spore pod' },
+          { type: 'killRace', race: 'hive', near: 'sporefield', count: 8, text: 'Hive at {sporefield}' },
+        ],
+        say: { 'sporefield:krell': 'You. Of course it\'s you. They hit my crew two nights back — came up out of the ground like the ground was theirs. They weren\'t hunting, sleeper. They were walking. Toward Farcall\'s masts, every one.' },
+      },
+    ],
+    turnIn: 'One of the hamlet folk made it in an hour ago. Said the masts "started singing wrong" the night before the pods came up. I\'ve stood under those masts twenty years. They don\'t sing.',
+    setFlags: ['hamlets_cleared'],
+    rewards: { xp: 1250, gold: 460, weapon: { minTier: 3 } },
+  },
+  {
+    id: 'b3', kind: 'story', act: 2, level: 10, giver: 'city2:captain', requires: ['b2'], title: 'Hold the Line',
+    offer: 'The masts picked up movement under {quiet1} — a lot of it, coming up. They\'ll hit the hamlet before dawn. Get out there and hold it. Anyone with a blade who hears the call will come.',
+    stages: [
+      { text: 'The Hive is surging on {quiet1}. Hold it.', objectives: [{ type: 'event', event: 'surge', at: 'quiet1', count: 1, text: 'Hold {quiet1} against the surge' }] },
+    ],
+    turnIn: 'Held. Good. But here\'s what bothers me: the masts tracked the ones that got past you. They didn\'t scatter. They turned — all together, the same way, like they\'d heard their name called. Toward something out past the masts.',
+    rewards: { xp: 1400, gold: 500, armor: { minTier: 3 } },
+  },
+  {
+    id: 'b4', kind: 'story', act: 2, level: 11, giver: 'city2:captain', requires: ['b3'], returnTo: 'sage', title: 'The Farcall Array',
+    offer: 'I followed the swarm\'s heading on the masts. It ends at the old Maker dish out past the city — the Array, we call it. Nobody goes there. Nobody\'s needed to. Go and see what\'s calling them, and if it has an off switch, find it.',
+    stages: [
+      { text: 'Follow the swarms to {array}.', objectives: [{ type: 'goto', at: 'array', count: 1, text: 'Reach {array}' }] },
+      {
+        text: 'The Array is calling the Hive. Power down its console while you hold them off.',
+        objectives: [
+          { type: 'use', object: 'array:console', count: 1, text: 'Power down the Array\'s console' },
+          { type: 'defend', at: 'array', race: 'hive', waves: 2, count: 1, text: 'Hold {array}' },
+        ],
+        done: { moment: 'array' },
+      },
+    ],
+    turnIn: 'Warden marks. On Maker work. ...Sit down, dear. No — sit. There\'s something I should have told you before I ever sent you to that vault.',
+    setFlags: ['array_found'],
+    rewards: { xp: 1550, gold: 540, weapon: { minTier: 3 } },
+  },
+  {
+    id: 'b5', kind: 'story', act: 2, level: 11, giver: 'sage', requires: ['b4'], title: 'Ysolde\'s Confession',
+    offer: 'Hear an old woman out. Then decide what to do with what you hear.',
+    stages: [{
+      text: 'Hear Old Ysolde out.',
+      objectives: [{ type: 'choose', npc: 'sage', count: 1, text: 'Hear Ysolde\'s confession' }],
+      say: {
+        sage: {
+          trusted_ysolde: 'You told me about the voice. I owe you the same. The first Wardens weren\'t soldiers, dear. They were keepers. When the Hive got loose off the Pilgrim, they found that Maker dish and taught it a lullaby to keep the brood asleep — and locked its workings behind a seal, so no one could ever turn it. Open the seal, and the song turns to a call. I knew what the vault might be. I let you go anyway. I hoped I was wrong.',
+          default: 'You saw the marks. I won\'t insult you. The first Wardens weren\'t soldiers, dear. They were keepers. When the Hive got loose off the Pilgrim, they found that Maker dish and taught it a lullaby to keep the brood asleep — and locked its workings behind a seal, so no one could ever turn it. Open the seal, and the song turns to a call. I knew what the vault might be. I let you go anyway. I hoped I was wrong.',
+        },
+      },
+      choices: {
+        npc: 'sage',
+        options: [
+          { label: 'Ashe has to know', set: 'told_ashe', reply: '"Yes. Yes, she does. The Wardens have been guarding a story they forgot the end of. Tell her — all of it. And tell her it was me who kept it."' },
+          { label: 'Keep it between us', set: 'kept_wardens_secret', reply: '"Between us, then. I\'ll carry it a while longer. But we stop that song, you and I — whatever it costs me."' },
+        ],
+      },
+    }],
+    turnIn: {
+      told_ashe: 'Go on to Ashe, then. I\'ll not be welcome at the Wardens\' table after this. That\'s as it should be.',
+      kept_wardens_secret: 'Go back to Farcall. Whatever that dish is singing, it\'s our song — the Wardens\' — and we\'ll be the ones to end it.',
+    },
+    rewards: { xp: 1600, gold: 560, armor: { minTier: 3 } },
+  },
+  {
+    id: 'b6', kind: 'story', act: 2, level: 12, giver: 'city2:captain', requires: ['b5'], title: 'Voice in the Chitin',
+    offer: {
+      told_ashe: 'Ashe sent word down the masts — I know what the Array is now, and what the Wardens were. Doesn\'t change the job. The swarms have a leader: a Psion, out at {psionnest}, {psionnest:dir} of here. Kill it, and bring me what\'s left of it.',
+      default: 'The swarms have a leader. The masts can hear it — a Psion, out at {psionnest}, {psionnest:dir} of here, steering them like a hand on a rein. Kill it, and bring me what\'s left of it.',
+    },
+    stages: [
+      { text: 'Find the Psion\'s nest.', objectives: [{ type: 'goto', at: 'psionnest', count: 1, text: 'Reach {psionnest}' }] },
+      {
+        text: 'Kill the Hive Psion and take its chitin.',
+        objectives: [
+          { type: 'kill', tag: 'psion', count: 1, text: 'Kill the Hive Psion' },
+          { type: 'collect', from: { tag: 'psion' }, chance: 1, count: 1, text: 'Take the Psion\'s chitin' },
+        ],
+      },
+    ],
+    turnIn: 'Look at the grain of it. That\'s not a pattern, that\'s a map — tunnels. It was listening to the Array and passing the song on, down. The Brood Pits, {broodpits:dir} of here. That\'s where the song goes.',
+    setFlags: ['psion_slain'],
+    rewards: { xp: 1700, gold: 600, weapon: { minTier: 3 } },
+  },
+  {
+    id: 'b7', kind: 'story', act: 2, level: 13, giver: 'city2:captain', requires: ['b6'], title: 'Into the Brood Pits',
+    offer: 'The Pits go down further than anyone\'s walked. There\'s something at the bottom the brood calls Matron. Go down, and end it.',
+    stages: [
+      { text: 'Reach {broodpits}.', objectives: [{ type: 'goto', at: 'broodpits', count: 1, text: 'Reach {broodpits}' }] },
+      { text: 'Go down through the Brood Pits and kill the Brood Matron.', objectives: [{ type: 'dungeon', d: 'brood', at: 'broodpits:mouth', count: 1, text: 'Clear the Brood Pits' }] },
+    ],
+    turnIn: 'You came back up. Not everyone who\'s gone into those tunnels can say that. What did you see at the bottom?',
+    rewards: { xp: 1850, gold: 640, armor: { minTier: 3 } },
+  },
+  {
+    id: 'b8', kind: 'story', act: 2, level: 14, giver: 'city2:captain', requires: ['b7'], title: 'What the Matron Knew',
+    offer: 'There\'s a node by the mouth of the Pits — the brood grew it, like a root, toward the Array. If the Matron heard the call, that thing carried it. Read it.',
+    stages: [
+      { text: 'Read the nest-node at {broodpits}.', objectives: [{ type: 'use', object: 'broodpits:node', count: 1, text: 'Read the nest-node' }] },
+      {
+        text: 'Tell Captain Okonta what the node showed.', objectives: [{ type: 'talk', npc: 'city2:captain', count: 1, text: 'Report to Captain Okonta' }],
+        say: { 'city2:captain': 'Deeper. The call doesn\'t stop at the Matron — it goes on down, to something bigger. A mother of mothers. And every hour that dish sings, it wakes a little more. Then we stop the singing. Tonight.' },
+      },
+    ],
+    turnIn: 'I\'ll put every blade Farcall has on the road to the Array. You go in first.',
+    setFlags: ['matron_read'],
+    rewards: { xp: 2000, gold: 680, weapon: { minTier: 3 } },
+  },
+  {
+    id: 'b9', kind: 'story', act: 2, level: 15, giver: 'city2:captain', requires: ['b8'], returnTo: 'city1:warden', title: 'Silence the Array',
+    offer: 'The lullaby\'s gone. What\'s left is the call, and it won\'t turn back — I\'ve had the mast crews try. So we break it. Get to the transmitter under the dish and destroy it. We\'ll hold as long as we can.',
+    stages: [
+      { text: 'Return to {array}.', objectives: [{ type: 'goto', at: 'array', count: 1, text: 'Reach {array}' }] },
+      { text: 'The whole brood is answering the call. Hold {array}.', objectives: [{ type: 'defend', at: 'array', race: 'hive', waves: 3, count: 1, text: 'Hold {array}' }] },
+      { text: 'Destroy the transmitter.', objectives: [{ type: 'use', object: 'array:transmitter', count: 1, text: 'Destroy the Array\'s transmitter' }], done: { moment: 'deathpulse' } },
+    ],
+    turnIn: 'Every waystone between here and Farcall flashed red at once — the whole city saw it. Whatever you broke out there, sleeper, something heard it break.',
+    setFlags: ['array_destroyed'],
+    rewards: { xp: 2200, gold: 720, armor: { minTier: 3 } },
+  },
+  {
+    id: 'b10', kind: 'story', act: 2, level: 15, giver: 'city1:warden', requires: ['b9'], title: 'Marshal the Wardens',
+    offer: 'The Array\'s dead, but the brood isn\'t. Whatever lays them is still down there, and no one blade is going to reach it. Come to the war table. It\'s time the Wardens fought like an army.',
+    stages: [{
+      text: 'Join High Warden Ashe at the war table.',
+      objectives: [{ type: 'talk', npc: 'city1:warden', count: 1, text: 'Talk to High Warden Ashe' }],
+      say: {
+        'city1:warden': {
+          told_ashe: 'I read Ysolde\'s letter three times. Keepers. We were keepers, and we forgot. Well — we remember now, and every Warden at this table knows it. No more secrets. We go down together: raid groups, a dozen strong, gathered here at the war table.',
+          kept_wardens_secret: 'Ysolde won\'t come to the table — she sent this instead. An old Warden seal; I\'ve never seen its like. Said you\'d know what it means. ...Fine. Keep your counsel. We go down together: raid groups, a dozen strong, gathered here at the war table.',
+          default: 'We go down together: raid groups, a dozen strong, gathered here at the war table.',
+        },
+      },
+    }],
+    turnIn: 'Gather who you trust at the war table and they\'ll march with you. Now — the gate.',
+    rewards: { xp: 2300, gold: 760, weapon: { minTier: 3 } },
+  },
+  {
+    id: 'b11', kind: 'story', act: 2, level: 16, giver: 'city1:warden', requires: ['b10'], title: 'The Gate Opens',
+    offer: 'The way down to the Brood Mother runs through the gate yard. It\'s been sealed since before I was born. Go and stand at it — I\'ll have it opened in your name.',
+    stages: [{ text: 'Go to the raid gate in {city1}\'s gate yard.', objectives: [{ type: 'goto', at: 'city1:raidgate', r: 8, count: 1, text: 'Reach the raid gate' }] }],
+    turnIn: 'It\'s open. Anyone who marches with you can go through it now. I won\'t pretend I like what\'s on the other side.',
+    setFlags: ['broodgate_open'],
+    rewards: { xp: 2400, gold: 800, armor: { minTier: 3 } },
+  },
+  {
+    id: 'b12', kind: 'story', act: 2, level: 16, giver: 'city1:warden', requires: ['b11'], title: 'Report to Ashe', moments: { done: 'act2end' },
+    offer: 'Before you go anywhere near that gate, tell me what you saw at the Array. All of it.',
+    stages: [{
+      text: 'Report to High Warden Ashe.',
+      objectives: [{ type: 'talk', npc: 'city1:warden', count: 1, text: 'Report to High Warden Ashe' }],
+      say: { 'city1:warden': 'Red, you said. Every stone, all at once. ...I had riders in from the highlands this morning. They say the old Maker machines up there are moving. Things that haven\'t moved in a thousand years.' },
+    }],
+    turnIn: 'The Brood Mother can wait for an army. The highlands won\'t wait at all. Rest while you can, sleeper.',
+    setFlags: ['act2_done'],
+    rewards: { xp: 2600, gold: 900, weapon: { minTier: 3 } },
+  },
 ];
 
 // Short scenes, played on screen when a quest asks (ui/Moments.js): a few shots, each a camera
@@ -250,6 +447,28 @@ export const MOMENTS = {
       { from: [-12, 10, 16], lift: 2, t: 6, line: ['The Pilgrim', '...Too late. It was never a door. It was a lid.'] },
     ],
   },
+  act2: {
+    at: 'player', title: ['Act II', 'The Brood'], shots: [
+      { from: [8, 6, 10], lift: 1.6, t: 5.5, line: ['High Warden Ashe', 'Farcall\'s masts have gone silent. Whatever came out of that vault, I\'d wager it went that way.'] },
+    ],
+  },
+  array: {
+    at: 'array', title: ['The Farcall Array', ''], shots: [
+      { from: [6, 4, 9], lift: 2.5, t: 5, line: ['', 'Warden sigils, welded onto Maker machinery — old, and deliberate.'] },
+      { from: [-14, 12, 18], lift: 4, t: 6, line: ['The Pilgrim', 'They built a lullaby. You woke it screaming.'] },
+    ],
+  },
+  deathpulse: {
+    at: 'array', title: ['The Array Falls Silent', ''], shots: [
+      { from: [-10, 9, 14], lift: 4, t: 5, line: ['', 'Down the network, waystone after waystone flickers red.'] },
+      { from: [24, 18, 30], lift: 6, t: 6, line: ['', 'And far off, in the highlands, something made of metal answers.'] },
+    ],
+  },
+  act2end: {
+    at: 'player', title: ['Act II complete', 'The Brood'], shots: [
+      { from: [8, 5, 10], lift: 1.6, t: 6, line: ['', 'The Array is silent, the Brood Mother\'s gate stands open — and in the highlands, the Makers\' guardians are waking.'] },
+    ],
+  },
   act1end: {
     at: 'player', title: ['Act I complete', 'Signal Fire'], shots: [
       { from: [8, 5, 10], lift: 1.6, t: 6, line: ['', 'The Sunken Vault lies open under Ironjaw\'s dig — and its gate in New Meridian stands sealed, for now.'] },
@@ -266,4 +485,7 @@ export const BARKS = [
   { npc: 'city1:warden', when: { quest: 'a2', stage: 1 }, line: 'You. Maren\'s runner? Over here.' },
   { npc: 'relicdig:chief', when: { quest: 'a3', stage: 2 }, line: 'That was close. Come here — you need to see this.' },
   { npc: 'foundry:krell', when: { quest: 'a6', stage: 2 }, line: 'Mercy! I yield, I yield!' },
+  { npc: 'city2:captain', when: { quest: 'b1', stage: 1 }, line: 'You — the one from New Meridian? Up here.' },
+  { npc: 'sporefield:krell', when: { quest: 'b2', stage: 1, flag: 'krell_freed' }, line: 'Sleeper! Over here — I didn\'t forget.' },
+  { npc: 'sage', when: { quest: 'b5', stage: 0 }, line: 'Come in, dear. Close the door.' },
 ];

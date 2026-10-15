@@ -183,6 +183,12 @@ export function planCity(place, rng, streets) {
     folk(place, rng, 3, 'warroom', war, CITY.board),
     ...between(streets, 3, 0.3).map((a, i) => folk(place, rng, 4 + i, 'flavor', a + 0.45, CITY.folk + rng() * 1.5)),
   ];
+  // Farcall's captain of the watch (Act II; world/story.js STORY_FOLK), by the citadel door. Set
+  // without a draw from `rng`, so the districts after keep the layouts they had.
+  if (place.act === 2) {
+    const [lx, lz] = polar(citadel + 0.35, CITY.door);
+    place.npcs.push({ id: `n:${place.key}:${place.tag}7`, place: place.id, role: 'story', folk: 'captain', x: place.x + lx, z: place.z + lz, facing: citadel + 0.35 + Math.PI, seed: 0x0ce7a });
+  }
   // Districts between the roads, kept from overlapping (each spans ~0.85 radians of the ring).
   const at = spread(between(streets, DISTRICTS.length, 0.5), 2 * Math.asin(S.district / S.ring) + 0.06);
   place.quarters = at;

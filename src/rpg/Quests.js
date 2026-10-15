@@ -21,7 +21,7 @@
 // character's rules (rpg/CharacterCore.js) hand to the screen.
 import { OLD_RACE } from '../combat/bestiary.js';
 import { folkName } from '../world/settlements.js';
-import { storyRef } from '../world/story.js';
+import { storyRef, STORY_FOLK } from '../world/story.js';
 import { STORY } from './storyline.js';
 import { SIDE_CHAINS } from './sidequests.js';
 
@@ -165,7 +165,9 @@ export class QuestLog {
     if (!n) return 'whoever sent you';
     const where = this.placeName(this.placeOf(id));
     if (n.role === 'board') return `the quest board in ${where}`;
-    if (n.name) return `${n.name}${where && !n.name.includes(where) ? ` in ${where}` : ''}`;
+    // The story's own people (Farcall's captain…) have names of their own.
+    const name = n.name ?? (n.role === 'story' ? STORY_FOLK[n.folk]?.name : null);
+    if (name) return `${name}${where && !name.includes(where) ? ` in ${where}` : ''}`;
     return `${n.role === 'warden' ? 'Warden ' : ''}${folkName(n, this.placeOf(id))} at ${where}`;
   }
 
@@ -623,6 +625,11 @@ export class QuestLog {
 
   onCampCleared(campId) {
     this.advance((o, q) => o.type === 'clear' && (o.camp === campId || this.ref(o.camp, q)?.camp === campId || (this.ref(o.camp, q)?.camp === true && this.ref(o.camp, q)?.poi === campId)));
+  }
+
+  // A dungeon (world/dungeons.js id) beaten with this character in it, at any tier or open world.
+  dungeonCleared(d) {
+    this.advance((o) => o.type === 'dungeon' && o.d === d);
   }
 
   // Talked to someone: their line for a quest's stage (said before it moves on), and progress on
