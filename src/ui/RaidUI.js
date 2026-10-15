@@ -4,7 +4,7 @@
 // for the raid members outside your party, and — down in a raid — the encounter on the HUD: each
 // boss's health, its phase, its shield, and how long until it enrages (sim/RaidRun.js sends the
 // fights with the copy's state).
-import { RAIDS, raidChoices, raidLockKey, lockWeek, weekEnds } from '../world/raids.js';
+import { RAIDS, raidChoices, raidLockKey, lockWeek, weekEnds, sealedText } from '../world/raids.js';
 import { BOSS_SCRIPTS } from '../combat/bosses.js';
 import { TIERS } from '../rpg/balance.js';
 import { esc } from './cards.js';
@@ -107,9 +107,10 @@ export class RaidUI {
     g.dialogue.open({
       name: 'Raid Gate', title: gate.title,
       text: 'An arch big enough to march an army through, its seal burning ember-bright. The Wardens hold it open now for any force strong enough to go — a raid group, a party, or the foolhardy alone.',
-      options: raidChoices(g.stats.level, { dev }).map(({ def, locked }) => ({
-        label: `${def.name} · Level ${def.minLevel ?? def.level}+${locked ? ' · not yet' : ''}`, cls: locked ? '' : 'quest',
-        onClick: () => (locked ? g.hud.toast(`${def.name} is for level ${def.minLevel ?? def.level} and up.`) : this.raidDialog(def, gate)),
+      // Sealed but in a raid group or party: one of them may have opened it (the server decides).
+      options: raidChoices(g.quests.flags, { dev, grouped: g.net.inWorld && (!!this.raid || !!g.partyUI?.party) }).map(({ def, sealed, locked }) => ({
+        label: `${def.name} · Level ${def.level}${sealed ? ' · sealed' : ''}`, cls: locked ? '' : 'quest',
+        onClick: () => (locked ? g.hud.toast(sealedText(def)) : this.raidDialog(def, gate)),
       })),
     });
   }

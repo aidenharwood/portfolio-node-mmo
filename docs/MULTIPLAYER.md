@@ -257,7 +257,10 @@ Built beyond the plan:
 - Raids (gameplay phase 7) are copies to the same instance manager (`world/raids.js`), private only.
   - **Who shares a copy:** a raid copy belongs to a [raid group](#raid-groups), or to the party
     or player if they're not in one. It holds 12 at most, and is entered at a city's raid gate
-    (`via: 'gate'`), from level 14.
+    (`via: 'gate'`) once the story has opened it (the raid's `needs: { flag }`; the Brood Mother's
+    is `broodgate_open`, from Act II's "The Gate Opens"). There's no level floor. The server
+    checks the flag on the character going in or on any other member of their raid group (else
+    their party) who's online, so one who has it takes the rest in. A refusal says why.
   - **Encounters** (`sim/RaidRun.js`): each arena is idle until its boss is pulled. Its gate then
     shuts, and the boss's script (`sim/BossScript.js`) runs the fight. Everyone down or out of
     the arena for 3 s is a wipe: the boss resets and the gate opens. Its bosses down beat the

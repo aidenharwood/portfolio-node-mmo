@@ -22,7 +22,7 @@
 // Raids (world/raids.js, gameplay phase 7) are copies here too — private runs only, for a raid group
 // (`who.raid`, else the party), up to the raid's size — with their encounters run by sim/RaidRun.js.
 import { DUNGEONS, THEMES, pocketOrigin, SHARED_SLOTS, CLOSE_AFTER, LIFT_SPEED, lockDay, lockKey } from '../world/dungeons.js';
-import { instanceDef } from '../world/raids.js';
+import { instanceDef, sealedText } from '../world/raids.js';
 import { generateDungeon } from '../world/DungeonGen.js';
 import { Interior } from '../world/Interior.js';
 import { TIERS, tierOf } from '../rpg/balance.js';
@@ -155,8 +155,15 @@ export class Dungeons {
 
   fail(why) { this.error = why; return null; }
 
+  // Whether the story has opened a sealed place to someone: their own flag — or, for a raid, any
+  // of their raid group's (else their party's) that `who.mates` carries (DEC-4). No level floor.
+  opened(def, who) {
+    const f = def.needs.flag;
+    return !!who.flags?.[f] || (!!def.raid && !!who.mates?.some((m) => m?.[f]));
+  }
+
   // Going in: `who` { id, position, party (a key), raid (a raid group's key, or null), level, flags
-  // (story flags), dev } and the ask { d (dungeon or raid), mode ('open' | 'run'), tier, via
+  // (story flags), mates (the story flags of the others in their raid group, else party), dev } and the ask { d (dungeon or raid), mode ('open' | 'run'), tier, via
   // ('entrance' | 'gate') }. Returns the roll for the character's 'enter' operation, { run, at,
   // facing, back } — or null (this.error says why).
   enter(who, ask) {
@@ -165,8 +172,7 @@ export class Dungeons {
     if (!def || (def.dev && !who.dev)) return this.fail('No such place.');
     const p = who.position;
     if (!who.dev && !this.atWayIn(def, p, ask.via)) return this.fail('Too far from the way in.');
-    if (def.needs?.flag && !who.flags?.[def.needs.flag] && !who.dev) return this.fail(`${def.name} is sealed.`);
-    if (def.raid && !who.dev && (who.level ?? 1) < (def.minLevel ?? def.level)) return this.fail(`${def.name} is for level ${def.minLevel ?? def.level} and up.`);
+    if (def.needs?.flag && !who.dev && !this.opened(def, who)) return this.fail(def.raid ? sealedText(def) : `${def.name} is sealed.`);
     // A raid is its raid group's (or, with none, the party's).
     const key = def.raid ? who.raid ?? who.party : who.party;
     const group = def.raid && who.raid ? 'raid' : 'party';

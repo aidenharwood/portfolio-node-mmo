@@ -17,7 +17,7 @@ import { STORY } from '../src/rpg/storyline.js';
 import { SIDE_CHAINS } from '../src/rpg/sidequests.js';
 import { reachedPlaces, defenceAt, heldObjectives, questDrops, eventCalled, eventObjectives } from '../src/rpg/questWatch.js';
 import { storyRef } from '../src/world/story.js';
-import { flagUses, flagProblems, storyFolk } from './storyflags.mjs';
+import { flagUses, flagProblems, storyFolk, STORY_FLAGS } from './storyflags.mjs';
 
 const seed = Number(process.argv[2] ?? 12345);
 const w = new HeadlessWorld(seed);
@@ -213,6 +213,13 @@ const fake = flagProblems(flagUses(w, {
 }), {});
 check(['zz_need', 'zz_line', 'zz_side', 'zz_bark', 'zz_folk', 'zz_gate'].every((f) => fake.unset.includes(f)) && fake.unread.includes('zz_done'),
   'stand-ins: flags read but never set are caught, and one set but never read');
+// A flag marked `pending` (read before what sets it is built) only warns, and fails once it's set.
+const later = flagProblems(flagUses(w, {
+  quests: [{ id: 'zz', setFlags: ['zz_set'] }], sideChains: {}, barks: [], folk: [], achievements: [],
+  instances: [{ id: 'zz', raid: true, needs: { flag: 'zz_gate' } }, { id: 'zy', raid: true, needs: { flag: 'zz_set' } }],
+}), { zz_gate: { pending: 'later' }, zz_set: { pending: 'later' } });
+check(later.pending.includes('zz_gate') && !later.unset.includes('zz_gate') && later.done.includes('zz_set'),
+  'stand-ins: a pending flag only warns while nothing sets it, and its mark must come off once something does');
 check(storyFolk(w).some((f) => f.who === 'foundry:krell'), 'the world\'s story folk are looked at too (Krell, waiting at the Foundry)');
 const uses = flagUses(w);
 const flags = flagProblems(uses);
@@ -220,6 +227,10 @@ check(!flags.unset.length, flags.unset.length
   ? `read but never set: ${flags.unset.map((f) => `${f} (${names(uses.read.get(f))})`).join('; ')}`
   : `every flag read is set somewhere (${names(uses.read.keys())})`);
 for (const f of flags.unread) console.log(`  ⚠ ${f} is set (${names(uses.set.get(f))}) but nothing reads it`);
+for (const f of flags.pending) console.log(`  ⚠ ${f} is read (${names(uses.read.get(f))}) but nothing sets it yet: ${STORY_FLAGS[f].pending}`);
+check(!flags.done.length, flags.done.length
+  ? `set now, so take the pending mark off (tools/storyflags.mjs): ${flags.done.join(', ')}`
+  : 'no pending mark left on a flag that something sets');
 check(!flags.unregistered.length, flags.unregistered.length
   ? `not in the registry (tools/storyflags.mjs): ${flags.unregistered.map((f) => `${f}, setBy ${quoted(uses.set.get(f))}, readBy ${quoted(uses.read.get(f))}`).join('; ')}`
   : `all ${new Set([...uses.set.keys(), ...uses.read.keys()]).size} flags the game sets or reads are in the registry (tools/storyflags.mjs)`);

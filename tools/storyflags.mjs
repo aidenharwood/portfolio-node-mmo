@@ -12,7 +12,8 @@
 //   'achievement <id>'                  flag(c, '<flag>') in its stat (rpg/achievements.js)
 // questcheck holds this list to the game: a flag read but never set fails, one set but never read
 // warns, and a flag missing here, or a setter or reader this list doesn't name, fails (it says
-// what to write).
+// what to write). `pending`: a flag the game reads before what sets it is built (it names that
+// work). It warns instead of failing, and fails once something does set it, so the mark comes off.
 import { QUESTS } from '../src/rpg/Quests.js';
 import { ACHIEVEMENTS } from '../src/rpg/achievements.js';
 import { SIDE_CHAINS } from '../src/rpg/sidequests.js';
@@ -38,6 +39,11 @@ export const STORY_FLAGS = {
   trusted_ysolde: { means: 'The player told Ysolde the voice warned them at the vault (the choice at a8).', setBy: ['a8 stage 1 choices'], readBy: [] },
   kept_secret: { means: 'The player kept the voice to themselves (the choice at a8).', setBy: ['a8 stage 1 choices'], readBy: [] },
   act1_done: { means: 'Act I is over.', setBy: ['a8 setFlags'], readBy: ['achievement story_act1'] },
+  // ---------------------------------------------------------------- Act II: The Brood
+  broodgate_open: {
+    means: 'The Wardens opened the Brood Mother\'s raid gate to the player (DEC-4: one in a raid group or party who has it takes the rest in).',
+    setBy: [], readBy: ['raid broodmother'], pending: 'A-7: quest 11 "The Gate Opens" sets it',
+  },
 };
 
 // Flags the game makes as it runs, one per thing (listed here, not checked: their ids come from
@@ -101,7 +107,9 @@ export function flagUses(world, {
 
 // What's wrong: flags read but never set (`unset`), set but never read (`unread`), missing from
 // the registry (`unregistered`), registered but nowhere in the game (`stale`), and entries whose
-// setters or readers differ from the game's (`wrong`: { flag, field, want }).
+// setters or readers differ from the game's (`wrong`: { flag, field, want }). A flag read but not
+// set whose entry is `pending` goes in `pending`, not `unset`; one marked so that something now
+// sets goes in `done`.
 export function flagProblems({ set, read }, registry = STORY_FLAGS) {
   const all = [...new Set([...set.keys(), ...read.keys()])];
   const stale = Object.keys(registry).filter((f) => !set.has(f) && !read.has(f));
@@ -113,8 +121,11 @@ export function flagProblems({ set, read }, registry = STORY_FLAGS) {
       if ([...(e[field] ?? [])].sort().join('|') !== want.join('|')) wrong.push({ flag, field, want });
     }
   }
+  const waiting = (f) => !!registry[f]?.pending;
   return {
-    unset: all.filter((f) => !set.has(f)),
+    unset: all.filter((f) => !set.has(f) && !waiting(f)),
+    pending: all.filter((f) => !set.has(f) && waiting(f)),
+    done: Object.keys(registry).filter((f) => waiting(f) && set.has(f)),
     unread: all.filter((f) => !read.has(f)),
     unregistered: all.filter((f) => !Object.hasOwn(registry, f)),
     stale,
