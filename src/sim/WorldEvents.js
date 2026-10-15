@@ -393,7 +393,9 @@ export class WorldEvents {
       if (time >= ev.until) this.remove(ev);
       return;
     }
-    // Under way: who's here (a point a second each), how many to scale to.
+    // Under way: what it leads moves on (and the event with it); who's here (a point a second
+    // each), how many to scale to.
+    const moved = this.moveLead(ev, dt);
     const here = this.present(ev);
     for (const p of here) {
       const who = this.person(ev, p.id);
@@ -420,6 +422,41 @@ export class WorldEvents {
       case 'anomaly': this.updateAnomaly(ev, time, dt); break;
       case 'retake': this.updateRetake(ev, time); break;
     }
+  }
+
+  // ================================================================ what moves
+  // An event can lead something along a route (sim/Routes.js RouteFollower): a structure to defend
+  // or an enemy to stop. Each tick it's set down where the follower's got to, on the ground and
+  // facing the way it goes, and the event's area goes with it — so who's told of it, who's taking
+  // part and who's straggling all follow it across the world.
+  lead(ev, body, follower) {
+    ev.lead = { body, follower };
+    this.placeLead(ev);
+  }
+
+  // → the follower's 'moving', 'arrived' or 'stuck'; null with nothing to lead.
+  moveLead(ev, dt) {
+    if (!ev.lead) return null;
+    const status = ev.lead.follower.step(dt);
+    this.placeLead(ev);
+    return status;
+  }
+
+  placeLead(ev) {
+    const { body, follower: f } = ev.lead;
+    const y = this.world.groundHeight(f.x, f.z);
+    if (body.structure) {
+      body.x = f.x;
+      body.z = f.z;
+    } else {
+      // An enemy's own legs never take it anywhere: home is wherever it's got to.
+      body.velocity.set(0, 0, 0);
+      body.home?.set(f.x, y, f.z);
+      body.facing = f.heading;
+    }
+    body.position.set(f.x, y, f.z);
+    ev.x = f.x;
+    ev.z = f.z;
   }
 
   standing(ev) { return ev.structures.filter((s) => s.alive).length; }

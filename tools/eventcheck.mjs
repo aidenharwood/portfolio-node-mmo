@@ -145,6 +145,32 @@ const w2 = walk(line, gap(100, 112));
 check(w2.f.status === 'arrived' && w2.f.skipped === 1, 'a short gap is jumped');
 const w3 = walk(line, gap(100, 140));
 check(w3.f.status === 'stuck' && w3.f.x < 100, 'a long gap leaves it stuck, before the gap');
+// Something an event leads along the route (a caravan, later): the event's area goes with it, so
+// whoever follows is told of it all the way, whichever region it's in.
+{
+  reset();
+  const convoy = dir.start({ poi: routeSite.p, type: 'retake', level: 6, race: 'synth' }); // any event will do as a carrier
+  const crate = dir.structure(convoy, `${convoy.id}:c`, 'pylon', { x: route.points[0][0], z: route.points[0][1] }, 50);
+  convoy.structures.push(crate);
+  dir.lead(convoy, crate, new RouteFollower(route.points, { speed: 6, canStand: (x, z) => world.standable(x, z) }));
+  const rider = player('rider');
+  sim.setPlayers([rider]);
+  let told = true;
+  const regions = new Set();
+  for (let t = 0; t < route.length / 6; t += 10) {
+    const behind = new RouteFollower(route.points, { speed: 1 });
+    behind.step(Math.max(0, t * 6 - 60)); // 60 m behind it
+    put(rider, behind.x, behind.z);
+    step(10);
+    told &&= dir.near(rider.position.x, rider.position.z).includes(convoy);
+    regions.add(world.regionAt(convoy.x, convoy.z).key);
+  }
+  check(told, 'a led structure is reported to someone following it, all the way');
+  check(regions.size >= 2, `it carries the event across regions (${regions.size})`);
+  check(Math.hypot(crate.x - convoy.x, crate.z - convoy.z) < 0.01 && crate.position.y === world.groundHeight(crate.x, crate.z), 'the structure and the event move together, on the ground');
+  sim.setPlayers([]);
+  reset();
+}
 
 // ---------------------------------------------------------------- the director
 console.log('The director:');
