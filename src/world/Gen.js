@@ -20,6 +20,7 @@ import { makeNoise2D, fbm, smoothstep } from '../core/noise.js';
 import { mulberry32 } from '../core/rng.js';
 import { SIZES, CITIES, CITY_WALL, HAMLETS, planHamlet, dressVillage, planTown, planCity, planHub, hamletName, townName, pathBearing } from './places.js';
 import { storyPlaces, storyIn } from './story.js';
+import { TIERS, campLayout } from './campLayout.js';
 
 export const REGION = 240;
 export const WATER_LEVEL = -0.9;
@@ -726,8 +727,10 @@ export class WorldGen {
     // Candidate spots inside the region, on dry, gentle, non-mountain ground, apart from each other
     // (and off any town or city next door).
     const taken = this.bigNear(rx, rz);
-    const free = (x, z, gap) => taken.every((t) => Math.hypot(t.x - x, t.z - z) > gap + t.r);
-    const spot = (minGap, { r = 6, maxSlope = 0.45, near = null, tries = 60, minHub = 70, rand = rng } = {}) => {
+    // (`legacy`: ground the camps of old held, kept clear for the features after them; the camps
+    // themselves no longer stand there, so a camp may.)
+    const free = (x, z, gap, camp = false) => taken.every((t) => (camp && t.legacy) || Math.hypot(t.x - x, t.z - z) > gap + t.r);
+    const spot = (minGap, { r = 6, maxSlope = 0.45, near = null, tries = 60, minHub = 70, rand = rng, legacy = false, camp = false, ok = null } = {}) => {
       for (let i = 0; i < tries; i++) {
         let x;
         let z;
@@ -746,8 +749,9 @@ export class WorldGen {
         if (h < WATER_LEVEL + 0.8) continue;
         if (this.mountainMask(x, z) > 0.35) continue;
         if (this.slopeBase(x, z) > maxSlope) continue;
-        if (!free(x, z, minGap)) continue;
-        taken.push({ x, z, r });
+        if (!free(x, z, minGap, camp)) continue;
+        if (ok && !ok(x, z)) continue;
+        taken.push({ x, z, r, legacy });
         return { x, z, h };
       }
       return null;
@@ -829,30 +833,17 @@ export class WorldGen {
       }
     }
 
-    // Camps (and maybe a stronghold) of the owning race — well away from settlements.
-    const campStyle = { scav: 'scav', hive: 'nest', synth: 'relay', fauna: 'den' }[race];
-    const camps = hub ? 1 : city ? 0 : 2 + (rng() < 0.45 ? 1 : 0);
-    const names = [...CAMP_NAME[race]];
-    for (let i = 0; i < camps; i++) {
-      const R = 10 + Math.floor(rng() * 4);
-      const c = spot(42, { r: R + 6, maxSlope: 0.35, minHub: hub ? 55 : 70 });
-      if (!c) continue;
-      const nm = names.splice(Math.floor(rng() * names.length), 1)[0];
-      region.pois.push({
-        type: 'camp', id: `c:${key}:${i}`, x: c.x, z: c.z, radius: R, race, style: rng() < 0.25 && race === 'scav' ? 'salvage' : campStyle,
-        level: level + (rng() < 0.35 ? 1 : 0), name: `${region.name.split(' ')[0]} ${nm}`, seed: Math.floor(rng() * 1e9),
-      });
-      pad(c.x, c.z, R + 2, c.h, 11, true);
-    }
-    if (!hub && !city && level >= 4 && rng() < 0.28) {
-      const c = spot(50, { r: 24, maxSlope: 0.3 });
-      if (c) {
-        region.pois.push({
-          type: 'camp', id: `s:${key}`, x: c.x, z: c.z, radius: 15, race, style: 'fort', stronghold: true,
-          level: level + 2, name: `${region.name} ${STRONGHOLD_NAME[race]}`, seed: Math.floor(rng() * 1e9),
-        });
-        pad(c.x, c.z, 19, c.h, 14, true);
+    // Where the camps stood before the act lands: their draws from the region's stream are still
+    // made, and their ground kept, so the features after them keep their places. The camps
+    // themselves are placed last, from a stream of their own (placeCamps).
+    {
+      const n = hub ? 1 : city ? 0 : 2 + (rng() < 0.45 ? 1 : 0);
+      for (let i = 0; i < n; i++) {
+        const R = 10 + Math.floor(rng() * 4);
+        if (!spot(42, { r: R + 6, maxSlope: 0.35, minHub: hub ? 55 : 70, legacy: true })) continue;
+        for (let k = 0; k < 4; k++) rng(); // its name, style, level and seed
       }
+      if (!hub && !city && level >= 4 && rng() < 0.28 && spot(50, { r: 24, maxSlope: 0.3, legacy: true })) rng();
     }
 
     // Verticality: mesas (canyon and desert country is full of them), a tower, ruins — with chests
@@ -923,6 +914,81 @@ export class WorldGen {
       }
     }
 
+    // The camps, from a stream of their own: bigger ones first, while there's room. Each keeps
+    // inside the region by a margin (so 20 m and more from its neighbours' camps), off every road it can know of
+    // and on ground with room for its garrison.
+    if (!city) {
+      const plan = [];
+      if (hub) plan.push('outpost');
+      else if (act === 1 && level < 5) plan.push(...(campRng() < 0.5 ? ['camp'] : []), 'outpost', 'outpost');
+      else {
+        const roll = campRng();
+        if (act === 1) { if (roll < 0.25) plan.push('base'); }
+        else if (level >= 10 && roll < 0.28) plan.push('fort');
+        else if (roll < 0.4) plan.push('base');
+        plan.push('camp');
+        if (act > 1 && campRng() < 0.5) plan.push('camp');
+        plan.push('outpost');
+        if (campRng() < 0.5) plan.push('outpost');
+      }
+      const known = this.roadsKnown(region);
+      const roads = known.roads;
+      const way = region.pois.find((p) => p.type === 'waystone');
+      let draws = known.draws;
+      // The road buildRoads will run to a camp here (its spur): the stream as it will stand then.
+      const spurTo = (x, z, R) => {
+        if (!way) return { pts: [], used: 0 };
+        const rr = mulberry32(hash2(rx, rz, this.seed ^ 0xa0ad));
+        for (let k = 0; k < draws; k++) rr();
+        const pts = this.roadPath(way, { x, z, inset: R * 0.7 }, rr);
+        return { pts, used: pts.length || Math.hypot(x - way.x, z - way.z) >= 8 && Math.hypot(x - way.x, z - way.z) <= REGION * 1.8 ? 2 : 0 };
+      };
+      const placed = [];
+      const campStyle = { scav: 'scav', hive: 'nest', synth: 'relay', fauna: 'den' }[race];
+      const names = [...CAMP_NAME[race]];
+      let n = 0;
+      for (const kind of plan) {
+        const tier = kind === 'fort' ? 'base' : kind;
+        const R = TIERS[tier].R;
+        const ok = (x, z, margin = 10) => {
+          for (let k = 0; k < 16; k++) {
+            const a = (k / 16) * Math.PI * 2;
+            if (!this.owns(rx, rz, x + Math.sin(a) * (R + 11), z + Math.cos(a) * (R + 11))) return false;
+          }
+          if (!roads.every((path) => path.every(([px, pz]) => Math.hypot(px - x, pz - z) > R + margin))) return false;
+          // Nor may its own road in run through a camp already here.
+          const { pts } = spurTo(x, z, R);
+          return placed.every((q) => pts.every(([px, pz]) => Math.hypot(px - q.x, pz - q.z) > q.radius + 10));
+        };
+        // Where roads leave no room, an outpost may stand by one (though none runs through it);
+        // Brightwater's streets fill its region, so the Prologue's first camp may stand by one.
+        const at = (o) => spot(R + 18, { r: R + 2, maxSlope: 0.35, minHub: hub ? 55 : 70, rand: campRng, camp: true, tries: R > 20 ? 250 : 150, ok: o });
+        // An outpost tries the ground the old camps stood on first: it's known to fit one.
+        const old = tier === 'outpost' ? taken.find((t) => t.legacy && !t.used && free(t.x, t.z, R + 18, true) && ok(t.x, t.z, 3)) : null;
+        if (old) { old.used = true; taken.push({ x: old.x, z: old.z, r: R + 2 }); }
+        const c = (old && { x: old.x, z: old.z, h: this.baseHeight(old.x, old.z) })
+          ?? at(ok) ?? (tier === 'outpost' ? at((x, z) => ok(x, z, 3)) : null) ?? (hub ? at(null) : null);
+        if (!c) continue;
+        const nm = names.length ? names.splice(Math.floor(campRng() * names.length), 1)[0] : CAMP_NAME[race][0];
+        const seed = Math.floor(campRng() * 1e9);
+        const poi = kind === 'fort'
+          ? { type: 'camp', id: `s:${key}`, x: c.x, z: c.z, radius: R, tier, race, style: 'fort', stronghold: true, level: level + 2, name: `${region.name} ${STRONGHOLD_NAME[race]}`, seed }
+          : {
+            type: 'camp', id: tier === 'base' ? `b:${key}` : `c:${key}:${n++}`, x: c.x, z: c.z, radius: R, tier, race,
+            style: campRng() < 0.25 && race === 'scav' ? 'salvage' : campStyle, level: level + (tier === 'base' ? 1 : campRng() < 0.35 ? 1 : 0),
+            name: `${region.name.split(' ')[0]} ${nm}`, seed,
+          };
+        // Room for its garrison once water and cliffs are left out, or it isn't placed.
+        if (campLayout(poi, this.campProbe).posts.length < TIERS[tier].garrison[0]) { taken.pop(); continue; }
+        region.pois.push(poi);
+        placed.push(poi);
+        pad(c.x, c.z, R + 2, c.h, R > 20 ? 16 : 11, true);
+        const spur = spurTo(c.x, c.z, R);
+        if (spur.pts.length) roads.push(spur.pts);
+        draws += spur.used;
+      }
+    }
+
     this.buildRoads(region);
     // Towns and cities lay out their services between the streets the roads come in by; a city's
     // districts are points of interest of their own, so it streams in a district at a time.
@@ -952,6 +1018,58 @@ export class WorldGen {
     const way = region.pois.find((p) => p.type === 'waystone');
     if (!way) return;
     const rng = mulberry32(hash2(region.rx, region.rz, this.seed ^ 0xa0ad));
+    for (const s of this.roadStops(region)) {
+      const pts = this.roadPath(way, s, rng);
+      if (pts.length < 2) continue;
+      region.roads.push(pts);
+      for (const [x, z] of pts) region.roadCells.add(`${Math.floor(x / 4)},${Math.floor(z / 4)}`);
+    }
+  }
+
+  // The roads a region will have, drawn before its camps are placed (the camps are its last
+  // stops, so these come out the same when buildRoads draws them), and the ones its west and south
+  // neighbours draw into it.
+  // { roads, draws }: `draws`, how far into the region's road stream they took it.
+  roadsKnown(region) {
+    const roads = this.trunksNear(region);
+    const way = region.pois.find((p) => p.type === 'waystone');
+    if (!way) return { roads, draws: 0 };
+    let draws = 0;
+    const base = mulberry32(hash2(region.rx, region.rz, this.seed ^ 0xa0ad));
+    const rng = () => { draws++; return base(); };
+    for (const s of this.roadStops(region)) {
+      const pts = this.roadPath(way, s, rng);
+      if (pts.length > 1) roads.push(pts);
+    }
+    return { roads, draws };
+  }
+
+  // The roads between waystones that the eight regions round this one draw (a region draws its
+  // own east and north, first from its road stream), which may cut across this one's corners.
+  trunksNear(region) {
+    const out = [];
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dz = -1; dz <= 1; dz++) {
+        if (!dx && !dz) continue;
+        const nx = region.rx + dx;
+        const nz = region.rz + dz;
+        const a = this.peekWaystone(nx, nz);
+        if (!a) continue;
+        const rng = mulberry32(hash2(nx, nz, this.seed ^ 0xa0ad));
+        for (const [ex, ez] of [[1, 0], [0, 1]]) {
+          const b = this.peekWaystone(nx + ex, nz + ez);
+          if (!b) continue;
+          const pts = this.roadPath(a, b, rng);
+          if (pts.length > 1) out.push(pts);
+        }
+      }
+    }
+    return out;
+  }
+
+  // Where a region's roads go from its waystone: its east and north neighbours' waystones, then
+  // its own places, in the order they were placed.
+  roadStops(region) {
     const stops = [];
     for (const [dx, dz] of [[1, 0], [0, 1]]) {
       const n = this.peekWaystone(region.rx + dx, region.rz + dz);
@@ -962,13 +1080,12 @@ export class WorldGen {
       else if (p.type === 'landmark') stops.push({ x: p.x, z: p.z, inset: p.r + 2 });
       else if (p.type === 'hamlet') stops.push({ x: p.x, z: p.z, inset: p.r * 0.45 });
     }
-    for (const s of stops) {
-      const pts = this.roadPath(way, s, rng);
-      if (pts.length < 2) continue;
-      region.roads.push(pts);
-      for (const [x, z] of pts) region.roadCells.add(`${Math.floor(x / 4)},${Math.floor(z / 4)}`);
-    }
+    return stops;
   }
+
+  // Ground a camp's layout leaves out (world/campLayout.js): water and cliffs, by the land's own
+  // shape, so the screen and the sim lay every camp out alike.
+  campProbe = (x, z) => this.baseHeight(x, z) < WATER_LEVEL + 0.2 || this.slopeBase(x, z) > 0.6;
 
   // A neighbour's waystone without building the whole neighbour (which would recurse).
   peekWaystone(rx, rz) {

@@ -131,7 +131,7 @@ export function storyIn(gen, rx, rz) {
       poi.npcs = [folkFor(poi, rng, 0, 'object', P.rot + 0.42, 13.5, { object: 'pilgrim:console', model: 'console', facing: P.rot + Math.PI / 2 })];
     } else if (P.key === 'foundry') {
       poi = {
-        ...base, type: 'camp', id: `sf:${key}`, radius: 15, race: 'scav', style: 'fort', stronghold: true, level: Math.max(7, P.level),
+        ...base, type: 'camp', id: `sf:${key}`, radius: 15, tier: 'base', race: 'scav', style: 'fort', stronghold: true, level: Math.max(7, P.level),
         boss: { name: 'Gorrak the Foreman' }, tag: 'sf',
       };
       // Krell, Ironjaw's lieutenant, kneels by the gate once his chief has fallen; at the back of
@@ -141,7 +141,7 @@ export function storyIn(gen, rx, rz) {
         folkFor(poi, rng, 1, 'object', Math.atan2(8, -8), Math.hypot(8, 8), { object: 'foundry:gate', model: 'foundrygate', facing: 0 }),
       ];
     } else if (P.key === 'outpost') {
-      poi = { ...base, type: 'camp', id: `sc:${key}`, radius: 12, race: 'scav', style: 'scav', level: Math.max(6, P.level), tag: 'so' };
+      poi = { ...base, type: 'camp', id: `sc:${key}`, radius: 12, tier: 'outpost', race: 'scav', style: 'scav', level: Math.max(6, P.level), tag: 'so' };
       poi.npcs = [folkFor(poi, rng, 0, 'object', P.rot + Math.PI, 3.2, { object: 'outpost:chest', model: 'strongbox' })];
     } else if (P.key === 'vault') {
       poi = { ...base, type: 'story', kind: 'vault', id: `p:${key}:vault`, r: P.r, tag: 'sv' };
@@ -157,7 +157,7 @@ export function storyIn(gen, rx, rz) {
       // A Hive nest grown round three spore pods (the Hive the quest asks you to kill live here,
       // whatever race holds the region), and Krell (if he was let go in Act I), whose crew the Hive
       // hit too.
-      poi = { ...base, type: 'camp', id: `sc:${key}:spore`, radius: 12, race: 'hive', style: 'nest', level: 9, tag: 'ssf' };
+      poi = { ...base, type: 'camp', id: `sc:${key}:spore`, radius: 12, tier: 'outpost', race: 'hive', style: 'nest', level: 9, tag: 'ssf' };
       poi.npcs = [
         ...[0, 1, 2].map((i) => folkFor(poi, rng, i, 'object', P.rot + i * 2.1, 7, { object: `sporefield:pod${i + 1}`, model: 'sporepod' })),
         folkFor(poi, rng, 3, 'story', P.rot + 1.05, 4, { folk: 'krell', when: { quest: 'b2', flag: 'krell_freed' } }),
@@ -165,7 +165,7 @@ export function storyIn(gen, rx, rz) {
     } else if (P.key === 'psionnest') {
       // A Hive nest with a Psion at its head: the voice driving the swarms (Act II).
       poi = {
-        ...base, type: 'camp', id: `sc:${key}:psion`, radius: 12, race: 'hive', style: 'nest', level: Math.max(12, P.level),
+        ...base, type: 'camp', id: `sc:${key}:psion`, radius: 12, tier: 'outpost', race: 'hive', style: 'nest', level: Math.max(12, P.level),
         boss: { type: 'psion', name: 'Hive Psion', tag: 'psion' }, tag: 'spn',
       };
       poi.npcs = [];

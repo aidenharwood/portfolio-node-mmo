@@ -65,6 +65,80 @@ function actLands(gen) {
   check(far === 0, `every region is within 150 m of its act's ring (${far} strays)`);
 }
 
+// ---------------------------------------------------------------- placement
+function placement(gen) {
+  const regions = regionsTo(gen, 12);
+  const cityAt = new Set(gen.cities().map((c) => `${c.rx},${c.rz}`));
+  const camps = [];
+  // Each region places what its act and level call for, as far as the land has room: never more,
+  // rarely nothing (water and mountains aside), and bases in about the share planned.
+  const rows = { early: { n: 0, zero: 0, big: 0 }, act1: { n: 0, zero: 0, big: 0 }, later: { n: 0, zero: 0, big: 0, camps: 0 } };
+  let over = 0;
+  let noTier = 0;
+  let hubBad = 0;
+  let earlyForts = 0;
+  for (const r of regions) {
+    const mine = r.pois.filter((p) => p.type === 'camp' && !p.story);
+    for (const c of mine) { camps.push({ c, r }); if (!c.tier) noTier++; }
+    if (r.hub) { if (mine.length > 1 || mine.some((c) => c.tier !== 'outpost')) hubBad++; continue; }
+    if (cityAt.has(`${r.rx},${r.rz}`)) { if (mine.length) over++; continue; }
+    const n = (t) => mine.filter((c) => c.tier === t).length;
+    const [o, k, b] = [n('outpost'), n('camp'), n('base')];
+    const kind = r.act === 1 && r.level < 5 ? 'early' : r.act === 1 ? 'act1' : 'later';
+    const most = { early: [2, 1, 0], act1: [2, 1, 1], later: [2, 2, 1] }[kind];
+    if (o > most[0] || k > most[1] || b > most[2]) over++;
+    const row = rows[kind];
+    row.n++;
+    if (!mine.length) row.zero++;
+    else if (b) row.big++;
+    if (row.camps !== undefined) row.camps += mine.length;
+    if (mine.some((c) => c.stronghold && r.level < 10)) earlyForts++;
+  }
+  const share = (row, k) => (row.n - row.zero ? row[k] / (row.n - row.zero) : 0);
+  check(noTier === 0, `every camp has a tier (${noTier} without)`);
+  check(hubBad === 0, 'Brightwater has its outpost, or none (as before)');
+  check(over === 0, `no region places more than its tier table allows (${over} over)`);
+  const firstLands = rows.early.zero + rows.act1.zero;
+  check(firstLands <= Math.ceil((rows.early.n + rows.act1.n) * 0.1), `Act I regions with no camp: ${firstLands} of ${rows.early.n + rows.act1.n}`);
+  check(rows.later.zero <= rows.later.n * 0.15, `later regions with no camp: ${rows.later.zero} of ${rows.later.n}`);
+  check(share(rows.act1, 'big') <= 0.35, `bases in Act I from level 5: ${rows.act1.big} of ${rows.act1.n - rows.act1.zero}`);
+  check(share(rows.later, 'big') >= 0.2 && share(rows.later, 'big') <= 0.45, `bases and strongholds in later acts: ${rows.later.big} of ${rows.later.n - rows.later.zero}`);
+  check(share(rows.later, 'camps') >= 2.5, `camps per later region with room: ${share(rows.later, 'camps').toFixed(2)}`);
+  check(earlyForts === 0, `no stronghold below level 10 (${earlyForts})`);
+
+  // Apart from each other, off the roads (but their own) and off the towns, cities and story places.
+  let close = 0;
+  for (let i = 0; i < camps.length; i++) {
+    for (let j = i + 1; j < camps.length; j++) {
+      const a = camps[i].c;
+      const b = camps[j].c;
+      if (Math.hypot(a.x - b.x, a.z - b.z) < a.radius + b.radius + 20) close++;
+    }
+  }
+  check(close === 0, `no two camps within 20 m of each other (${close} pairs)`);
+  let onRoad = 0;
+  let inTown = 0;
+  let thin = 0;
+  for (const { c, r } of camps) {
+    // (Story camps stand where world/story.js puts them.)
+    for (let dx = -1; dx <= 1 && !c.story && !r.hub; dx++) {
+      for (let dz = -1; dz <= 1; dz++) {
+        for (const path of gen.region(r.rx + dx, r.rz + dz).roads) {
+          const [ex, ez] = path[path.length - 1];
+          // Its own way in (which water may cut short just outside it).
+          if (Math.hypot(ex - c.x, ez - c.z) < c.radius + 12) continue;
+          if (path.some(([x, z]) => Math.hypot(x - c.x, z - c.z) < c.radius + 3)) { onRoad++; dx = dz = 2; break; }
+        }
+      }
+    }
+    if (gen.bigNear(r.rx, r.rz).some((t) => Math.hypot(t.x - c.x, t.z - c.z) < t.r + c.radius)) inTown++;
+    if (campLayout(c, gen.campProbe).posts.length < TIERS[c.tier].garrison[0]) thin++;
+  }
+  check(onRoad === 0, `no road runs through a camp but its own (${onRoad} of ${camps.length})`);
+  check(inTown === 0, `no camp on a town, city or story place (${inTown})`);
+  check(thin === 0, `water and cliffs leave every camp room for its garrison (${thin} short)`);
+}
+
 // ---------------------------------------------------------------- layouts
 const STYLES = { scav: 'scav', salvage: 'scav', nest: 'hive', relay: 'synth', den: 'fauna' };
 function layouts() {
@@ -109,6 +183,7 @@ for (const seed of SEEDS) {
   const gen = new WorldGen(seed);
   check(fingerprint(gen) === FINGERPRINTS[seed], `the settled places are where they were (seed ${seed})`);
   actLands(gen);
+  placement(gen);
 }
 
 console.log(failed ? `campcheck: ${failed} failed` : 'campcheck: all good');

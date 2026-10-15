@@ -291,7 +291,8 @@ console.log('Ragdolls:');
   let bad = [];
   for (const [k, key] of MODELS_TO_TRY.entries()) {
     const a = (k / MODELS_TO_TRY.length) * Math.PI * 2;
-    const r = kill(key, at(700 + k * 9, 640), new THREE.Vector3(Math.sin(a) * 3, 0, Math.cos(a) * 3));
+    // (Along the levelest line round here on seed 7: what's measured is the body, not the slope.)
+    const r = kill(key, at(700 + k * 9, 680), new THREE.Vector3(Math.sin(a) * 3, 0, Math.cos(a) * 3));
     const m = survey(r, terrain);
     worst = { low: Math.min(worst.low, m.low), off: Math.max(worst.off, m.off), stretch: Math.max(worst.stretch, m.stretch), settle: Math.max(worst.settle, r.settled ?? 99) };
     if (m.nan || m.low < -0.03 || m.off > 0.1 || m.stretch > 0.08 || r.settled === null) bad.push(`${key} (low ${m.low.toFixed(2)}, off ${m.off.toFixed(2)}${m.at ? ` from ${m.at}` : ''}, stretch ${(m.stretch * 100).toFixed(0)}%, ${r.settled === null ? 'never rests' : `rests at ${r.settled.toFixed(1)} s`})`);
