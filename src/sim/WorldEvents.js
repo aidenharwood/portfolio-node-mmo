@@ -6,6 +6,7 @@
 //
 // An event goes: gathering (its beacon lit, the tier voted there) → under way (its objectives) →
 // won or lost (the chest, or the place overrun and a Retake started) → gone a little later.
+// A quest's step can call one at a named place too (startStory: at once, at Normal, no vote).
 // What players need to know comes out as each event's state (`view`, `personal`) and the host's
 // callbacks:
 //   onEventEnd(ev)          won or lost: ev.result { won, people: [{ id, points, top, lead }] }
@@ -178,7 +179,7 @@ export class WorldEvents {
     const ev = {
       id, type, T, director: this, site: poi, place, x: poi.x, z: poi.z, r: Math.max(10, reach(poi)), level: Math.max(1, spec.level ?? 1),
       race: spec.race ?? T.race ?? 'scav', stage: 'gather', began: time, until: time + (type === 'retake' ? 0 : GATHER),
-      tier: spec.tier ?? 0, votes: new Map(), structures: [], foes: [], enemies: [], people: new Map(),
+      tier: spec.tier ?? 0, locked: !!spec.locked, story: !!spec.story, votes: new Map(), structures: [], foes: [], enemies: [], people: new Map(),
       wave: 0, waves: T.waves ?? 0, next: 0, lastWave: -Infinity, charge: 0, warden: false, phase: null,
       xp: 0, idle: 0, n: 1, near: 0, res: null, result: null, named: [],
     };
@@ -237,7 +238,7 @@ export class WorldEvents {
     const time = this.time;
     ev.stage = 'active';
     ev.began = time;
-    if (ev.type !== 'retake') ev.tier = this.tally(ev);
+    if (ev.type !== 'retake' && !ev.locked) ev.tier = this.tally(ev);
     ev.n = Math.max(1, this.present(ev).length);
     const scale = 1 + 0.3 * (ev.n - 1);
     if (T.pylons) {
@@ -596,6 +597,20 @@ export class WorldEvents {
     return this.start({ poi, type, level: level ?? poi.level ?? region.level, race: T.race ?? region.race });
   }
 
+  // A quest's step calls for an event at a place (rpg/questWatch.js eventCalled): it starts at
+  // once, its tier locked at Normal (no vote), whatever the director's spacing (quiet, gap, cap,
+  // the site's rest). One already running there is the one (whoever started it); a place overrun
+  // has to be retaken first. Returns the event, or null.
+  startStory(siteId, type) {
+    const T = EVENT_TYPES[type];
+    if (!T || type === 'retake' || !siteId || this.overrun.has(siteId)) return null;
+    for (const ev of this.events.values()) if (ev.site.id === siteId && ev.stage !== 'over') return ev;
+    const poi = this.world.poiById?.(siteId);
+    if (!poi || PLACE_TYPES.has(poi.type) !== !!T.settlement) return null;
+    const region = this.world.regionAt(poi.x, poi.z);
+    return this.start({ poi, type, level: poi.level ?? region.level, race: T.race ?? region.race, tier: 0, locked: true, story: true });
+  }
+
   // Dev tools: win or lose the event nearest (x, z) now.
   force(x, z, won) {
     let best = null;
@@ -617,7 +632,7 @@ export class WorldEvents {
   vote(playerId, evId, tier) {
     const ev = this.events.get(evId);
     const p = this.sim.players.find((q) => q.id === playerId);
-    if (!ev || ev.stage !== 'gather' || !p?.alive || ![0, 1, 2].includes(tier)) return false;
+    if (!ev || ev.stage !== 'gather' || ev.locked || !p?.alive || ![0, 1, 2].includes(tier)) return false;
     if (Math.hypot(p.position.x - ev.bx, p.position.z - ev.bz) > VOTE_REACH) return false;
     ev.votes.set(playerId, tier);
     return true;
@@ -662,7 +677,8 @@ export class WorldEvents {
       tl: ev.stage === 'gather' || ev.stage === 'over' || ev.type === 'retake' ? Math.max(0, Math.ceil(ev.until - time)) : undefined,
       s: ev.structures.map((s) => [s.id, s.kind, round(s.x), round(s.z), Math.ceil(s.hp), s.max]),
     };
-    if (ev.stage === 'gather') v.v = this.counts(ev);
+    if (ev.locked) v.lk = 1;
+    else if (ev.stage === 'gather') v.v = this.counts(ev);
     if (ev.waves) v.w = [ev.wave, ev.waves];
     if (ev.foes.length) v.f = [this.aliveFoes(ev), ev.foes.length];
     if (ev.T.beacon) { v.c = Math.round(ev.charge * 1000) / 1000; v.rx = round(ev.rx); v.rz = round(ev.rz); if (ev.contested) v.ct = 1; }
