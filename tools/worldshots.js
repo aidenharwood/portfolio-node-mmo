@@ -208,3 +208,62 @@ export async function measure({ biomes = ['forest', 'jungle', 'meadow', 'snow', 
   }
   return out;
 }
+
+// Camp props (world/scenery/props.js): one close tile per kind, for each faction's kit, each on
+// a flat pad, baked as a place is, the wild scenery hidden, at midday. Sheets: tour_props_<kit>.png.
+export async function props({ w = 400, h = 300, cols = 6, seed = 1, kits = ['scav', 'salvage', 'nest', 'relay', 'den'] } = {}) {
+  const { prop, PROP_KINDS, PROP_SIZES } = await import('../src/world/scenery/props.js');
+  const { bakeTree } = await import('../src/render/ModelKit.js');
+  const { mulberry32 } = await import('../src/core/rng.js');
+  g.state = 'playing';
+  document.getElementById('loading')?.remove();
+  const x0 = g.player.position.x + 40;
+  const z0 = g.player.position.z + 40;
+  const y0 = g.world.groundHeight(x0, z0) + 3;
+  const pad = new THREE.Mesh(new THREE.CylinderGeometry(9, 9, 4, 32), new THREE.MeshLambertMaterial({ color: 0x8a9a6a }));
+  pad.position.set(x0, y0 - 2, z0);
+  g.scene.add(pad);
+  // (The wild scenery kept hidden while view() streams the world in round the camera.)
+  const pack = g.world.packScenery;
+  g.world.packScenery = function () { this.sceneryDirty = false; };
+  const hidden = [];
+  for (const set of Object.values(g.world.sets)) for (const m of [set.body, set.hull, set.mesh]) if (m?.visible) { m.visible = false; hidden.push(m); }
+  for (const kit of kits) {
+    const sheet = document.createElement('canvas');
+    sheet.width = cols * w;
+    sheet.height = Math.ceil(PROP_KINDS.length / cols) * h;
+    const ctx = sheet.getContext('2d');
+    PROP_KINDS.forEach((kind, i) => {
+      const root = new THREE.Group();
+      root.position.set(x0, y0, z0);
+      root.add(prop(kind, mulberry32(seed * 1000 + i * 31), { kit }));
+      bakeTree(root, { surfaces: true });
+      g.scene.add(root);
+      const [r, ht] = PROP_SIZES[kind];
+      const d = Math.max(3.5, r * 2.6, ht * 1.3);
+      const from = new THREE.Vector3(x0 + d * 0.55, y0 + d * 0.55 + ht * 0.3, z0 + d);
+      const at = new THREE.Vector3(x0, y0 + Math.max(0.4, ht * 0.4), z0);
+      g.world.dayTime = 0.25;
+      view(x0 + 12, z0 + 12, from, at);
+      g.world.dayTime = 0.25;
+      const src = view(x0 + 12, z0 + 12, from, at);
+      const sw = src.width;
+      const sh = src.height;
+      const cw = Math.min(sw, (sh * w) / h);
+      const chh = (cw * h) / w;
+      ctx.drawImage(src, (sw - cw) / 2, (sh - chh) / 2, cw, chh, (i % cols) * w, Math.floor(i / cols) * h, w, h);
+      ctx.fillStyle = '#000a';
+      ctx.fillRect((i % cols) * w, Math.floor(i / cols) * h, w, 22);
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 14px sans-serif';
+      ctx.fillText(`${kit} ${kind}`, (i % cols) * w + 6, Math.floor(i / cols) * h + 16);
+      g.scene.remove(root);
+    });
+    await fetch(`/__shot/tour_props_${kit}`, { method: 'POST', body: sheet.toDataURL('image/png') });
+  }
+  g.scene.remove(pad);
+  for (const m of hidden) m.visible = true;
+  g.world.packScenery = pack;
+  g.world.sceneryDirty = true;
+  return 'ok';
+}
