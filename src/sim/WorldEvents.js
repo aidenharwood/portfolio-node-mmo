@@ -49,7 +49,7 @@ const ANNOUNCE = 450;          // metres: who's told an event has begun
 const STRAGGLE = { far: 45, after: 20, rout: 60 }; // see stragglers()
 const MAX_FOES = 40;           // an event's enemies alive at once, at most
 const PLACE_TYPES = new Set(['hamlet', 'settlement', 'town']);
-const COUPLING_RING = 2.4;     // metres from a war-walker's heart its couplings ride
+const COUPLING_RING = 3.6;     // metres from a war-walker's heart its couplings ride
 const IMMUNE_TELL = 0.6;       // seconds between "it's shielded" sparks (as sim/BossScript.js)
 
 // Each kind of event. `hits`: how many of an on-level enemy's blows a thing to defend takes.
@@ -308,7 +308,7 @@ export class WorldEvents {
   raiseWalker(ev, extra) {
     const T = ev.T;
     const [x, z] = ev.route.points[0];
-    const w = this.spawn(ev, { type: 'warwalker', opts: { elite: true } }, x, z, { aggro: false, transient: false, objective: true, name: 'Synth War-walker' });
+    const w = this.spawn(ev, { type: 'warwalker', opts: {} }, x, z, { aggro: false, transient: false, objective: true, name: 'Synth War-walker' });
     ev.walker = w;
     this.lead(ev, w, new RouteFollower(ev.route.points, { speed: T.speed, canStand: (px, pz) => this.world.standable(px, pz) && !this.world.isWater(px, pz) }));
     const n = T.couplings + extra;
@@ -511,8 +511,10 @@ export class WorldEvents {
       body.z = f.z;
     } else {
       // An enemy's own legs never take it anywhere: home is wherever it's got to. It faces the
-      // way it goes, except while it's turned to strike.
-      body.velocity.set(0, 0, 0);
+      // way it goes, except while it's turned to strike, and its velocity is the follower's pace
+      // (what screens stride its legs by; the next tick sets it down here again regardless).
+      const v = f.status === 'moving' ? f.speed : 0;
+      body.velocity.set(Math.sin(f.heading) * v, 0, Math.cos(f.heading) * v);
       body.home?.set(f.x, y, f.z);
       if (body.state !== 'windup' && body.state !== 'attack') body.facing = f.heading;
     }

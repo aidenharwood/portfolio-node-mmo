@@ -140,6 +140,14 @@ export class EventUI {
       if (v.ph === 'engines' && v.f) rows.push(`<li>Siege engines: ${v.f[0]} of ${v.f[1]} left</li>`);
       else if (v.k === 'surge' && v.f) rows.push(`<li class="${v.f[0] ? '' : 'done'}">Spore pods: ${v.f[0]} of ${v.f[1]} left</li>`);
       else if (v.k === 'retake' && v.f) rows.push(`<li>The garrison: ${v.f[0]} of ${v.f[1]} left${v.tl ? ` · ${clock(v.tl)}` : ''}</li>`);
+      else if (v.k === 'walker' && v.wk) {
+        // wk: [x, z, hull, max, couplings left, couplings, metres to go]. The event's centre is
+        // the walker, so the maps and compass already follow it.
+        const [, , hp, max, left, all, togo] = v.wk;
+        rows.push(`<li class="${left ? '' : 'done'}">Couplings: ${left} of ${all} left</li>`);
+        rows.push(`<li class="ev-bars"><span>Hull</span><i class="ev-hp walker ${left ? 'shielded' : ''}"><em style="width:${Math.max(0, hp / max) * 100}%"></em></i></li>`);
+        rows.push(`<li>${togo} m from ${esc(v.pl)}</li>`);
+      }
       if (v.w && (v.k !== 'siege' || v.ph === 'hold')) rows.push(`<li class="${v.w[0] >= v.w[1] ? 'done' : ''}">Wave ${Math.max(1, v.w[0])} of ${v.w[1]}</li>`);
       if (v.c !== undefined) rows.push(`<li>Beacon charge ${Math.floor(v.c * 100)}%${v.ct ? ' — contested!' : ''}</li>`);
       const bars = v.s.map(([, kind, , , hp, max]) => `<i class="ev-hp ${kind} ${hp <= 0 ? 'down' : ''}"><em style="width:${Math.max(0, hp / max) * 100}%"></em></i>`).join('');

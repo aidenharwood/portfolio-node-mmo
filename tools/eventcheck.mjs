@@ -324,9 +324,14 @@ console.log('The war-walker:');
   check(ev?.couplings?.length === 3 && ev.couplings.every((c) => c.alive), 'three couplings for one player');
   const hull1 = W?.maxHp;
   if (W) {
+    // It walks at its pace, and says so (screens stride its legs by it).
+    step(0.5);
+    const v = Math.hypot(W.velocity.x, W.velocity.z);
+    check(Math.abs(v - EVENT_TYPES.walker.speed) < 0.01 && Math.abs(Math.atan2(W.velocity.x, W.velocity.z) - ev.lead.follower.heading) < 0.01, `it goes at ${v.toFixed(2)} m/s, along the road`);
     const hp0 = W.hp;
     hit(one, W, 500);
     check(W.hp === hp0 && said.some((e) => e.k === 'rimm' && e.id === W.id), 'immune while a coupling lives');
+    check(!W.elite && !W.affixes.length, 'a plain machine, not an elite: no affixes, no elite tint on a hull that size');
 
     // Won: someone rides with it, breaks the couplings, then the walker.
     const t0 = sim.time;
@@ -399,7 +404,7 @@ console.log('The war-walker:');
   {
     const at = new THREE.Vector3(wsite.p.x, 0, wsite.p.z);
     const level = wsite.p.level ?? wsite.region.level;
-    const hull = sim.spawnEnemy('warwalker', at, { level, elite: true });
+    const hull = sim.spawnEnemy('warwalker', at, { level });
     const boss = sim.spawnEnemy('colossus', at, { level });
     const k = hull.maxHp / boss.maxHp;
     check(k >= 2 && k <= 3 && route.length / EVENT_TYPES.walker.speed >= k * 75 + 30, `its hull is ${k.toFixed(2)} Colossus fights: about ${mins(k * 75 + 40)} alone, against a ${mins(route.length / EVENT_TYPES.walker.speed)} walk`);
