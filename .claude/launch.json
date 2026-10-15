@@ -4,7 +4,7 @@
     {
       "name": "game",
       "runtimeExecutable": "python",
-      "runtimeArgs": ["C:/Users/aiden/Documents/cel-blade/serve.py", "5173"],
+      "runtimeArgs": ["serve.py", "5173"],
       "port": 5173
     }
   ]
