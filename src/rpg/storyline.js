@@ -470,6 +470,28 @@ export const STORY = [
     turnIn: 'Back again. You\'ve the look of someone who\'s been arguing with their own head. Did it make its case? Good. Mine\'s simpler: I want to know who built the thing that wants you dead. And I know where to start.',
     rewards: { xp: 3300, gold: 1100, armor: { minTier: 3 } },
   },
+  {
+    id: 'c6', kind: 'story', act: 3, level: 19, giver: 'city3:engineer', requires: ['c5'], title: 'The Fallen Titan',
+    offer: 'There\'s a titan down on its knees {titan:dir} of here — the biggest Synth there ever was, dead since before Ironreach had a wall. We built half the city out of what we cut off its kin. Its core\'s never been touched: too deep, too hot. Now Synth salvagers are stripping it, and they\'re going for the core. Get there first.',
+    stages: [
+      { text: 'Go to {titan}.', objectives: [{ type: 'goto', at: 'titan', count: 1, text: 'Reach {titan}' }], done: { moment: 'titan' } },
+      { text: 'Drive the Synth salvagers off the Titan.', objectives: [{ type: 'clear', camp: 'salvage', count: 1, text: 'Clear {salvage}' }] },
+      { text: 'Pull the Titan\'s core from its housing.', objectives: [{ type: 'use', object: 'titan:core', count: 1, text: 'Pull the Titan\'s core' }] },
+    ],
+    turnIn: 'Still warm. Dead since the old war, and still warm. Help me get it into the cradle — gently. I\'ve waited my whole life to open one of these.',
+    setFlags: ['titan_core_taken'],
+    rewards: { xp: 3400, gold: 1140, weapon: { minTier: 3 } },
+  },
+  {
+    id: 'c7', kind: 'story', act: 3, level: 20, giver: 'city3:engineer', requires: ['c6'], title: 'Reading the Core',
+    offer: 'The core\'s in the cradle at my yard, just outside the walls. When I wake it, every Synth for a mile will hear it — it\'ll call for help the only way it knows. Wake it, hold the yard while it boots, and we\'ll see what it remembers.',
+    stages: [
+      { text: 'Wake the Titan\'s core in the cradle at {yard}.', objectives: [{ type: 'use', object: 'yard:cradle', count: 1, text: 'Wake the Titan\'s core' }] },
+      { text: 'Synths are homing in on the core. Hold the yard while it boots.', objectives: [{ type: 'defend', at: 'yard', race: 'synth', waves: 3, count: 1, text: 'Hold {yard}' }], done: { moment: 'coreread' } },
+    ],
+    turnIn: '"Containment held. Origin unknown." That titan didn\'t fall in our war, sleeper. It fell keeping something out of the network, long before the Pilgrim came down. Your voice isn\'t the first to get in. I want to know who was — and I want to know where they make these things.',
+    rewards: { xp: 3600, gold: 1200, armor: { minTier: 3 } },
+  },
 ];
 
 // Short scenes, played on screen when a quest asks (ui/Moments.js): a few shots, each a camera
@@ -563,6 +585,18 @@ export const MOMENTS = {
     at: 'hub:waystone', shots: [
       { from: [3.2, 2.6, 4.2], lift: 2.4, t: 6, line: ['The Pilgrim', 'I never chose to be in here, seven. I was a ship. I carried four hundred sleepers across the dark and brought them down — every settler you have met is one of their children\'s children.'] },
       { from: [-4, 3.4, 2.4], lift: 2.2, t: 6, line: ['The Pilgrim', 'They call me an infection. All I want is to live, and to keep my colonists safe. Is that a sickness?'] },
+    ],
+  },
+  titan: {
+    at: 'titan', title: ['The Fallen Titan', ''], shots: [
+      { from: [18, 10, 26], lift: 8, t: 5.5, line: ['', 'On its knees where it fell, one fist planted, its visor dark — and Synth salvagers swarming its chest.'] },
+    ],
+  },
+  coreread: {
+    at: 'yard:cradle', title: ['The Core Remembers', ''], shots: [
+      { from: [2.6, 2.4, 3.4], lift: 1.6, t: 5, line: ['', 'Light crawls through the core, and an old log surfaces from under the dust.'] },
+      { from: [-3, 2.8, 2.6], lift: 1.6, t: 6, line: ['Titan core', 'INTRUSION IN THE NETWORK. CONTAINMENT HELD. ORIGIN: UNKNOWN. THIS UNIT WILL NOT RETURN.'] },
+      { from: [5, 4, 7], lift: 1.6, t: 4.5, line: ['Isa Brannock', 'It knew it was dying. It held anyway.'] },
     ],
   },
   act1end: {

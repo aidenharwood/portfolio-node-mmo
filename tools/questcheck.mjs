@@ -315,6 +315,7 @@ check(!Object.keys(core.records.raids ?? {}).length, 'and all without a raid cle
 check(quests.flags.act3_started && quests.completed.has('c2'), 'Act III under way: Ironreach reached, the Synth scouts at the stone driven off');
 check(quests.completed.has('c3'), 'the first war-walker stopped (c3, a public event the quest called)');
 check(quests.flags.synth_orders_known && quests.completed.has('c5'), 'the Synths\' orders known from the stone, and the Pilgrim heard out');
+check(quests.flags.titan_core_taken && quests.completed.has('c7'), 'the Fallen Titan\'s core pulled, and read at Brannock\'s Yard');
 check(npc(storyRef(w, 'city1:raidgate')?.npc ?? '')?.gate === 'raid', 'New Meridian\'s raid gate can be pointed at (city1:raidgate)');
 check(!!quests.flags.told_ashe !== !!quests.flags.kept_wardens_secret, `Ysolde's confession: one choice made (${quests.flags.told_ashe ? 'told Ashe' : quests.flags.kept_wardens_secret ? 'kept it' : 'neither'})`);
 {
@@ -450,7 +451,7 @@ for (const a6 of [0, 1]) {
       const onePerPair = pairs.every((pair, k) => f[pair[picked[k]]] && !f[pair[1 - picked[k]]]);
       const bad = lines.filter(([, t]) => !LINE_OK(t));
       const name = `Krell ${a6 ? 'freed' : 'chained'}, voice ${a8 ? 'kept' : 'told'}, Wardens' secret ${b5 ? 'kept' : 'told Ashe'}`;
-      check(!stuck && f.act2_done && f.synth_orders_known && onePerPair && !bad.length,
+      check(!stuck && f.act2_done && f.synth_orders_known && f.titan_core_taken && onePerPair && !bad.length,
         `${name}: ${stuck ?? (bad.length ? `bad lines: ${bad.map(([w]) => w).join(', ')}` : `Acts II and III so far done, ${lines.length} lines`)}`);
     }
   }

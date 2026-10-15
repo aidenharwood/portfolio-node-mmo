@@ -56,6 +56,7 @@ export const STORY_FLAGS = {
   // ---------------------------------------------------------------- Act III: Iron Heart
   act3_started: { means: 'The player reached Ironreach and Foundrywright Isa Brannock (c1).', setBy: ['c1 setFlags'], readBy: [] },
   synth_orders_known: { means: 'A Synth emissary spoke through a waystone: the Synths quarantine the network, and the player is the carrier they hunt (c4).', setBy: ['c4 setFlags'], readBy: [] },
+  titan_core_taken: { means: 'The player drove the Synth salvagers off the Fallen Titan and pulled its control core (c6).', setBy: ['c6 setFlags'], readBy: [] },
 };
 
 // Flags the game makes as it runs, one per thing (listed here, not checked: their ids come from
