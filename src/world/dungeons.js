@@ -5,9 +5,9 @@
 // chosen tier (sim/Dungeons.js), with a reward chest at the end once a day per tier.
 //
 // The launch set follows the story: the Rustjaw Foundry (Ironjaw's fortress, Act I), the Sunken
-// Vault (the seal he was digging out, opened at the end of Act I) and the Brood Pits (out past
-// Farcall, for Act II). Two more themes — a Synth facility and a Wild cavern — are built by the
-// same generator, for the dev panel and the checks, until dungeons of their own arrive.
+// Vault (the seal he was digging out, opened at the end of Act I), the Brood Pits (out past
+// Farcall, for Act II) and the Foundry Below (past Ironreach, for Act III). Two more — a Synth
+// relay and a Wild cavern — are built by the same generator for the dev panel and the checks.
 
 // The grid every dungeon is laid out on, and the pockets they're built in.
 export const CELL = 2;            // metres per grid cell
@@ -81,6 +81,14 @@ export const DUNGEONS = {
     blurb: 'Hive tunnels out past Farcall, chewed down through the rock to the nests — and the thing that lays in them.',
     boss: { type: 'queen', name: 'The Brood Matron', tag: 'matron' }, mini: { type: 'praetorian', name: 'The Gravid Guard' },
   },
+  // Act III: where the Synths are made, under the highlands past Ironreach. Sealed until the
+  // Fallen Titan's core is taken (its codes are the way down). The standard route for now; G-2's
+  // structural twist can come to it later without moving its id or its way in.
+  foundrybelow: {
+    id: 'foundrybelow', name: 'The Foundry Below', theme: 'synth', level: 21, seed: 0xf0b31a, open: true, entrance: 'foundrybelow:hatch', needs: { flag: 'titan_core_taken' },
+    blurb: 'Under the highlands, the line where the Synths are made — still running, still building, for orders nobody living gave.',
+    boss: { type: 'colossus', name: 'The Forge-Overseer', tag: 'forgeoverseer' }, mini: { type: 'bulwark', name: 'The Line Foreman' },
+  },
   // The other two themes, for the dev panel and the checks.
   synthlab: {
     id: 'synthlab', name: 'Relay Station Kappa', theme: 'synth', level: 16, seed: 0x5717ab, open: false, dev: true,
@@ -93,7 +101,7 @@ export const DUNGEONS = {
     boss: { type: 'behemoth', name: 'The Old Bull' }, mini: { type: 'thunderhorn', name: 'Greyhorn' },
   },
 };
-export const LAUNCH = ['foundry', 'vault', 'brood'];
+export const LAUNCH = ['foundry', 'vault', 'brood', 'foundrybelow'];
 
 // The UTC day, for the reward chest's lockout (once a day per dungeon per tier).
 export const lockDay = (ms = Date.now()) => Math.floor(ms / 86400000);

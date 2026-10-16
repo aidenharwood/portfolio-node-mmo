@@ -99,9 +99,13 @@ const OBJECTS = {
   cut: { name: 'The Deep Cut', prompt: 'Set the charges', idle: 'The deep cut. Cold air breathes up out of it.', done: 'Sealed.' },
   relay: { name: 'Relay Mast', prompt: 'Repair the relay', idle: 'The relay\'s light is dead.', done: 'The relay blinks steadily.' },
   lantern: { name: 'Marsh-Lantern', prompt: 'Light the lantern', idle: 'A marsh-lantern, out.', done: 'The lantern burns.' },
+  // Act III (world/StorySites.js).
+  titancore: { name: 'Titan\'s Core', prompt: 'Pull the core', idle: 'The Titan\'s core, glowing in its torn-out housing.', done: 'An empty socket, still warm.' },
+  cradle: { name: 'Core Cradle', prompt: 'Wake the core', idle: 'Isa\'s cradle, its clamps open. It\'s waiting for something.', done: 'The core turns in its rings, awake.' },
   // Ways down into dungeons (world/dungeons.js).
   foundrygate: { name: 'Furnace Hall Gate', idle: 'The way down into the foundry.' },
   broodmouth: { name: 'The Brood Pits', idle: 'A tunnel mouth in the resin, breathing warm air.' },
+  hatch: { name: 'Blast Hatch', idle: 'A Synth blast hatch, sealed. Somewhere below, something is still running.' },
 };
 const FOLK_NEAR = 85;  // townsfolk are built when you come this close…
 const FOLK_FAR = 110;  // …and let go past this
@@ -1095,7 +1099,7 @@ class Game {
       const O = OBJECTS[n.model] ?? { name: 'Object' };
       const prop = {
         kind: 'object', id: n.id, place, n, title: this.placeName(place), name: O.name,
-        position: new THREE.Vector3(n.x, this.world.groundHeight(n.x, n.z), n.z), height: n.model === 'vaultdoor' ? 7 : 1.6,
+        position: new THREE.Vector3(n.x, this.world.groundHeight(n.x, n.z), n.z), height: n.model === 'vaultdoor' ? 7 : n.model === 'hatch' ? 6 : 1.6,
       };
       // (Something a quest wants used: the same '…' as someone it wants a word with — it gives none.)
       this.markProp(prop, [n.id], false);

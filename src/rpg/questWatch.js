@@ -39,6 +39,7 @@ export function defenceAt(quests, world, x, z) {
       return {
         key: defenceKey(quests, o, q), x: t.x, z: t.z, r: Math.max(12, o.r ?? t.r ?? 16), name: t.name ?? q.title,
         race: o.race ?? region.race, level: Math.max(1, region.level), waves: o.waves ?? 2,
+        ...(t.gate !== undefined ? { gate: t.gate } : {}),
       };
     }
   }

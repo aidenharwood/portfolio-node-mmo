@@ -118,6 +118,16 @@ export const BESTIARY = {
     strengths: 'Shells that land from sixty metres off, and a blast of exhaust for anyone who climbs on.',
     weaknesses: 'Rooted where they were set down, and slow to reload. Get past the crew and they\'re yours.',
   },
+  warwalker: {
+    lore: 'An old guardian of the Maker network, nine metres of hull on four legs, marching down the roads toward the places whose waystones have started answering. It doesn\'t stop to fight. It stops when it gets there.',
+    strengths: 'Stomps, shock barrages and fans of fire, an escort dropping off behind it — and nothing gets through its hull while its couplings hold.',
+    weaknesses: 'Break the couplings riding round it and the shield goes down. It keeps to the road: get ahead of it.',
+  },
+  walkercoupling: {
+    lore: 'Power couplings that ride round a war-walker\'s hull, each one feeding the field that keeps its armour whole.',
+    strengths: 'Arcs of shock at anyone who gets close.',
+    weaknesses: 'Small and brittle. Every one that breaks brings the walker\'s shield nearer to failing.',
+  },
   // ---------------------------------------------------------------- the Brood Mother's raid
   broodwarden: {
     lore: 'The first door of the deep nest is a guard grown to fill it: a praetorian fed until its carapace became a wall.',

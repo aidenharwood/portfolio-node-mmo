@@ -28,10 +28,14 @@ Anything marked *(default)* below is my assumption. Change it when you review.
 - **Built:** phases 1–5 and 7 (balance and hordes, talents and achievements, settlements, the
   quest system and Act I, dungeons, the Brood Mother raid). Each has its Node check in `npm test`.
 - **Phase 6 (public world events):** 6a is built (see 8): the director, Hive Surges, Scav
-  Sieges, Maker Anomalies, overrun settlements and the Retake. 6b (the war-walker and the
-  stampede) isn't.
-- **Phase 8 (Acts II–IV and the endgame):** Act II (8a) is under way: its story design and the
-  first quests, on their own branch.
+  Sieges, Maker Anomalies, overrun settlements and the Retake. 6b is under way: routes along the
+  roads and the Synth war-walker are built (P-1, P-2, on branch `p-walker`); the stampede, the
+  director's rules for walkers, escort quests and the close-out aren't.
+- **Phase 8 (Acts II–IV and the endgame):** Act II (8a) is built (b1–b12). Act III (8b) is under
+  way: its story design ([the Act III spec](superpowers/specs/2026-10-15-act-iii-story-design.md))
+  is approved. Ironreach, quests c1–c8, the Fallen Titan with Brannock's Yard and the Foundry Below are built (WORK_PLAN
+  B-1 to B-3, branch `act-iii`, on top of the war-walker branch `p-walker`). The
+  Colossus foundry and the act's choice come next (B-4, B-5).
 - **Stabilising:** a pass over what the phases left open (WORK_PLAN S-1 to S-4): the server's
   scenery colliders matched to the client's, the deploy files and docs matched to the real
   pipeline, and trades and mail made safe against a layer crashing. Each is on its own branch
@@ -53,7 +57,7 @@ The sections below this one are the plan as first written, kept for reference. W
 | 3 | Settlements of every size | Hamlets to cities with services, quest boards and side quests | M | built |
 | 4 | Quest system v2 and Story Act I | Story-led play from level 1 to about 8 | L | built |
 | 5 | Dungeons | Interiors, a generator, open-world and instanced dungeons with tiers | XL | built |
-| 6 | Public world events | Faction offensives everyone nearby joins | L | 6a built, 6b next |
+| 6 | Public world events | Faction offensives everyone nearby joins | L | 6a built, 6b under way (the war-walker) |
 | 7 | Raids | 8–16 player instances with scripted multi-phase bosses | L | built |
 | 8 | Story Acts II–IV and the endgame loop | The rest of the story, more dungeons and raids, and the tiered endgame | XL | waits on 6 |
 
@@ -482,6 +486,38 @@ The design is in 8.1–8.6 below, and the original outline after it. Where 6a di
 - **Admins** can start and settle events online with `/admin event surge|siege|anomaly|win|lose`.
   The dev panel does the same offline.
 - **Server restart:** 6a changes server code, so your 8080 server needs a restart to run events.
+
+### 8.0 6b so far: the war-walker (P-1, P-2)
+
+**Status: built** (2026-10-15, branch `p-walker`). `tools/eventcheck.mjs` adds routes (one built
+from the roads, walked, a short gap jumped and a long one leaving it stuck), something led along a
+route across regions with whoever follows it told all the way, and the walker won, lost (overrun
+and a Synth Retake), abandoned, stuck, killed on the tick it arrives, its couplings, scaling, pace
+and hull, and its state on the wire.
+- **Routes** (`sim/Routes.js`): from a waystone up to three regions off, along the roads between
+  waystones, to the settlement's waystone and in by its spur; 360–480 m long (at least four
+  minutes' walk). A settlement with no such road (or whose region has no waystone) gets no walker. They keep out of
+  the cities and the hub unless the city is where they're going *(default)*. A follower walks a
+  route at a steady pace, jumps ground it can't stand on if there's footing within 30 m, and is
+  otherwise stuck.
+- **An event can lead something** along a route, a structure or an enemy. Its centre moves with
+  it, so `wev`, participation, stragglers and abandonment follow it without other changes.
+- **The Synth War-walker** (`walker`): a settlement event. It sets out 360–480 m off and walks at
+  1.5 m/s (four to five and a half minutes). Three power couplings (one more per three extra defenders) ride
+  round its hull, which can't be hurt while any holds; an escort wave drops off behind it every
+  24 s. Win: bring it down. Lost: it arrives, and the settlement is overrun with a Synth Retake.
+  Abandoned (nobody within 200 m of it or of the settlement for 45 s) or stuck: it turns back
+  and nothing is overrun *(default)*. Waiting for it at the beacon counts as being there.
+  - *Toughness:* not an elite (the elite tint and affixes don't suit it). Its hull is about 1.6
+    Colossus fights. `eventcheck` budgets one player alone: running out to meet it, its three
+    couplings, its hull, and a sixth more for its escort comes to about 3:50, inside the shortest
+    walk (4:00). It's tight alone and comfortable for a group. More players toughen it by the
+    usual crowd rule, not on top of it, and it never goes home to mend: stepping back out of
+    reach doesn't heal it.
+  - *Shielded:* while its couplings hold, screens show it immune (the ward, no damage numbers).
+    The couplings ride 3.2 m up beside its legs, within a jump of a melee swing.
+  - *For now* only a quest (A-2's hook, Act III's "The Walker") or the console starts one; the
+    director, `/admin event walker` and the dev panel come with P-4.
 
 ### 8.1 Split
 - **6a (now):**

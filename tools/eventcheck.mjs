@@ -18,6 +18,10 @@ import { RARITY } from '../src/items/rarity.js';
 import { SimHost } from '../server/simhost.js';
 import { loadCharacter } from '../server/characters.js';
 import { eventCalled, eventObjectives, EVENT_CALL } from '../src/rpg/questWatch.js';
+import { roadRoute, RouteFollower } from '../src/sim/Routes.js';
+import { CITY_WALL } from '../src/world/places.js';
+import { storyRef } from '../src/world/story.js';
+import { OpenNav } from '../src/sim/OpenNav.js';
 
 const seed = Number(process.argv[2] ?? 12345);
 const world = new HeadlessWorld(seed);
@@ -119,6 +123,76 @@ const character = (p, level) => {
   return core;
 };
 const startAt = (site, type, level = null) => dir.start({ poi: site.p, type, level: level ?? site.p.level ?? site.region.level, race: EVENT_TYPES[type].race ?? site.region.race });
+
+// ---------------------------------------------------------------- routes (P-1)
+// A route from the roads between waystones, toward a settlement two or more regions off.
+console.log('Routes:');
+const routeSite = all.find(({ p, region }) => ['hamlet', 'settlement', 'town'].includes(p.type) && region.level >= 6 && roadRoute(world.gen, p));
+const route = routeSite && roadRoute(world.gen, routeSite.p);
+check(!!route, 'a road route to a settlement');
+check(route?.length >= 360 && route?.length <= 480, `its length is in band (${Math.round(route?.length)} m)`);
+check(route?.regions >= 2, `it crosses regions (${route?.regions})`);
+const [lx, lz] = route?.points.at(-1) ?? [Infinity, Infinity];
+check(Math.hypot(lx - routeSite?.p.x, lz - routeSite?.p.z) <= (routeSite?.p.r ?? 0) + 6, 'it ends at the settlement');
+const towns = world.gen.cities();
+// Every settlement in the rings: a route or none, never a throw (a region can lack a waystone);
+// every route in band, and none through a city that isn't where it's going, or the hub.
+{
+  let threw = 0;
+  let none = 0;
+  let bad = 0;
+  const routes = [];
+  for (const { p } of all) {
+    if (!['hamlet', 'settlement', 'town'].includes(p.type)) continue;
+    let r = null;
+    try { r = roadRoute(world.gen, p); } catch { threw++; continue; }
+    if (!r) { none++; continue; }
+    routes.push(r);
+    const inBand = r.length >= 360 && r.length <= 480;
+    const clear = r.points.every(([x, z]) => Math.hypot(x, z) > 60 && towns.every((c) => Math.hypot(c.x - p.x, c.z - p.z) < CITY_WALL || Math.hypot(c.x - x, c.z - z) > CITY_WALL + 10));
+    if (!inBand || !clear) bad++;
+  }
+  check(!threw, `no settlement's route throws (${routes.length} routes, ${none} with none${threw ? `, ${threw} threw` : ''})`);
+  check(routes.length > 20 && !bad, `every route in band and clear of the cities and the hub${bad ? ` (${bad} not)` : ''}`);
+}
+check(!!route && route.points.every(([x, z]) => towns.every((c) => Math.hypot(c.x - routeSite.p.x, c.z - routeSite.p.z) < CITY_WALL || Math.hypot(c.x - x, c.z - z) > CITY_WALL + 10) && Math.hypot(x, z) > 60), 'it keeps out of the cities and the hub');
+// Walked at 1.5 m/s it arrives in length / speed.
+const walk = (pts, canStand) => { const f = new RouteFollower(pts, { speed: 1.5, canStand }); let t = 0; while (f.step(0.05) === 'moving' && t < 2000) t += 0.05; return { f, t }; };
+const w1 = route && walk(route.points);
+check(w1?.f.status === 'arrived' && Math.abs(w1.t - route.length / 1.5) < 1, `a follower arrives on time (${w1 ? mins(w1.t) : '-'})`);
+// A 12 m stretch it can't stand on is jumped; a 40 m one leaves it stuck where it began.
+const line = Array.from({ length: 81 }, (_, i) => [i * 2.5, 0]);
+const gap = (a, b) => (x) => x < a || x > b;
+const w2 = walk(line, gap(100, 112));
+check(w2.f.status === 'arrived' && w2.f.skipped === 1, 'a short gap is jumped');
+const w3 = walk(line, gap(100, 140));
+check(w3.f.status === 'stuck' && w3.f.x < 100, 'a long gap leaves it stuck, before the gap');
+// Something an event leads along the route (a caravan, later): the event's area goes with it, so
+// whoever follows is told of it all the way, whichever region it's in.
+{
+  reset();
+  const convoy = dir.start({ poi: routeSite.p, type: 'retake', level: 6, race: 'synth' }); // any event will do as a carrier
+  const crate = dir.structure(convoy, `${convoy.id}:c`, 'pylon', { x: route.points[0][0], z: route.points[0][1] }, 50);
+  convoy.structures.push(crate);
+  dir.lead(convoy, crate, new RouteFollower(route.points, { speed: 6, canStand: (x, z) => world.standable(x, z) }));
+  const rider = player('rider');
+  sim.setPlayers([rider]);
+  let told = true;
+  const regions = new Set();
+  for (let t = 0; t < route.length / 6; t += 10) {
+    const behind = new RouteFollower(route.points, { speed: 1 });
+    behind.step(Math.max(0, t * 6 - 60)); // 60 m behind it
+    put(rider, behind.x, behind.z);
+    step(10);
+    told &&= dir.near(rider.position.x, rider.position.z).includes(convoy);
+    regions.add(world.regionAt(convoy.x, convoy.z).key);
+  }
+  check(told, 'a led structure is reported to someone following it, all the way');
+  check(regions.size >= 2, `it carries the event across regions (${regions.size})`);
+  check(Math.hypot(crate.x - convoy.x, crate.z - convoy.z) < 0.01 && crate.position.y === world.groundHeight(crate.x, crate.z), 'the structure and the event move together, on the ground');
+  sim.setPlayers([]);
+  reset();
+}
 
 // ---------------------------------------------------------------- the director
 console.log('The director:');
@@ -232,6 +306,226 @@ const play = (label, site, type, setup, limit = 900) => {
   check(ev.res === 'won' && ev.charge >= 1, `charged to full in ${mins(took)}`);
   check(ev.warden && ev.named.includes('Maker Warden'), 'a Maker Warden came out at half charge');
   check(ev.structures[0].alive, `the beacon stood (${Math.round(ev.structures[0].hp)}/${ev.structures[0].max})`);
+  reset();
+}
+
+// ---------------------------------------------------------------- the war-walker (P-2)
+// A Synth war-walker marches on a settlement along the roads (sim/Routes.js). Its couplings shield
+// it; break them, then bring it down before it arrives — or the settlement is overrun.
+console.log('The war-walker:');
+{
+  const wsite = routeSite;
+  const call = (people, at = wsite.p) => {
+    reset();
+    sim.setPlayers(people);
+    people.forEach((p, i) => put(p, at.x + i * 2, at.z));
+    const ev = dir.startStory(wsite.p.id, 'walker');
+    if (ev) step(GATHER + 1);
+    return ev;
+  };
+  // Keeps `p` `back` metres behind the walker along its route, every second.
+  const follow = (p, ev, back = 30) => {
+    let t = 1;
+    return () => {
+      if ((t += 0.05) < 1) return;
+      t = 0;
+      const f = ev.lead.follower;
+      const b = new RouteFollower(ev.route.points, { speed: 1 });
+      b.step(Math.max(0, f.d - back));
+      put(p, b.x, b.z);
+    };
+  };
+  const gone = (e) => !e.alive || e.gone;
+
+  const one = player('w1');
+  let ev = call([one]);
+  check(ev?.type === 'walker' && ev.route?.points.length > 10, 'a quest can call a war-walker at a settlement, with a road route');
+  check(dir.startStory(wsite.p.id, 'walker') === ev, 'calling it again finds the one already coming');
+  const W = ev?.walker;
+  check(!!W && Math.hypot(W.position.x - ev.route.points[0][0], W.position.z - ev.route.points[0][1]) < 3, 'it sets out from the route\'s start');
+  check(ev?.couplings?.length === 3 && ev.couplings.every((c) => c.alive), 'three couplings for one player');
+  const hull1 = W?.maxHp;
+  if (W) {
+    // It walks at its pace, and says so (screens stride its legs by it).
+    step(0.5);
+    const v = Math.hypot(W.velocity.x, W.velocity.z);
+    check(Math.abs(v - EVENT_TYPES.walker.speed) < 0.01 && Math.abs(Math.atan2(W.velocity.x, W.velocity.z) - ev.lead.follower.heading) < 0.01, `it goes at ${v.toFixed(2)} m/s, along the road`);
+    const hp0 = W.hp;
+    hit(one, W, 500);
+    check(W.hp === hp0 && said.some((e) => e.k === 'rimm' && e.id === W.id), 'immune while a coupling lives');
+    check(!W.elite && !W.affixes.length, 'a plain machine, not an elite: no affixes, no elite tint on a hull that size');
+    check(W.immune === true, 'screens are told it is shielded (immune) while its couplings hold');
+
+    // Won: someone rides with it, breaks the couplings, then the walker.
+    const t0 = sim.time;
+    let t = 1;
+    step(900, () => {
+      if ((t += 0.05) >= 1) {
+        t = 0;
+        put(one, W.position.x + 4, W.position.z);
+        const c = ev.couplings.find((x) => x.alive);
+        if (c) hit(one, c, c.maxHp + (c.shield ?? 0));
+        else hit(one, W, Math.ceil(W.maxHp * 0.05));
+      }
+      if (ev.stage === 'over') return false;
+    });
+    check(ev.res === 'won', `won in ${mins(sim.time - t0)}, ${Math.round(ev.lead.follower.left)} m short of ${wsite.p.name}`);
+    check(said.some((e) => e.k === 'evstep' && e.id === ev.id && /shield is down/.test(e.text)) && W.immune === false, 'its shield came down with the last coupling (no longer immune)');
+    check(!dir.overrun.has(wsite.p.id), 'nothing overrun');
+    check(ev.enemies.every(gone), 'what was left of it melted away');
+    check(ev.result.people.some((p) => p.id === 'w1'), 'the one who stopped it earned the chest');
+
+    // Lost: someone follows and never fights; it arrives and the settlement falls.
+    ev = call([one]);
+    step(ev.route.length / 1.5 + 30, () => { follow(one, ev)(); if (ev.stage === 'over') return false; });
+    const retake = [...dir.events.values()].find((x) => x.type === 'retake' && x.site.id === wsite.p.id);
+    check(ev.res === 'lost' && dir.overrun.has(wsite.p.id), `it arrived and ${wsite.p.name} is overrun`);
+    check(retake?.race === 'synth', 'a Synth garrison holds it: the Retake');
+
+    // Waiting for it at the beacon, as the event asks, isn't abandoning it: it comes all the way.
+    ev = call([one]);
+    step(ev.route.length / 1.5 + 30, () => { if (ev.stage === 'over') return false; });
+    check(ev.res === 'lost', `someone who waits at the beacon sees it arrive (${ev.res})`);
+
+    // Abandoned: nobody stays near it; it turns back, and nothing's overrun.
+    ev = call([one]);
+    put(one, wsite.p.x + 1500, wsite.p.z);
+    let t1 = sim.time;
+    step(60, () => { if (ev.stage === 'over') return false; });
+    check(ev.res === 'faded' && sim.time - t1 <= 50 && !dir.overrun.has(wsite.p.id), `abandoned, it turns back (${Math.round(sim.time - t1)} s)`);
+    check(gone(ev.walker), 'the walker is gone');
+
+    // Stuck: ground it can't cross, all the way on; it turns back.
+    ev = call([one]);
+    const fol = follow(one, ev);
+    step(20, fol);
+    ev.lead.follower.canStand = () => false;
+    t1 = sim.time;
+    step(5, () => { fol(); if (ev.stage === 'over') return false; });
+    check(ev.res === 'faded' && sim.time - t1 <= 2 && !dir.overrun.has(wsite.p.id) && gone(ev.walker), 'stuck, it turns back and nothing\'s overrun');
+
+    // Brought down on the very tick it would have arrived: that's a win.
+    ev = call([one]);
+    for (const c of ev.couplings) hit(one, c, c.maxHp + (c.shield ?? 0));
+    const f = ev.lead.follower;
+    f.step((f.left - 0.01) / f.speed);
+    put(one, ev.walker.position.x + 4, ev.walker.position.z);
+    hit(one, ev.walker, ev.walker.hp + (ev.walker.shield ?? 0) + 1);
+    step(0.1);
+    check(ev.res === 'won', 'killed as it arrives, it\'s won');
+
+    // Scaling: four at the start bring out a coupling more. The hull toughens as any enemy's does
+    // with the crowd fighting it (EnemySim's crowd rule), and the event adds nothing on top.
+    ev = call([one, player('w2'), player('w3'), player('w4')]);
+    check(ev.couplings.length === 4 && ev.walker.maxHp === hull1, `four players: ${ev.couplings.length} couplings, the hull as it was until they reach it`);
+    ev = call([one]);
+    const before = ev.walker.maxHp;
+    const [p2, p3] = [player('w5'), player('w6')];
+    sim.setPlayers([one, p2, p3]);
+    for (const p of [one, p2, p3]) put(p, ev.walker.position.x + 6, ev.walker.position.z);
+    step(2);
+    check(Math.abs(ev.walker.maxHp - before * 2.2) <= 1, `two joining toughen the hull by the crowd rule alone (×${(ev.walker.maxHp / before).toFixed(2)})`);
+    // Half its hull down, then they step back out of its reach a while and come again: it hasn't
+    // healed (a walker doesn't go home to mend).
+    for (const c of ev.couplings) hit(one, c, c.maxHp + (c.shield ?? 0));
+    step(0.1);
+    hit(one, ev.walker, Math.ceil(ev.walker.hp / 2));
+    const half = ev.walker.hp / ev.walker.maxHp;
+    const max0 = ev.walker.maxHp;
+    for (const p of [one, p2, p3]) put(p, ev.walker.position.x + 90, ev.walker.position.z);
+    step(4);
+    for (const p of [one, p2, p3]) put(p, ev.walker.position.x + 6, ev.walker.position.z);
+    step(2);
+    check(ev.stage === 'active' && ev.walker.maxHp >= max0 && ev.walker.hp / ev.walker.maxHp <= half + 0.01, `stepping back doesn't heal it (${Math.round(half * 100)}% → ${Math.round((ev.walker.hp / ev.walker.maxHp) * 100)}%)`);
+  }
+
+  // One player alone can stop it on the shortest road: run out to meet it (from the beacon, at a
+  // run, as it comes on), break its couplings, then its hull (in Colossus fights: the power curve's
+  // 60–90 s boss, 75 s), with its escort taking a sixth of their time — inside the walk.
+  {
+    const at = new THREE.Vector3(wsite.p.x, 0, wsite.p.z);
+    const level = wsite.p.level ?? wsite.region.level;
+    const hull = sim.spawnEnemy('warwalker', at, { level });
+    const boss = sim.spawnEnemy('colossus', at, { level });
+    const cp = sim.spawnEnemy('walkercoupling', at, { level });
+    const k = hull.maxHp / boss.maxHp;
+    const speed = EVENT_TYPES.walker.speed;
+    const shortest = 360 / speed;
+    const meet = 360 / (6 + speed); // at worst it starts as far off as its road is long
+    const fight = (k + (EVENT_TYPES.walker.couplings * cp.maxHp) / boss.maxHp) * 75 * 1.15;
+    check(meet + fight <= shortest, `alone: about ${mins(meet + fight)} to meet it and bring it down (hull ${k.toFixed(2)} Colossus fights), against at least a ${mins(shortest)} walk`);
+    for (const e of [hull, boss, cp]) sim.removeEnemy(e);
+  }
+
+  // Act III's "The Walker" (c3) calls one at Ironreach's nearest settlement with a road
+  // (world/story.js 'ironhamlet'): the director starts it there for real.
+  {
+    reset();
+    const ham = storyRef(world, 'ironhamlet');
+    const c3 = ham?.poi && dir.startStory(ham.poi, 'walker');
+    check(c3?.type === 'walker' && c3.site.id === ham.poi && c3.route?.length >= 360, `c3's walker starts at ${ham?.name ?? 'nowhere'} (${Math.round(c3?.route?.length ?? 0)} m of road)`);
+  }
+
+  // Act III's "Reading the Core" (c7) holds Brannock's Yard, fenced but for its gate toward the
+  // city: the Synths come at it from the gate's side, so they can get in (a wave from behind the
+  // fence would only press against it).
+  {
+    reset();
+    const yard = storyRef(world, 'yard');
+    const p = player('yardkeeper');
+    sim.setPlayers([p]);
+    put(p, yard.x, yard.z);
+    const d = sim.encounters.defend({ key: 'yardcheck', x: yard.x, z: yard.z, r: Math.max(12, yard.r), name: yard.name, race: 'synth', level: 20, waves: 3, gate: yard.gate });
+    let off = 0;
+    let n = 0;
+    for (let w = 0; w < 3; w++) {
+      step(12, () => { if (d.enemies.some((e) => e.alive)) return false; });
+      for (const e of d.enemies) {
+        if (!e.alive) continue;
+        const a = Math.atan2(e.home.x - yard.x, e.home.z - yard.z);
+        off = Math.max(off, Math.abs(Math.atan2(Math.sin(a - yard.rot), Math.cos(a - yard.rot))));
+        n++;
+        e.dissolve();
+      }
+      step(0.1);
+    }
+    check(yard.gate === yard.rot && n > 0 && off < 0.3, `the yard's waves come from its gate side (${n} Synths, within ${off.toFixed(2)} rad of the gate)`);
+    sim.setPlayers([]);
+    reset();
+    // …and from there they make it in: chasers walked by the world's own pathing (sim/OpenNav.js,
+    // the fence's colliders) from the wave's spawn line reach someone at the cradle.
+    world.loadPoi(world.poiById(yard.poi));
+    const cradle = storyRef(world, 'yard:cradle');
+    const goal = { x: cradle.x + Math.sin(yard.rot) * 1.8, z: cradle.z + Math.cos(yard.rot) * 1.8 };
+    const stuck = [];
+    for (const da of [-0.18, 0, 0.18]) {
+      const nav = new OpenNav(world, 1.2);
+      const out = Math.max(12, yard.r) + 16;
+      const q = new THREE.Vector3(yard.x + Math.sin(yard.rot + da) * out, 0, yard.z + Math.cos(yard.rot + da) * out);
+      let pts = null;
+      let i = 0;
+      let t = 0;
+      for (let next = 0; t < 40; t += 0.05) {
+        nav.tick(t);
+        if (t >= next) { pts = nav.route(q, goal, 0.45); i = 0; next = t + 1; }
+        while (pts && i < pts.length && Math.hypot(pts[i].x - q.x, pts[i].z - q.z) < 0.8) i++;
+        const to = pts && i < pts.length ? pts[i] : goal;
+        if (Math.hypot(goal.x - q.x, goal.z - q.z) < 2) break;
+        const dd = Math.hypot(to.x - q.x, to.z - q.z);
+        if (dd > 0.01) { q.x += ((to.x - q.x) / dd) * 0.2; q.z += ((to.z - q.z) / dd) * 0.2; }
+        q.y = world.groundHeight(q.x, q.z);
+        world.resolve(q, 0.45, 0.3, 2, null);
+      }
+      if (t >= 40) stuck.push(da);
+    }
+    check(!stuck.length, `and they get in through the gate to the cradle${stuck.length ? ` (not from ${stuck.join(', ')} rad)` : ''}`);
+  }
+
+  // Overrun already: no walker can be called there.
+  reset();
+  dir.overrun.set(wsite.p.id, { id: wsite.p.id, x: wsite.p.x, z: wsite.p.z, r: 10, name: wsite.p.name, race: 'synth', until: sim.time + 60 });
+  check(dir.startStory(wsite.p.id, 'walker') === null, 'none at a settlement that\'s overrun');
+  sim.setPlayers([]);
   reset();
 }
 
@@ -545,6 +839,20 @@ console.log('On the server (server/simhost.js):');
   const won = (s) => s.out.some((m) => m.t === 'sop' && m.op?.op === 'evwon' && m.op.roll.id === q.id);
   check(won(c) && won(d) && c.core.quests.isComplete(q.id) && d.core.quests.isComplete(q.id), 'won: the step moved on for both who took part (evwon)');
   check(!won(e) && !e.core.quests.isComplete(q.id), 'not for the one on the same step who wasn\'t there');
+
+  // A war-walker on the move: whoever's near is told where it's got to (wev wk), as it goes.
+  for (const x of [...hd.events.values()]) hd.remove(x);
+  hd.rest.clear();
+  const wg = session(76);
+  move(wg, routeSite.p.x, routeSite.p.z);
+  const wk = hd.startStory(routeSite.p.id, 'walker');
+  tick(GATHER + 1);
+  const wkAt = () => wg.out.filter((m) => m.t === 'wev').at(-1)?.l.find((v) => v.id === wk?.id)?.wk;
+  tick(2);
+  const w1 = wkAt();
+  tick(2);
+  const w2 = wkAt();
+  check(Array.isArray(w1) && w1.length === 7 && Array.isArray(w2) && (w1[0] !== w2[0] || w1[1] !== w2[1]), `the walker's place goes out as it moves (wk ${JSON.stringify(w1)} → ${JSON.stringify(w2)})`);
 }
 
 console.log(failed ? `eventcheck: ${failed} failed` : 'eventcheck: all good');

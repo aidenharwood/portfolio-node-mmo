@@ -49,6 +49,7 @@ const STORY_LINE = {
   chief: ['Careful where you step — every stone here is older than the city.', 'The Wardens pay us to dig. The scavs want to stop us digging. Makes you wonder what we\'re digging for.'],
   krell: ['I only kept his books. I never swung a hammer for him. Not once.', 'The vault... he talked of nothing else, at the end.'],
   captain: ['The masts hear everything for a hundred leagues. Lately, they don\'t like what they hear.', 'Keep your voice down near the masts. Old habit.'],
+  engineer: ['Every Synth I\'ve opened was built to last forever. Most of them nearly did.', 'Mind the slag. It\'s hotter than it looks. Everything here is.'],
 };
 const TRADER_TITLE = { homestead: 'Produce Seller', outpost: 'Quartermaster', mining: 'Ore Broker', caravan: 'Caravan Trader', stilts: 'Swamp Peddler', town: 'Merchant', city: 'Merchant' };
 const STOCK_TITLE = { weapons: 'Gunsmith', armor: 'Armourer' };

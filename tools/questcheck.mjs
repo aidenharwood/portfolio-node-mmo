@@ -17,9 +17,11 @@ import { ACTS, STORY } from '../src/rpg/storyline.js';
 import * as storyline from '../src/rpg/storyline.js';
 import { SIDE_CHAINS } from '../src/rpg/sidequests.js';
 import { reachedPlaces, defenceAt, heldObjectives, questDrops, eventCalled, eventObjectives } from '../src/rpg/questWatch.js';
-import { storyRef } from '../src/world/story.js';
+import { storyRef, storyPlaces } from '../src/world/story.js';
 import { settlementFolk } from '../src/world/settlements.js';
 import { flagUses, flagProblems, storyFolk, STORY_FLAGS } from './storyflags.mjs';
+import { roadRoute } from '../src/sim/Routes.js';
+import { CITY_WALL } from '../src/world/places.js';
 
 const seed = Number(process.argv[2] ?? 12345);
 const w = new HeadlessWorld(seed);
@@ -153,6 +155,8 @@ console.log('Lines keyed by story flags:');
   check(heard(false) === 'B', 'and without it, the default');
   const act2 = ACTS.find((A) => A.act === 2);
   check(act2?.title === 'Act II' && act2.sub === 'The Brood' && act2.levels === '8–16', 'Act II, The Brood (8–16), is in the journal\'s acts');
+  const act3 = ACTS.find((A) => A.act === 3);
+  check(act3?.title === 'Act III' && act3.sub === 'Iron Heart' && act3.levels === '16–24', 'Act III, Iron Heart (16–24), is in the journal\'s acts');
 }
 
 // ---------------------------------------------------------------- Act II's people and places
@@ -173,6 +177,67 @@ console.log('Act II\'s people and places:');
   log.flags.krell_freed = false;
   log.flags.krell_captured = true;
   check(!!k?.when && !log.whenHolds(k.when), 'but not if he was taken in chains');
+}
+
+// ---------------------------------------------------------------- Act III's people and places
+console.log('Act III\'s people and places:');
+{
+  const at = (r) => { const t = storyRef(w, r); return t?.npc && npc(t.npc); };
+  const isa = at('city3:engineer');
+  const shown = isa && settlementFolk(w.placeOf(isa), isa);
+  check(shown?.name === 'Isa Brannock' && shown.title === 'Foundrywright', `Ironreach's foundrywright stands in the city (${shown?.name ?? 'nobody'})`);
+  const tal = at('city3:warden');
+  const talShown = tal && settlementFolk(w.placeOf(tal), tal);
+  check(talShown?.name === 'High Warden Tal', `High Warden Tal stands in Ironreach's citadel (${talShown?.name ?? 'nobody'})`);
+  const c3 = w.gen.cities()[2];
+  const stone = storyRef(w, 'ironstone');
+  const stonePoi = stone?.poi && w.poiById(stone.poi);
+  check(stonePoi?.type === 'waystone' && Math.hypot(stonePoi.x - c3.x, stonePoi.z - c3.z) > CITY_WALL, `the stone the Synths scan is a waystone out past Ironreach's walls (${stonePoi?.name ?? 'none'})`);
+  const ham = storyRef(w, 'ironhamlet');
+  const hamPoi = ham?.poi && w.poiById(ham.poi);
+  check(['hamlet', 'settlement', 'town'].includes(hamPoi?.type) && !!roadRoute(w.gen, hamPoi), `the settlement the first walker marches on has a road for it (${hamPoi?.name ?? 'none'})`);
+  // On any world the stone stands out in the open: not a village's or town's own square (where
+  // the Synth scouts would be fought among its folk), and so never the walker's settlement too.
+  const squares = [];
+  for (const s of [seed, 95028, 777]) {
+    const ws = s === seed ? w : new HeadlessWorld(s);
+    const st = storyRef(ws, 'ironstone');
+    const sp = st?.poi && ws.poiById(st.poi);
+    const home = sp && ws.poisNear(sp.x, sp.z, 120, ['hamlet', 'settlement', 'town']).find((p) => Math.hypot(p.x - sp.x, p.z - sp.z) < (p.r ?? 12) + 10);
+    if (!sp || home) squares.push(`seed ${s}: ${sp ? `${sp.name} is in ${home.name}` : 'no stone'}`);
+  }
+  check(!squares.length, `the stone stands out in the open on every world tried${squares.length ? ` (not: ${squares.join('; ')})` : ''}`);
+  // The salvagers' rig stands beside the Titan, on its far side from Ironreach, on every world
+  // tried: so the Titan is reached first (c6's first step) and the rig cleared after (its second).
+  const rigs = [];
+  for (const s of [seed, 95028, 777, 1, 4]) {
+    const ws = s === seed ? w : new HeadlessWorld(s);
+    const sp = storyPlaces(ws.gen);
+    const c = ws.gen.cities()[2];
+    const d = Math.hypot(sp.salvage.x - sp.titan.x, sp.salvage.z - sp.titan.z);
+    const far = Math.hypot(sp.salvage.x - c.x, sp.salvage.z - c.z) > Math.hypot(sp.titan.x - c.x, sp.titan.z - c.z);
+    if (d > 100 || !far) rigs.push(`seed ${s}: ${Math.round(d)} m${far ? '' : ', city side'}`);
+  }
+  check(!rigs.length, `the salvagers' rig stands beside the Titan, beyond it from the city, on every world tried${rigs.length ? ` (not: ${rigs.join('; ')})` : ''}`);
+  // The Fallen Titan (B-2): the kneeling titan landmark, its core to pull, the salvagers' camp by
+  // it, and Isa's yard just outside the walls where the core is woken.
+  const poiOf = (r) => { const t = storyRef(w, r); return t && w.poiById(t.poi ?? t.camp ?? ''); };
+  const titan = poiOf('titan');
+  check(titan?.type === 'landmark' && titan.kind === 'titan' && titan.name === 'The Fallen Titan' && Math.hypot(titan.x - c3.x, titan.z - c3.z) < 700, `the Fallen Titan kneels out past Ironreach (${titan ? `${Math.round(Math.hypot(titan.x - c3.x, titan.z - c3.z))} m` : 'missing'})`);
+  check(!!at('titan:core'), 'its core is something to pull');
+  const rig = poiOf('salvage');
+  check(rig?.type === 'camp' && rig.race === 'synth' && titan && Math.hypot(rig.x - titan.x, rig.z - titan.z) < 80, `the salvagers camp beside it (${rig?.name ?? 'none'}, ${rig?.race ?? '-'})`);
+  const yard = poiOf('yard');
+  const yd = yard && Math.hypot(yard.x - c3.x, yard.z - c3.z);
+  check(yard?.type === 'story' && yd > CITY_WALL && yd < CITY_WALL + 160 && !!at('yard:cradle'), `Brannock's Yard stands just outside the walls, with the cradle (${yd ? Math.round(yd - CITY_WALL) : '-'} m out)`);
+  // No landmark the world makes for itself takes the story's name.
+  const clash = [];
+  for (let rx = -12; rx <= 12; rx++) for (let rz = -12; rz <= 12; rz++) for (const p of w.gen.region(rx, rz).pois) if (p.type === 'landmark' && p.name === 'The Fallen Titan' && !p.story) clash.push(p.id);
+  check(!clash.length, `no other landmark is called "The Fallen Titan"${clash.length ? ` (${clash.join(', ')})` : ''}`);
+  // The Foundry Below (B-3): its hatch out past Ironreach, the way down.
+  const below = poiOf('foundrybelow');
+  const bd = below && Math.hypot(below.x - c3.x, below.z - c3.z);
+  check(below?.type === 'story' && below.kind === 'foundrybelow' && bd < 700 && !!at('foundrybelow:hatch'), `the Foundry Below's hatch stands out past Ironreach (${bd ? Math.round(bd) : '-'} m)`);
 }
 
 // ---------------------------------------------------------------- dungeon objectives
@@ -215,10 +280,12 @@ console.log('The story, as the live world has it:');
   // A dungeon step names where its way in is, for the compass and the map.
   const lost = STORY.flatMap((q) => quests.stagesOf(q).flatMap((st) => st.objectives.filter((o) => o.type === 'dungeon' && !storyRef(w, o.at ?? '')).map(() => q.id)));
   check(!lost.length, `every dungeon step points at its entrance${lost.length ? ` (not: ${lost.join(', ')})` : ''}`);
-  // When the last act is done, the journal names the act still to come.
+  // When every quest there is has been played, the journal says what comes next: the rest of an
+  // act still being written, or the next act.
   const told = storyline.storyToldText?.() ?? '';
-  const coming = ACTS.at(-1).act + 1;
-  check(told.includes(['Prologue', 'Act I', 'Act II', 'Act III', 'Act IV'][coming] + ' ') && !ACTS.some((A) => told.includes(`${A.title} comes`)), `the journal, story told, looks ahead to the next act ("${told}")`);
+  const last = ACTS.at(-1);
+  const want = last.partial ? `${last.title} continues` : `${['Prologue', 'Act I', 'Act II', 'Act III', 'Act IV'][last.act + 1]} comes`;
+  check(told.includes(want), `the journal, story told, looks ahead ("${told}")`);
 }
 
 // ---------------------------------------------------------------- the story
@@ -261,6 +328,11 @@ check(quests.flags.psion_slain && quests.flags.matron_read && quests.flags.array
 check((core.records.dungeons.brood ?? []).some((n) => n > 0), 'the Brood Pits beaten along the way (the dungeon step)');
 check(quests.flags.broodgate_open && quests.flags.act2_done, 'Act II complete: the Brood Mother\'s gate open, the act done');
 check(!Object.keys(core.records.raids ?? {}).length, 'and all without a raid clear');
+check(quests.flags.act3_started && quests.completed.has('c2'), 'Act III under way: Ironreach reached, the Synth scouts at the stone driven off');
+check(quests.completed.has('c3'), 'the first war-walker stopped (c3, a public event the quest called)');
+check(quests.flags.synth_orders_known && quests.completed.has('c5'), 'the Synths\' orders known from the stone, and the Pilgrim heard out');
+check(quests.flags.titan_core_taken && quests.completed.has('c7'), 'the Fallen Titan\'s core pulled, and read at Brannock\'s Yard');
+check(quests.flags.foundry_below_cleared && (core.records.dungeons.foundrybelow ?? []).some((n) => n > 0), 'down the Foundry Below to its boss (c8, the dungeon step)');
 check(npc(storyRef(w, 'city1:raidgate')?.npc ?? '')?.gate === 'raid', 'New Meridian\'s raid gate can be pointed at (city1:raidgate)');
 check(!!quests.flags.told_ashe !== !!quests.flags.kept_wardens_secret, `Ysolde's confession: one choice made (${quests.flags.told_ashe ? 'told Ashe' : quests.flags.kept_wardens_secret ? 'kept it' : 'neither'})`);
 {
@@ -270,6 +342,11 @@ check(!!quests.flags.told_ashe !== !!quests.flags.kept_wardens_secret, `Ysolde's
   const b1 = STORY.find((q) => q.id === 'b1');
   check(later.available(later.giverId(b1)).some((q) => q.id === 'b1'), 'a character past Act I is offered Act II by High Warden Ashe');
   check(later.giverName(later.returnId(b1)) === 'Vey Okonta in Farcall', `the journal names Farcall's captain (${later.giverName(later.returnId(b1))})`);
+  // And one past Act II: Ashe sends them on to Ironreach.
+  for (const q of STORY) if (q.act < 3) later.completed.add(q.id);
+  const c1 = STORY.find((q) => q.id === 'c1');
+  check(!!c1 && later.available(later.giverId(c1)).some((q) => q.id === 'c1'), 'a character past Act II is offered Act III by High Warden Ashe');
+  check(!!c1 && later.giverName(later.returnId(c1)) === 'Isa Brannock in Ironreach', `the journal names Ironreach's foundrywright (${c1 && later.giverName(later.returnId(c1))})`);
 }
 check(quests.pick(STORY.find((q) => q.id === 'a6').turnIn).startsWith('Ironjaw dead, and his bookkeeper'), 'and what people say follows them');
 check(STORY.every((q) => quests.completed.has(q.id)) && !Object.keys(quests.active).length, `all ${STORY.length} story quests done, the log clear`);
@@ -391,8 +468,8 @@ for (const a6 of [0, 1]) {
       const onePerPair = pairs.every((pair, k) => f[pair[picked[k]]] && !f[pair[1 - picked[k]]]);
       const bad = lines.filter(([, t]) => !LINE_OK(t));
       const name = `Krell ${a6 ? 'freed' : 'chained'}, voice ${a8 ? 'kept' : 'told'}, Wardens' secret ${b5 ? 'kept' : 'told Ashe'}`;
-      check(!stuck && f.act2_done && onePerPair && !bad.length,
-        `${name}: ${stuck ?? (bad.length ? `bad lines: ${bad.map(([w]) => w).join(', ')}` : `Act II done, ${lines.length} lines`)}`);
+      check(!stuck && f.act2_done && f.synth_orders_known && f.titan_core_taken && f.foundry_below_cleared && onePerPair && !bad.length,
+        `${name}: ${stuck ?? (bad.length ? `bad lines: ${bad.map(([w]) => w).join(', ')}` : `Acts II and III so far done, ${lines.length} lines`)}`);
     }
   }
 }

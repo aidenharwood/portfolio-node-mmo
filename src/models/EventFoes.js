@@ -2,13 +2,15 @@
 // pods, rooted outside a settlement and hatching drones, and a Scav siege's engines, mortars on
 // scrap carriages that shell the defences. Both are rooted in place, on the hover rig
 // (anim/LegAnimator.js HoverAnimator) with no hover: the pod breathes and its spores turn; the
-// engine judders and kicks back when it fires.
-//   hive:sporepod · scav:siege
+// engine judders and kicks back when it fires. A Synth war-walker strides on four legs (the
+// quadruped rig) as its event walks it down the road, its power couplings turning round it.
+//   hive:sporepod · scav:siege · synth:warwalker · synth:coupling
 import { piece, G } from '../render/ModelKit.js';
 import { finish } from './Characters.js';
-import { hook, hoverSkeleton } from './Rigs.js';
+import { hook, hoverSkeleton, legSkeleton, quadLegs, seg } from './Rigs.js';
 import { HIVE_GLOW } from './Hive.js';
 import { SCAV } from './Scavs.js';
+import { SYNTH_GLOW } from './Synths.js';
 
 const SHELL = 0x3a2c48;
 const FLESH = 0x7e5a86;
@@ -119,7 +121,69 @@ function siege() {
   return finish(rig);
 }
 
+const W_SHELL = 0xd8dde4;
+const W_SHELL2 = 0xa8b0bc;
+const W_FRAME = 0x2a2e36;
+const W_JOINT = 0x4a505c;
+
+// A Synth war-walker: a long armoured hull slung between four jointed legs, nine metres to its
+// sensor crest, the Synths' cyan along every seam. A sensor head out front with a slit of an
+// eye, twin gun pods under the chin, a mortar battery on its back. Its legs stride with the
+// pace its event walks it at (anim/LegAnimator.js); it faces +Z.
+function warwalker() {
+  const cfg = {
+    bodyY: 5.4, legLen: 5.2, bodyLen: 4.6, bodyWidth: 3.2, walk: 2.5, strideK: 1.6, height: 9,
+    head: [0, 0.4, 2.6],
+    // Knees out, as a walker's are (front knees forward, hind knees back), so long legs never cross.
+    legs: quadLegs({ fx: 1.7, fz: 1.8, hx: 1.7, hz: -1.8, hipY: -0.4, upper: 2.7, lower: 2.7, footSpread: 1.3 }).map((l) => ({ ...l, bend: l.front ? 'fwd' : 'back' })),
+  };
+  const rig = legSkeleton(cfg);
+  const { body, head, legs } = rig;
+  // The hull: a keel, armour plates over it, ribbed flanks lit along their seams.
+  piece(body, G.box(3.0, 1.6, 4.8), W_FRAME, { pos: [0, 0, 0], outline: 0.03 });
+  piece(body, G.box(3.4, 0.5, 4.2), W_SHELL, { pos: [0, 0.95, 0], outline: 0.03 });
+  piece(body, G.box(2.4, 0.4, 3.2), W_SHELL2, { pos: [0, 1.35, -0.2], outline: 0.024 });
+  for (const s of [-1, 1]) {
+    piece(body, G.box(0.3, 1.2, 4.4), W_SHELL2, { pos: [1.6 * s, 0.1, 0], rot: [0, 0, -0.12 * s], outline: 0.024 });
+    for (let i = 0; i < 5; i++) piece(body, G.box(0.06, 0.8, 0.12), SYNTH_GLOW, { pos: [1.78 * s, 0.1, -1.6 + i * 0.8], glow: true, outline: 0 });
+  }
+  piece(body, G.box(2.0, 0.08, 0.1), SYNTH_GLOW, { pos: [0, 1.2, 2.1], glow: true, outline: 0 });
+  // A battery of mortar tubes on its back, raised at the sky.
+  for (let i = 0; i < 3; i++) piece(body, G.cyl(0.26, 0.3, 1.3, 12), W_JOINT, { pos: [-0.7 + i * 0.7, 2.0, -1.2], rot: [-0.5, 0, 0], outline: 0.016 });
+  // The sensor head: a wedge with a slit of an eye, and gun pods slung under it.
+  piece(head, G.box(1.8, 1.0, 1.4), W_SHELL, { pos: [0, 0, 0.3], outline: 0.026 });
+  piece(head, G.box(1.4, 0.16, 0.06), SYNTH_GLOW, { pos: [0, 0.1, 1.02], glow: true, outline: 0 });
+  piece(head, G.cone(0.12, 0.9, 6), W_JOINT, { pos: [0, 0.9, 0.1], outline: 0.012 });
+  for (const s of [-1, 1]) {
+    piece(head, G.cylZ(0.22, 0.22, 1.3, 10), W_FRAME, { pos: [0.75 * s, -0.7, 0.6], outline: 0.016 });
+    piece(head, G.cylZ(0.12, 0.12, 0.06, 10), SYNTH_GLOW, { pos: [0.75 * s, -0.7, 1.26], glow: true, outline: 0 });
+  }
+  // Legs: a heavy thigh, a shin with a glowing knee, a splayed foot.
+  for (const leg of legs) {
+    piece(leg.upper, G.sphere(0.5, 12, 8), W_JOINT, { outline: 0.02 });
+    seg(leg.upper, 2.7, 0.42, 0.32, W_SHELL2, { outline: 0.024 });
+    piece(leg.lower, G.sphere(0.38, 10, 8), SYNTH_GLOW, { glow: true, outline: 0.012 });
+    seg(leg.lower, 2.7, 0.3, 0.22, W_FRAME, { outline: 0.02 });
+    piece(leg.foot, G.cyl(0.55, 0.7, 0.3, 10), W_JOINT, { pos: [0, 0.1, 0], outline: 0.02 });
+  }
+  return finish(rig);
+}
+
+// A war-walker's power coupling: a bright core inside two counter-turning rings, so it can be
+// picked out from thirty metres off.
+function coupling() {
+  const rig = hoverSkeleton({ bodyY: 0, height: 1.2, spin: [{ at: [0, 0.6, 0], rate: 2.4 }, { at: [0, 0.6, 0], rate: -1.6 }] });
+  const { body, spin } = rig;
+  piece(body, G.octa(0.34), SYNTH_GLOW, { pos: [0, 0.6, 0], glow: true, outline: 0.01 });
+  piece(body, G.cyl(0.12, 0.2, 0.3, 8), W_FRAME, { pos: [0, 0.15, 0], outline: 0.012 });
+  piece(spin[0], G.torus(0.52, 0.06), W_SHELL, { rot: [Math.PI / 2, 0, 0], outline: 0.01 });
+  piece(spin[1], G.torus(0.42, 0.05), W_JOINT, { rot: [0.5, 0, 0], outline: 0.01 });
+  return finish(rig);
+}
+
 export const EVENT_MODELS = {
   'hive:sporepod': () => sporepod(),
   'scav:siege': () => siege(),
+  'synth:warwalker': () => warwalker(),
+  'synth:coupling': () => coupling(),
 };

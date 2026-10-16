@@ -209,6 +209,8 @@ button { font-family: var(--ui); cursor: pointer; }
 .ev-hp { flex: 1; height: 5px; background: rgba(6, 8, 14, 0.8); box-shadow: inset 0 0 0 1px var(--line); }
 .ev-hp em { display: block; height: 100%; background: linear-gradient(90deg, #2a9fff, #58cfff); transition: width 0.3s; }
 .ev-hp.beacon em { background: linear-gradient(90deg, #c89a3a, #ffd27a); }
+.ev-hp.walker em { background: linear-gradient(90deg, #d0402e, #ff7a5a); }
+.ev-hp.shielded em { opacity: 0.35; }
 .ev-hp.down { box-shadow: inset 0 0 0 1px rgba(255, 77, 94, 0.6); }
 #labels > .ev-plate span { font-family: var(--display); font-size: 11px; font-weight: 600; letter-spacing: 1.5px; text-transform: uppercase; color: #a8e8ff; text-shadow: var(--outline); }
 #labels > .ev-plate i { display: block; width: 80px; height: 5px; margin: 3px auto 0; background: rgba(6, 8, 14, 0.8); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6); }
