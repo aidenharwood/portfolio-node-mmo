@@ -255,6 +255,7 @@ body.touch #event { max-height: 18vh; overflow: hidden; }
   text-shadow: var(--outline-big), 0 0 22px rgba(94, 230, 255, 0.35);
 }
 #banner::before { content: ''; display: block; width: min(520px, 70vw); height: 1px; margin: 0 auto 8px; background: linear-gradient(90deg, transparent, var(--accent-2), transparent); }
+#banner.banner-warn small { color: #ffb347; }
 #banner small { display: block; font-family: var(--ui); font-size: 15px; font-weight: 600; letter-spacing: 3px; text-transform: uppercase; color: var(--accent-2); text-shadow: var(--outline); margin-top: 4px; }
 #toast {
   position: absolute; top: 34%; left: 50%; transform: translateX(-50%); opacity: 0;

@@ -308,6 +308,21 @@ export class EnemyLayer {
         _p.set(ev.p[0], g.player.position.y, ev.p[1]);
         g.audio.roar?.(_p, 3);
         break;
+      // A camp's squad arriving (sim/WorldSim.js sendSquad): out of its spawner. No toast: they
+      // come every half minute while anyone's there.
+      case 'reinforce':
+        _p.set(ev.p[0], g.world.groundHeight(ev.p[0], ev.p[1]), ev.p[1]);
+        if (ev.kind === 'droppod') {
+          g.effects.spawnSparks(_p.clone().setY(_p.y + 6), RACE_GLOW.synth ?? 0x58cfff, 18);
+          g.effects.spawnRing(_p, 3, RACE_GLOW.synth ?? 0x58cfff);
+        } else if (ev.kind === 'hivemound') {
+          g.effects.spawnPuff(_p, { size: 2.2, life: 0.8, color: 0x6a3a7a });
+          g.effects.spawnRing(_p, 3, RACE_GLOW.hive);
+        } else if (ev.kind === 'burrow') {
+          g.effects.spawnPuff(_p, { size: 2, life: 0.9, color: 0x6a5238 });
+          g.audio.howl?.(_p, false);
+        } else g.effects.spawnPuff(_p, { size: 2.4, life: 1, color: 0xb9a582 });
+        break;
       case 'wave':
         g.hud.toast(ev.of ? `Wave ${ev.wave} of ${ev.of}: ${ev.n} coming for ${ev.name}` : `Reinforcements: ${ev.n} more from ${ev.name}`);
         break;

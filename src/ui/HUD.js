@@ -350,16 +350,18 @@ export class HUD {
 
   // A banner across the screen; one that comes while another is still up waits its turn (a few at
   // most: a level-up on the same kill as a broken warband shows after it).
-  banner(text, sub = '') {
+  // `warn`: in amber (land too dangerous for the player's level).
+  banner(text, sub = '', { warn = false } = {}) {
     if (this.bannerTime > 0.8 && this.bannerText !== text) {
-      if (this.bannerQueue.length < 3 && !this.bannerQueue.some(([t]) => t === text)) this.bannerQueue.push([text, sub]);
+      if (this.bannerQueue.length < 3 && !this.bannerQueue.some(([t]) => t === text)) this.bannerQueue.push([text, sub, { warn }]);
       return;
     }
-    this.showBanner(text, sub);
+    this.showBanner(text, sub, { warn });
   }
 
-  showBanner(text, sub) {
+  showBanner(text, sub, { warn = false } = {}) {
     this.bannerText = text;
+    this.el.banner.classList.toggle('banner-warn', warn);
     sub = forScreen(sub);
     this.el.banner.innerHTML = `${esc(forScreen(text))}${sub ? `<small>${esc(sub)}</small>` : ''}`;
     this.bannerTime = 2.6;

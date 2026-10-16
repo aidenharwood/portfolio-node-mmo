@@ -18,7 +18,7 @@ import { Sfx } from './audio/Sfx.js';
 import { World } from './world/World.js';
 import { NPCS } from './world/mapData.js';
 import { settlementFolk, placeTitle } from './world/settlements.js';
-import { HUB } from './world/Gen.js';
+import { HUB, ACTS } from './world/Gen.js';
 import { Discovery } from './world/Discovery.js';
 import { MapUI } from './ui/MapUI.js';
 import { Player } from './entities/Player.js';
@@ -1004,8 +1004,20 @@ class Game {
       const first = this.regionKey === null;
       this.regionKey = region.key;
       this.hud.setZone(region.name);
-      if (!first && !region.hub) this.hud.banner(region.name, `Level ${region.level} · ${RACE[region.race].name.replace(/^the /, 'The ')}`);
+      // Into a later act's lands: say so (in amber, under-levelled), once a crossing.
+      const A = ACTS[region.act - 1];
+      if (!first && A && region.act > (this.act ?? 1)) {
+        const [lo, hi] = A.levels;
+        const under = this.stats.level < lo;
+        this.hud.banner(A.name, `Levels ${lo}–${hi}${under ? ' · Too dangerous for you yet: turn back' : ''}`, { warn: under });
+      } else if (!first && !region.hub) this.hud.banner(region.name, `Level ${region.level} · ${RACE[region.race].name.replace(/^the /, 'The ')}`);
+      if (first || region.act > (this.act ?? 1)) { this.act = region.act; this.actSince = null; }
     }
+    // Back in an earlier act's lands for 20 s: crossing again counts again.
+    if (region.act < (this.act ?? 1)) {
+      this.actSince ??= performance.now();
+      if (performance.now() - this.actSince > 20000) { this.act = region.act; this.actSince = null; }
+    } else this.actSince = null;
     const z = this.world.zoneAt(p.x, p.z);
     if (z !== this.zone) {
       this.zone = z;
