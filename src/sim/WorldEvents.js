@@ -20,6 +20,7 @@ import { eventWave, campUnits } from '../combat/races.js';
 import { enemyDamage } from './enemyDefs.js';
 import { rollAffixes, affixCount } from './affixes.js';
 import { inPocket } from '../world/dungeons.js';
+import { roadRoute, RouteFollower } from './Routes.js';
 
 export const DIRECTOR = {
   every: 10,        // seconds between looks for somewhere to start one
@@ -48,6 +49,8 @@ const ANNOUNCE = 450;          // metres: who's told an event has begun
 const STRAGGLE = { far: 45, after: 20, rout: 60 }; // see stragglers()
 const MAX_FOES = 40;           // an event's enemies alive at once, at most
 const PLACE_TYPES = new Set(['hamlet', 'settlement', 'town']);
+const COUPLING_RING = 3.6;     // metres from a war-walker's heart its couplings ride
+const IMMUNE_TELL = 0.6;       // seconds between "it's shielded" sparks (as sim/BossScript.js)
 
 // Each kind of event. `hits`: how many of an on-level enemy's blows a thing to defend takes.
 export const EVENT_TYPES = {
@@ -65,6 +68,11 @@ export const EVENT_TYPES = {
     name: 'Maker Anomaly', race: 'synth', beacon: true, hits: 220, charge: 150, wave: 4, gap: 18,
     gather: 'A Maker beacon is waking at {place}. Gather at it.', start: 'Stand by the beacon while it charges; keep the guardians off it',
     won: 'The anomaly is stable', lost: 'The beacon is destroyed', faded: 'The anomaly fades',
+  },
+  walker: {
+    name: 'Synth War-walker', race: 'synth', settlement: true, walker: true, speed: 1.5, couplings: 3, wave: 4, gap: 24,
+    gather: 'A Synth war-walker is marching on {place}. Gather at the beacon.', start: 'Break the war-walker\'s couplings, then bring it down before it reaches {place}',
+    won: 'The war-walker falls', lost: '{place} is overrun', faded: 'The war-walker turns back',
   },
   retake: {
     name: 'Retake', settlement: true, garrison: true,
@@ -174,6 +182,9 @@ export class WorldEvents {
     const { poi, type } = spec;
     const T = EVENT_TYPES[type];
     const time = this.time;
+    // A walker needs a road to come by: none, no walker.
+    const route = T.walker ? roadRoute(this.world.gen, poi) : null;
+    if (T.walker && !route) return null;
     const id = `ev${this.nextId++}`;
     const place = poi.name ?? `the ruins in ${this.world.regionAt(poi.x, poi.z).name}`;
     const ev = {
@@ -181,7 +192,7 @@ export class WorldEvents {
       race: spec.race ?? T.race ?? 'scav', stage: 'gather', began: time, until: time + (type === 'retake' ? 0 : GATHER),
       tier: spec.tier ?? 0, locked: !!spec.locked, story: !!spec.story, votes: new Map(), structures: [], foes: [], enemies: [], people: new Map(),
       wave: 0, waves: T.waves ?? 0, next: 0, lastWave: -Infinity, charge: 0, warden: false, phase: null,
-      xp: 0, idle: 0, n: 1, near: 0, res: null, result: null, named: [],
+      xp: 0, idle: 0, n: 1, near: 0, res: null, result: null, named: [], route, walker: null, couplings: [], unshielded: false,
     };
     ev.name = type === 'retake' ? `Retake ${place}` : `${T.name} at ${place}`;
     // The beacon: by the settlement's heart, or beside the landmark.
@@ -276,6 +287,7 @@ export class WorldEvents {
         engine.engaged = !!engine.foe;
       }
     }
+    if (T.walker) this.raiseWalker(ev, extra);
     if (T.garrison) {
       const units = campUnits({ level: ev.level, race: ev.race, style: null, radius: ev.r, stronghold: false }, this.rng);
       units.push(...eventWave(ev.race, ev.level, this.rng, 1, 1));
@@ -288,6 +300,54 @@ export class WorldEvents {
     }
     ev.next = time + 6;
     this.sim.emit({ k: 'evgo', at: new THREE.Vector3(ev.x, 0, ev.z), id: ev.id, name: ev.name, tier: ev.tier });
+  }
+
+  // The war-walker sets out from the far end of its road with its couplings round it (more of them
+  // the more defenders there are; its hull toughens as any enemy's does, with the crowd fighting
+  // it). While any coupling holds, nothing gets through to the hull.
+  raiseWalker(ev, extra) {
+    const T = ev.T;
+    const [x, z] = ev.route.points[0];
+    const w = this.spawn(ev, { type: 'warwalker', opts: {} }, x, z, { aggro: false, transient: false, objective: true, name: 'Synth War-walker' });
+    ev.walker = w;
+    this.lead(ev, w, new RouteFollower(ev.route.points, { speed: T.speed, canStand: (px, pz) => this.world.standable(px, pz) && !this.world.isWater(px, pz) }));
+    const n = T.couplings + extra;
+    for (let i = 0; i < n; i++) {
+      const c = this.spawn(ev, { type: 'walkercoupling', opts: {} }, x, z, { aggro: false, transient: false, objective: true });
+      c.ring = (i / n) * Math.PI * 2;
+      ev.couplings.push(c);
+    }
+    this.carryCouplings(ev);
+    // They never go home to mend: home is wherever the road has got to, and giving up the fight
+    // there would let the crowd rule start their health over (EnemySim.leash, then 'idle').
+    for (const e of [w, ...ev.couplings]) e.leash = () => {};
+    // Screens show the shield (no damage numbers, the ward) while it holds (EnemySim.immune).
+    w.immune = true;
+    const hit = w.applyHit.bind(w);
+    let tell = -Infinity;
+    w.applyHit = (h) => {
+      if (!w.alive || !ev.couplings.some((c) => c.alive)) return hit(h);
+      // Shielded by its couplings: it remembers who tried.
+      if (h.by !== null && h.by !== undefined) w.threat.set(h.by, (w.threat.get(h.by) ?? 0) + h.damage * 0.5);
+      if (this.time - tell > IMMUNE_TELL) {
+        tell = this.time;
+        this.sim.emit({ k: 'rimm', id: w.id, at: w.position });
+      }
+      return false;
+    };
+  }
+
+  // The couplings ride round the hull, turning with it.
+  carryCouplings(ev) {
+    const w = ev.walker;
+    const y = this.world.groundHeight(w.position.x, w.position.z);
+    for (const c of ev.couplings) {
+      if (!c.alive) continue;
+      const a = w.facing + c.ring;
+      c.velocity.set(0, 0, 0);
+      c.position.set(w.position.x + Math.sin(a) * COUPLING_RING, y + c.alt, w.position.z + Math.cos(a) * COUPLING_RING);
+      c.home?.copy(c.position);
+    }
   }
 
   // Somewhere for a pylon: `d` out along `a` from the heart, nudged off anything in the way.
@@ -393,7 +453,9 @@ export class WorldEvents {
       if (time >= ev.until) this.remove(ev);
       return;
     }
-    // Under way: who's here (a point a second each), how many to scale to.
+    // Under way: what it leads moves on (and the event with it); who's here (a point a second
+    // each), how many to scale to.
+    const moved = this.moveLead(ev, dt);
     const here = this.present(ev);
     for (const p of here) {
       const who = this.person(ev, p.id);
@@ -409,9 +471,17 @@ export class WorldEvents {
       for (const s of ev.structures) { s.max = Math.round(s.max * k); s.hp = Math.round(s.hp * k); }
       ev.n = n;
     }
-    // Nobody left within reach: a settlement falls, an anomaly fades, a garrison stays put.
-    if (near > ABANDON.reach && ev.type !== 'retake') {
-      if ((ev.idle += dt) > ABANDON.after) { this.finish(ev, false, ev.T.settlement ? 'lost' : 'faded'); return; }
+    // Nobody left within reach: a settlement falls, an anomaly fades, a walker turns back (nobody
+    // saw it come), a garrison stays put. Someone waiting for a walker at the settlement it's
+    // coming for is still there for it.
+    let guard = Infinity;
+    if (ev.T.walker) for (const p of this.sim.players) guard = Math.min(guard, Math.hypot(p.position.x - ev.site.x, p.position.z - ev.site.z));
+    if (Math.min(near, guard) > ABANDON.reach && ev.type !== 'retake') {
+      if ((ev.idle += dt) > ABANDON.after) {
+        if (ev.T.walker) this.recall(ev);
+        this.finish(ev, false, ev.T.settlement && !ev.T.walker ? 'lost' : 'faded');
+        return;
+      }
     } else ev.idle = 0;
     this.stragglers(ev, dt, time);
     switch (ev.type) {
@@ -419,7 +489,46 @@ export class WorldEvents {
       case 'siege': this.updateSiege(ev, time); break;
       case 'anomaly': this.updateAnomaly(ev, time, dt); break;
       case 'retake': this.updateRetake(ev, time); break;
+      case 'walker': this.updateWalker(ev, time, moved); break;
     }
+  }
+
+  // ================================================================ what moves
+  // An event can lead something along a route (sim/Routes.js RouteFollower): a structure to defend
+  // or an enemy to stop. Each tick it's set down where the follower's got to, on the ground and
+  // facing the way it goes, and the event's area goes with it — so who's told of it, who's taking
+  // part and who's straggling all follow it across the world.
+  lead(ev, body, follower) {
+    ev.lead = { body, follower };
+    this.placeLead(ev);
+  }
+
+  // → the follower's 'moving', 'arrived' or 'stuck'; null with nothing to lead.
+  moveLead(ev, dt) {
+    if (!ev.lead) return null;
+    const status = ev.lead.follower.step(dt);
+    this.placeLead(ev);
+    return status;
+  }
+
+  placeLead(ev) {
+    const { body, follower: f } = ev.lead;
+    const y = this.world.groundHeight(f.x, f.z);
+    if (body.structure) {
+      body.x = f.x;
+      body.z = f.z;
+    } else {
+      // An enemy's own legs never take it anywhere: home is wherever it's got to. It faces the
+      // way it goes, except while it's turned to strike, and its velocity is the follower's pace
+      // (what screens stride its legs by; the next tick sets it down here again regardless).
+      const v = f.status === 'moving' ? f.speed : 0;
+      body.velocity.set(Math.sin(f.heading) * v, 0, Math.cos(f.heading) * v);
+      body.home?.set(f.x, y, f.z);
+      if (body.state !== 'windup' && body.state !== 'attack') body.facing = f.heading;
+    }
+    body.position.set(f.x, y, f.z);
+    ev.x = f.x;
+    ev.z = f.z;
   }
 
   standing(ev) { return ev.structures.filter((s) => s.alive).length; }
@@ -479,6 +588,35 @@ export class WorldEvents {
     if (ev.charge >= 1) this.finish(ev, true);
   }
 
+  // The walker comes on down the road, its escorts dropping off behind it as it goes. Brought
+  // down, it's won (even on the step it would have arrived); arrived, the settlement falls;
+  // stuck, it turns back.
+  updateWalker(ev, time, moved) {
+    const w = ev.walker;
+    if (!w.alive) { this.finish(ev, true); return; }
+    this.carryCouplings(ev);
+    if (!ev.unshielded && !ev.couplings.some((c) => c.alive)) {
+      ev.unshielded = true;
+      w.immune = false;
+      this.sim.emit({ k: 'shield', id: w.id, at: w.position });
+      this.sim.emit({ k: 'evstep', at: new THREE.Vector3(ev.x, 0, ev.z), id: ev.id, text: 'The war-walker\'s shield is down — bring it down!' });
+    }
+    if (moved === 'arrived' || moved === 'stuck') {
+      this.recall(ev);
+      this.finish(ev, false, moved === 'arrived' ? 'lost' : 'faded');
+      return;
+    }
+    if (time >= ev.next && this.aliveAll(ev) < MAX_FOES) {
+      ev.next = time + ev.T.gap;
+      this.wave(ev, false);
+    }
+  }
+
+  // The walker, its couplings and its escort go (it broke through, or turned back).
+  recall(ev) {
+    for (const e of ev.enemies) if (e.alive) e.dissolve();
+  }
+
   updateRetake(ev, time) {
     if (!this.aliveFoes(ev)) { this.finish(ev, true); return; }
     if (time >= ev.until) this.finish(ev, false, 'faded');
@@ -517,7 +655,14 @@ export class WorldEvents {
     let ox;
     let oz;
     let spread;
-    if (ev.T.beacon) { ox = ev.rx; oz = ev.rz; spread = 0.6; } else {
+    if (ev.T.beacon) { ox = ev.rx; oz = ev.rz; spread = 0.6; } else if (ev.T.walker) {
+      // A walker's escort drops off behind it, on the road it came by.
+      const f = ev.lead.follower;
+      const back = f.at(Math.max(0, f.d - 8));
+      ox = back.x;
+      oz = back.z;
+      spread = 0.25;
+    } else {
       // Settlement events come from the side their pods or engines are on, else from anywhere.
       const from = ev.foes.find((e) => e.alive) ?? null;
       const a = from ? Math.atan2(from.position.x - ev.x, from.position.z - ev.z) : this.rng() * Math.PI * 2;
@@ -682,6 +827,10 @@ export class WorldEvents {
     if (ev.waves) v.w = [ev.wave, ev.waves];
     if (ev.foes.length) v.f = [this.aliveFoes(ev), ev.foes.length];
     if (ev.T.beacon) { v.c = Math.round(ev.charge * 1000) / 1000; v.rx = round(ev.rx); v.rz = round(ev.rz); if (ev.contested) v.ct = 1; }
+    if (ev.walker) {
+      const w = ev.walker;
+      v.wk = [round(w.position.x), round(w.position.z), Math.max(0, Math.ceil(w.hp)), w.maxHp, ev.couplings.filter((c) => c.alive).length, ev.couplings.length, Math.round(ev.lead.follower.left)];
+    }
     if (ev.phase) v.ph = ev.phase;
     if (ev.res) v.res = ev.res;
     return v;

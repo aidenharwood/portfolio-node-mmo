@@ -10,6 +10,7 @@
 // camp the server checks — the quest log's and the waypoints' one way of finding anything.
 import { mulberry32 } from '../core/rng.js';
 import { SIZES, CITY_WALL, folkFor } from './places.js';
+import { roadRoute } from '../sim/Routes.js';
 
 const TAU = Math.PI * 2;
 
@@ -32,9 +33,18 @@ export const STORY_PLACES = {
   // driving the swarms.
   sporefield: { name: 'The Spore Field', from: 'city2', turn: -1.2, dist: CITY_WALL + 140, r: 12, flat: [8, 14], act: 2 },
   psionnest: { name: 'Psion\'s Nest', from: 'city2', turn: 0.9, dist: CITY_WALL + 220, r: 12, flat: [8, 14], act: 2 },
+  // Act III round Ironreach: the Fallen Titan, kneeling where it fell in the old war, facing the
+  // city built from its kin; the Synth salvagers' camp just beyond it (reached after it); and Isa Brannock's
+  // salvage yard just outside the walls.
+  titan: { name: 'The Fallen Titan', from: 'city3', turn: 1.3, dist: CITY_WALL + 300, r: 14, flat: [10, 16], act: 3, face: 'city3' },
+  salvage: { name: 'Salvage Rig', from: 'titan', away: 'city3', dist: 70, r: 11, flat: [8, 14], act: 3, keep: 0.3, around: [0, 0.6, -0.6, 1.2, -1.2] },
+  yard: { name: 'Brannock\'s Yard', from: 'city3', turn: -0.6, dist: CITY_WALL + 50, r: 12, flat: [8, 14], act: 3, face: 'city3' },
+  // Act III: the way down into the Foundry Below (a dungeon: world/dungeons.js), a Synth blast
+  // hatch in a cut out past Ironreach.
+  foundrybelow: { name: 'The Foundry Below', from: 'city3', turn: 2.4, dist: CITY_WALL + 380, r: 12, flat: [8, 14], act: 3, face: 'city3' },
 };
 // (New places go on the end: each draws from the seed in turn, so the earlier ones stay put.)
-const ORDER = ['foundry', 'outpost', 'vault', 'beacon1', 'beacon2', 'relicdig', 'pilgrim', 'broodpits', 'array', 'sporefield', 'psionnest'];
+const ORDER = ['foundry', 'outpost', 'vault', 'beacon1', 'beacon2', 'relicdig', 'pilgrim', 'broodpits', 'array', 'sporefield', 'psionnest', 'titan', 'salvage', 'yard', 'foundrybelow'];
 
 // Story folk with names of their own (looks fixed; world/settlements.js dresses them).
 export const STORY_FOLK = {
@@ -42,6 +52,9 @@ export const STORY_FOLK = {
   krell: { name: 'Krell', title: 'Ironjaw\'s Lieutenant', look: { skin: 0xe0ac84, hair: 0x1f1a17, hairStyle: 'spiky', top: 0x6a3a2a, topDark: 0x4a2418, trim: 0xb0583a, pants: 0x2e2e36, boots: 0x2a2018, leather: 0x4a3a2a, metal: 0x8a909c, glow: 0xff8a2a, beard: 0x1f1a17, pauldrons: true } },
   // Farcall's captain of the watch (Act II), in Warden green, with a mast officer's goggles.
   captain: { name: 'Vey Okonta', title: 'Captain of the Watch', look: { skin: 0x8d5a3b, hair: 0x1a1412, hairStyle: 'short', top: 0x3a6a4a, topDark: 0x2a4a34, trim: 0xd0d0d0, pants: 0x2a2e36, boots: 0x3a2a1a, leather: 0x4a3a2a, metal: 0xc9d1dc, glow: 0x7aff9a, goggles: true, pauldrons: true, cape: 0x2a4a34 } },
+  // Ironreach's foundrywright (Act III), who reads dead Synths for a living: a soot-black apron
+  // over shop greys, welding goggles up on her brow, the Synths' cyan on her tools.
+  engineer: { name: 'Isa Brannock', title: 'Foundrywright', look: { skin: 0xd8a37c, hair: 0x6a3a22, hairStyle: 'bun', top: 0x5a5f6a, topDark: 0x3a3e46, trim: 0xd9a227, pants: 0x2a2e36, boots: 0x2a2018, leather: 0x4a3a2a, metal: 0x9aa0aa, glow: 0x3ad8ff, goggles: true, apron: 0x22242a } },
 };
 
 // Whether (x, z) keeps clear of the hub, the cities, the waystones (and the villages and towns
@@ -74,7 +87,8 @@ export function storyPlaces(gen) {
   const city = gen.cities()[0];
   const out = {};
   const city2 = gen.cities()[1] ?? city;
-  const anchor = { hub: { x: 0, z: 0 }, city1: { x: city.x, z: city.z }, city2: { x: city2.x, z: city2.z } };
+  const city3 = gen.cities()[2] ?? city2;
+  const anchor = { hub: { x: 0, z: 0 }, city1: { x: city.x, z: city.z }, city2: { x: city2.x, z: city2.z }, city3: { x: city3.x, z: city3.z } };
   const main = Math.atan2(city.x, city.z); // the bearing from the hub out to New Meridian
   const rng = mulberry32((gen.seed ^ 0x57a7) >>> 0);
   for (const key of ORDER) {
@@ -82,24 +96,37 @@ export function storyPlaces(gen) {
     const from = anchor[S.from] ?? out[S.from];
     let tx;
     let tz;
+    let a = 0;
     if (S.frac) {
       tx = city.x * S.frac + Math.sin(main + Math.PI / 2) * S.turn * 60;
       tz = city.z * S.frac + Math.cos(main + Math.PI / 2) * S.turn * 60;
     } else {
+      // `toward` a place, `away` from one (beyond `from`, seen from it), or on a bearing of its own.
       const to = S.toward ? anchor[S.toward] ?? out[S.toward] : null;
-      const a = to ? Math.atan2(to.x - from.x, to.z - from.z) : main + S.turn + (rng() - 0.5) * 0.2;
+      const off = S.away ? anchor[S.away] ?? out[S.away] : null;
+      a = to ? Math.atan2(to.x - from.x, to.z - from.z) : off ? Math.atan2(from.x - off.x, from.z - off.z) : main + S.turn + (rng() - 0.5) * 0.2;
       tx = from.x + Math.sin(a) * S.dist;
       tz = from.z + Math.cos(a) * S.dist;
     }
+    // Where to look: round the spot it's wanted at. `around` (a place that belongs beside another):
+    // also at bearings either side of it, the same distance out, each searched close in — so rough
+    // ground just there sends it a little round, not far off.
+    const centres = S.around ? S.around.map((da) => [from.x + Math.sin(a + da) * S.dist, from.z + Math.cos(a + da) * S.dist, Math.abs(da) * S.dist]) : [[tx, tz, 0]];
     let best = null;
-    for (let i = 0; i < 40; i++) {
-      const d = i ? 6 + i * 4 : 0;
-      const x = tx + Math.sin(i * 2.4) * d;
-      const z = tz + Math.cos(i * 2.4) * d;
-      if (!clearOf(gen, x, z, S.r, out)) continue;
-      const s = gen.flatness(x, z, S.flat);
-      if (!best || s < best.s) best = { x, z, s };
-      if (s < 2.5) break;
+    for (const [cx, cz, arc] of centres) {
+      for (let i = 0; i < (S.around ? 10 : 40); i++) {
+        const d = i ? 6 + i * 4 : 0;
+        const x = cx + Math.sin(i * 2.4) * d;
+        const z = cz + Math.cos(i * 2.4) * d;
+        if (!clearOf(gen, x, z, S.r, out)) continue;
+        // `keep`: a place that belongs beside another pays for each metre it strays from where it
+        // was wanted, so a flatter spot further off doesn't win by default (places without it are
+        // scored as they always were).
+        const s = gen.flatness(x, z, S.flat) + (S.keep ?? 0) * (d + arc);
+        if (!best || s < best.s) best = { x, z, s };
+        if (s < 2.5) break;
+      }
+      if (best && best.s < 2.5) break;
     }
     best ??= { x: tx, z: tz, s: Infinity };
     const [rx, rz] = cellAt(gen, best.x, best.z);
@@ -179,6 +206,23 @@ export function storyIn(gen, rx, rz) {
         folkFor(poi, rng, 1, 'object', P.rot + Math.PI, 6.5, { object: 'array:transmitter', model: 'transmitter', facing: P.rot }),
         folkFor(poi, rng, 2, 'object', P.rot + 0.75, 7, { object: 'array:console2', model: 'arrayconsole' }),
       ];
+    } else if (P.key === 'titan') {
+      // The kneeling titan (world/Landmarks.js titan), its control core's housing torn out and left
+      // at its knees, in front, where the salvagers dropped it.
+      poi = { ...base, type: 'landmark', id: `p:${key}:titan`, kind: 'titan', r: P.r, tag: 'stt' };
+      poi.npcs = [folkFor(poi, rng, 0, 'object', P.rot, 8, { object: 'titan:core', model: 'titancore', facing: P.rot })];
+    } else if (P.key === 'salvage') {
+      // The Synths stripping the titan (Act III): a relay camp, whatever race holds the region.
+      poi = { ...base, type: 'camp', id: `sc:${key}:salvage`, radius: 11, race: 'synth', style: 'relay', level: Math.max(19, P.level), tag: 'ssr' };
+      poi.npcs = [];
+    } else if (P.key === 'yard') {
+      // Isa's yard: the cradle at the back, under the crane, facing the gap toward the city.
+      poi = { ...base, type: 'story', kind: 'yard', id: `p:${key}:yard`, r: P.r, tag: 'sy', gate: P.rot };
+      poi.npcs = [folkFor(poi, rng, 0, 'object', P.rot + Math.PI, 2.5, { object: 'yard:cradle', model: 'cradle', facing: P.rot })];
+    } else if (P.key === 'foundrybelow') {
+      // The hatch at the back of the cut, facing the way you come in from the city.
+      poi = { ...base, type: 'story', kind: 'foundrybelow', id: `p:${key}:foundrybelow`, r: P.r, tag: 'sfb' };
+      poi.npcs = [folkFor(poi, rng, 0, 'object', P.rot + Math.PI, 6.5, { object: 'foundrybelow:hatch', model: 'hatch', facing: P.rot })];
     } else if (P.key === 'relicdig') {
       poi = { ...base, type: 'story', kind: 'relicdig', id: `p:${key}:relicdig`, r: P.r, tag: 'sr' };
       poi.npcs = [folkFor(poi, rng, 0, 'story', P.rot, 4, { folk: 'chief' })];
@@ -205,7 +249,8 @@ function nearest(world, x, z, range, types, pred = () => true) {
 }
 const npcOf = (p, pred) => p?.npcs?.find(pred) ?? null;
 // `rot`: which way a place (or a person) faces, for framing story moments (ui/Moments.js).
-const target = (p, extra = {}) => p && { x: p.x, z: p.z, r: p.radius ?? p.r ?? 3, name: p.name, poi: p.id, rot: p.rot ?? 0, ...extra };
+// `gate`: the bearing a place's only way in faces (a fenced yard), for what comes to attack it.
+const target = (p, extra = {}) => p && { x: p.x, z: p.z, r: p.radius ?? p.r ?? 3, name: p.name, poi: p.id, rot: p.rot ?? 0, ...(p.gate !== undefined ? { gate: p.gate } : {}), ...extra };
 const person = (n, place) => n && { x: n.x, z: n.z, r: 3, name: place?.name, npc: n.id, rot: n.facing ?? 0 };
 
 // What a quest's reference names: { x, z, r, name, rot, npc?, poi?, camp? }, or null. `ctx.home`:
@@ -217,9 +262,12 @@ export function storyRef(world, ref, ctx = {}) {
   const key = ctx.home ? `${ctx.home}|${ref}` : ref;
   if (cache.has(key)) return cache.get(key);
   const out = resolve(world, ref, ctx);
-  if (out) cache.set(key, out);
+  // Found, it's kept. Not found is kept too for the refs worked out from the seed alone (searching
+  // again every frame would cost a hitch each time); others may yet turn up as the world streams.
+  if (out || SEEDED.has(ref)) cache.set(key, out);
   return out;
 }
+const SEEDED = new Set(['ironstone', 'ironhamlet']);
 
 function resolve(world, ref, ctx) {
   const gen = world.gen;
@@ -264,6 +312,23 @@ function resolve(world, ref, ctx) {
     if (!c) return null;
     const near = world.poisNear(c.x, c.z, 1400, ['hamlet']).sort((a, b) => Math.hypot(a.x - c.x, a.z - c.z) - Math.hypot(b.x - c.x, b.z - c.z));
     return target(near[Number(head.slice(5)) - 1]) ?? null;
+  }
+  // Act III round Ironreach: the waystone the Synth scouts scan, and where the emissary speaks
+  // (the nearest to the city outside its walls), and the settlement the first war-walker marches
+  // on (the nearest with a road a walker can come down: sim/Routes.js).
+  if (head === 'ironstone' || head === 'ironhamlet') {
+    const c = gen.cities()[2];
+    if (!c) return null;
+    const by = (a, b) => Math.hypot(a.x - c.x, a.z - c.z) - Math.hypot(b.x - c.x, b.z - c.z);
+    if (head === 'ironstone') {
+      // Out in the open: not a village's or town's own square (the scouts would be fought among
+      // its folk, and it could be the walker's settlement too).
+      const inSquare = (p) => world.poisNear(p.x, p.z, 120, ['hamlet', 'settlement', 'town']).some((s) => Math.hypot(s.x - p.x, s.z - p.z) < (s.r ?? 12) + 10);
+      const stones = world.poisNear(c.x, c.z, 1400, ['waystone']).filter((p) => Math.hypot(p.x - c.x, p.z - c.z) > CITY_WALL && !inSquare(p)).sort(by);
+      return target(stones[0], { r: 4 }) ?? null;
+    }
+    const homes = world.poisNear(c.x, c.z, 1400, ['hamlet', 'settlement', 'town']).sort(by);
+    return target(homes.find((p) => roadRoute(gen, p))) ?? null;
   }
   if (ref === 'hubcamp') return target(nearest(world, 0, 0, 500, ['camp'], (c) => !c.stronghold && !c.story), { camp: true });
   if (head === 'home' && ctx.home) {

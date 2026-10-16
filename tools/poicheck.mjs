@@ -108,6 +108,10 @@ if (seed === 12345) {
   };
   const sp = storyPlaces(w.gen);
   for (const [k, [x, z]] of Object.entries(before)) if (Math.hypot(sp[k].x - x, sp[k].z - z) > 0.2) fail(`story:${k}`, 'moved when Act II\'s places were added');
+  // …nor Act II's own when Act III's came (as they stood before the Fallen Titan).
+  const act2 = { array: [-1094.9, -564.5], sporefield: [-1057.9, -790], psionnest: [-1488.8, -948.3] };
+  for (const [k, [x, z]] of Object.entries(act2)) if (Math.hypot(sp[k].x - x, sp[k].z - z) > 0.2) fail(`story:${k}`, 'moved when Act III\'s places were added');
+  for (const key of ['titan', 'salvage', 'yard']) if (!storyKeys().includes(key)) fail(`story:${key}`, 'not a story place');
   // Farcall's districts are built from the same draws as before its captain came.
   const farcall = w.gen.cities()[1];
   const seeds = w.gen.region(farcall.rx, farcall.rz).pois.filter((p) => p.type === 'district').map((d) => d.seed);

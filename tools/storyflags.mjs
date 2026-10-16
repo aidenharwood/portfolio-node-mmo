@@ -43,16 +43,21 @@ export const STORY_FLAGS = {
   act2_started: { means: 'The player reached Farcall and its captain of the watch (b1).', setBy: ['b1 setFlags'], readBy: [] },
   hamlets_cleared: { means: 'The hamlets gone quiet were found and the spore pods burned (b2).', setBy: ['b2 setFlags'], readBy: [] },
   array_found: { means: 'The player found the Farcall Array calling the Hive, with Warden marks on it (b4).', setBy: ['b4 setFlags'], readBy: [] },
-  told_ashe: { means: "The player chose to tell Ashe the Wardens' forgotten purpose (the choice at b5).", setBy: ['b5 stage 1 choices'], readBy: ['b10 stage 1 say', 'b5 turnIn', 'b6 offer'] },
-  kept_wardens_secret: { means: "The player kept the Wardens' secret between themselves and Ysolde (the choice at b5).", setBy: ['b5 stage 1 choices'], readBy: ['b10 stage 1 say', 'b5 turnIn'] },
+  told_ashe: { means: "The player chose to tell Ashe the Wardens' forgotten purpose (the choice at b5).", setBy: ['b5 stage 1 choices'], readBy: ['b10 stage 1 say', 'b5 turnIn', 'b6 offer', 'c1 offer', 'c5 offer'] },
+  kept_wardens_secret: { means: "The player kept the Wardens' secret between themselves and Ysolde (the choice at b5).", setBy: ['b5 stage 1 choices'], readBy: ['b10 stage 1 say', 'b5 turnIn', 'c5 offer'] },
   psion_slain: { means: "The Hive Psion steering the swarms is dead; its chitin mapped the way to the Brood Pits (b6).", setBy: ['b6 setFlags'], readBy: [] },
   matron_read: { means: "The player read the Matron's nest-node: the Array's call feeds a deeper nest, the Brood Mother's (b8).", setBy: ['b8 setFlags'], readBy: [] },
-  array_destroyed: { means: "The Farcall Array's transmitter is destroyed; its death-pulse woke the Synths (b9; Acts III and IV read it).", setBy: ['b9 setFlags'], readBy: [] },
+  array_destroyed: { means: "The Farcall Array's transmitter is destroyed; its death-pulse woke the Synths (b9; always set by Act II's end, so Act III's emissary moment names the pulse in its line, unkeyed).", setBy: ['b9 setFlags'], readBy: [] },
   act2_done: { means: "Act II is over: the Array silenced, the Brood Mother's gate open (b12).", setBy: ['b12 setFlags'], readBy: [] },
   broodgate_open: {
     means: 'The Wardens opened the Brood Mother\'s raid gate to the player (DEC-4: one in a raid group or party who has it takes the rest in).',
     setBy: ['b11 setFlags'], readBy: ['raid broodmother'],
   },
+  // ---------------------------------------------------------------- Act III: Iron Heart
+  act3_started: { means: 'The player reached Ironreach and Foundrywright Isa Brannock (c1).', setBy: ['c1 setFlags'], readBy: [] },
+  synth_orders_known: { means: 'A Synth emissary spoke through a waystone: the Synths quarantine the network, and the player is the carrier they hunt (c4).', setBy: ['c4 setFlags'], readBy: [] },
+  titan_core_taken: { means: 'The player drove the Synth salvagers off the Fallen Titan and pulled its control core; its codes open the Foundry Below (c6).', setBy: ['c6 setFlags'], readBy: ['dungeon foundrybelow'] },
+  foundry_below_cleared: { means: 'The player went down the Foundry Below and stopped the Forge-Overseer running its line (c8).', setBy: ['c8 setFlags'], readBy: [] },
 };
 
 // Flags the game makes as it runs, one per thing (listed here, not checked: their ids come from

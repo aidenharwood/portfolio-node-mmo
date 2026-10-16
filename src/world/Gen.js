@@ -114,7 +114,7 @@ export const LANDMARKS = {
   },
   titan: {
     biomes: { highland: 1.2, badlands: 1.2, ash: 1, snow: 0.8, meadow: 0.5, desert: 0.6 }, r: 12, slope: 0.4, chest: [0, 6],
-    name: (r) => `The ${pick(r, ['Sleeping', 'Kneeling', 'Silent', 'Fallen', 'Broken', 'Last'])} Titan`,
+    name: (r) => `The ${pick(r, ['Sleeping', 'Kneeling', 'Silent', 'Shattered', 'Broken', 'Last'])} Titan`, // (not 'Fallen': the story's own, world/story.js)
   },
   monoliths: {
     biomes: { meadow: 1.2, forest: 1, marsh: 0.8, highland: 0.6, snow: 0.5 }, r: 11, pad: true, slope: 0.35, chest: [0, 0],

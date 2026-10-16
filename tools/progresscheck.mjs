@@ -63,6 +63,11 @@ check(ABILITY_IDS.every((id) => Object.keys(ABILITIES[id].upgrades ?? {}).length
 // ---------------------------------------------------------------- achievements and records
 console.log('Achievements:');
 check(ACHIEVEMENTS.length >= 40 && new Set(ACHIEVEMENTS.map((a) => a.id)).size === ACHIEVEMENTS.length, `${ACHIEVEMENTS.length} achievements, ids unique, ${TITLES.length} titles`);
+{
+  // Act III's dungeon has its own: a Foundry Below clear at any tier counts, and nothing else does.
+  const down = ACHIEVEMENTS.find((a) => a.id === 'dungeon_foundrybelow');
+  check(!!down && down.stat({ dungeons: { foundrybelow: [0, 0, 1, 0] } }) === 1 && down.stat({ dungeons: { brood: [3, 0, 0, 0] } }) === 0, 'Down the Line: a Foundry Below clear counts, another dungeon\'s doesn\'t');
+}
 const quests = { onKill() {}, advance() {}, onCampCleared() {}, isComplete: () => false, defs: new Map(), toJSON: () => ({ active: {}, completed: [] }) };
 const core = new CharacterCore({
   stats: new Stats(), inventory: new Inventory(3), quests, attuned: new Set(['w-hub']), chests: new Set(), shop: { stock: [] },

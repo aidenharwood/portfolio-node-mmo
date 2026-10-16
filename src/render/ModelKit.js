@@ -9,7 +9,9 @@ import { SURFACE_BAKE, surfaceOf, surfaceCoords, noSurface, withSurfaces } from 
  * Add a bakeable piece to `parent`.
  * opts: pos [x,y,z], rot [x,y,z] (Euler XYZ), scale number | [x,y,z], outline (0 = none), glow (unlit),
  *   pattern: what its surface is drawn as (render/Surfaces.js: 'planks', 'brick'…; false for plain;
- *   left out, a world bake picks one by its colour)
+ *   left out, a world bake picks one by its colour); surfaced: its geometry is unindexed and
+ *   already carries its surface's coordinates (`puv`, `pat`) where it has any (pieces collapsed
+ *   ahead of time and reused, world/scenery/props.js), so a bake keeps them and works out none
  */
 export function piece(parent, geometry, color, opts = {}) {
   const mesh = new THREE.Mesh(geometry);
@@ -19,7 +21,7 @@ export function piece(parent, geometry, color, opts = {}) {
     if (typeof opts.scale === 'number') mesh.scale.setScalar(opts.scale);
     else mesh.scale.fromArray(opts.scale);
   }
-  mesh.userData.piece = { color, outline: opts.outline ?? 0.025, glow: !!opts.glow, pattern: opts.pattern };
+  mesh.userData.piece = { color, outline: opts.outline ?? 0.025, glow: !!opts.glow, pattern: opts.pattern, surfaced: !!opts.surfaced };
   parent.add(mesh);
   return mesh;
 }
@@ -56,17 +58,18 @@ export function bake(group, opts = {}) {
     const p = child.userData.piece;
     if (!p || !child.isMesh) continue;
     child.updateMatrix();
-    const g = baseOf(child.geometry).clone();
-    const kind = !SURFACE_BAKE.on || p.glow ? null
+    const g = p.surfaced ? child.geometry.clone() : baseOf(child.geometry).clone();
+    const kind = p.surfaced || !SURFACE_BAKE.on || p.glow ? null
       : p.pattern ?? (table ? (typeof table === 'object' ? table[p.color] : null) ?? surfaceOf(p.color) : null);
     if (kind) surfaceCoords(g, kind, child);
+    else if (p.surfaced && !SURFACE_BAKE.on) for (const name of ['puv', 'pat']) g.deleteAttribute(name);
     g.applyMatrix4(child.matrix);
     const key = p.glow ? `${p.color}|${p.outline}|g` : `${p.color}`;
     if (!buckets.has(key)) buckets.set(key, { ...p, geos: [], inks: [], surfaces: false });
     const b = buckets.get(key);
     b.geos.push(g);
     b.inks.push(p.outline);
-    if (kind) b.surfaces = true;
+    if (kind || g.attributes.pat) b.surfaces = true;
     child.parent = null;
   }
   // (Taken out all at once: removing thousands one by one is quadratic.)

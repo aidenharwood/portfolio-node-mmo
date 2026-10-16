@@ -369,7 +369,8 @@ export class Encounters {
   // A place to hold (a quest's 'defend', rpg/questWatch.js): begun when someone who must hold it
   // stands there; waves of its faction march in from round its edge at whoever's there, each once
   // the last is down; the last one down and it's held (host.onDefended). Left alone a while, it's
-  // called off. `spec`: { key, x, z, r, name, race, level, waves }.
+  // called off. `spec`: { key, x, z, r, name, race, level, waves, gate? } — `gate`: the bearing of
+  // a fenced place's way in, which its waves come at (from anywhere else they'd only meet the fence).
   defend(spec) {
     let d = this.defences.get(spec.key);
     if (d) return d;
@@ -404,9 +405,11 @@ export class Encounters {
       const units = roamPack(d.race, d.level, Math.random);
       if (d.wave === d.waves) units.push(...roamPack(d.race, d.level, Math.random).slice(0, 2));
       const foe = there[Math.floor(Math.random() * there.length)];
-      const from = Math.random() * Math.PI * 2;
+      // Through a gate, the whole wave comes down its line, close together; elsewhere from any side.
+      const from = d.gate ?? Math.random() * Math.PI * 2;
+      const spread = d.gate !== undefined ? 0.06 : 0.22;
       units.forEach((u, i) => {
-        const a = from + (i - (units.length - 1) / 2) * 0.22;
+        const a = from + (i - (units.length - 1) / 2) * spread;
         let x = d.x + Math.sin(a) * (d.r + 16);
         let z = d.z + Math.cos(a) * (d.r + 16);
         if (this.world.isWater(x, z)) { x = d.x + Math.sin(a) * d.r; z = d.z + Math.cos(a) * d.r; }

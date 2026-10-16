@@ -227,7 +227,9 @@ export const ENEMY_TYPES = {
   // ======================================================== World events (gameplay phase 6)
   // Rooted in place, set down by a public event (sim/WorldEvents.js) rather than living in a camp:
   // a Hive surge's spore pods, which hatch drones until they're burst, and a Scav siege's engines,
-  // which shell a settlement's defences from outside its walls.
+  // which shell a settlement's defences from outside its walls. A Synth war-walker doesn't stand
+  // still, but its own legs don't carry it: its event walks it down the roads (sim/Routes.js), with
+  // the power couplings that shield it riding round its hull.
   sporepod: {
     race: 'hive', name: 'Spore Pod', model: 'hive:sporepod', rig: 'hover', behavior: 'support', hover: 0,
     hp: 260, radius: 1.1, height: 2.3, speed: 0, mass: 60, poise: 99999, staggerTime: 0.1,
@@ -243,6 +245,23 @@ export const ENEMY_TYPES = {
       { id: 'shell', kind: 'lob', range: 60, min: 8, windup: 1.6, active: 0.1, recover: 1.4, damage: 40, radius: 3.6, fuse: 0.8, knockback: 14, cooldown: 4.5, element: 'fire' },
       { id: 'vent', kind: 'nova', range: 4, windup: 1.0, active: 0.1, recover: 1.6, damage: 26, radius: 4.5, knockback: 14, cooldown: 6 },
     ],
+  },
+  warwalker: {
+    race: 'synth', name: 'Synth War-walker', model: 'synth:warwalker', rig: 'quad', behavior: 'lobber', hover: 0, muzzle: { y: 0.8, f: 0.5 },
+    lure: 60,
+    hp: 2880, radius: 2.6, height: 9, speed: 0, mass: 60, poise: 99999, staggerTime: 0.1,
+    xp: 400, gold: [60, 100], dropChance: 1, cooldown: [0.8, 1.4],
+    attacks: [
+      { id: 'stomp', kind: 'stomp', range: 7, windup: 1.1, active: 0.1, recover: 1.0, damage: 60, radius: 7, knockback: 18, cooldown: 5 },
+      { id: 'barrage', kind: 'lob', range: 40, min: 8, windup: 1.2, active: 0.1, recover: 1.0, damage: 44, radius: 3.4, fuse: 0.8, knockback: 12, count: 3, cooldown: 6, element: 'shock' },
+      { id: 'fan', kind: 'fan', proj: 'energy', range: 26, windup: 0.9, active: 0.1, recover: 0.9, damage: 20, speed: 34, count: 7, fan: 1.0, cooldown: 4 },
+    ],
+  },
+  walkercoupling: {
+    race: 'synth', name: 'Power Coupling', model: 'synth:coupling', rig: 'hover', behavior: 'support', hover: 3.2,
+    hp: 320, radius: 0.7, height: 1.2, speed: 0, mass: 60, poise: 99999, staggerTime: 0.1,
+    xp: 30, gold: [4, 8], dropChance: 0.2, cooldown: [1.5, 2.5],
+    attacks: [{ id: 'arc', kind: 'nova', range: 5, windup: 1.0, active: 0.1, recover: 1.8, damage: 24, radius: 5, knockback: 8, element: 'shock', cooldown: 6 }],
   },
 
   // ======================================================== Raids (gameplay phase 7)

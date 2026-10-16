@@ -189,6 +189,11 @@ export function planCity(place, rng, streets) {
     const [lx, lz] = polar(citadel + 0.35, CITY.door);
     place.npcs.push({ id: `n:${place.key}:${place.tag}7`, place: place.id, role: 'story', folk: 'captain', x: place.x + lx, z: place.z + lz, facing: citadel + 0.35 + Math.PI, seed: 0x0ce7a });
   }
+  // Ironreach's foundrywright (Act III), on the same terms by the same door.
+  if (place.act === 3) {
+    const [lx, lz] = polar(citadel + 0.35, CITY.door);
+    place.npcs.push({ id: `n:${place.key}:${place.tag}7`, place: place.id, role: 'story', folk: 'engineer', x: place.x + lx, z: place.z + lz, facing: citadel + 0.35 + Math.PI, seed: 0x15a3b });
+  }
   // Districts between the roads, kept from overlapping (each spans ~0.85 radians of the ring).
   const at = spread(between(streets, DISTRICTS.length, 0.5), 2 * Math.asin(S.district / S.ring) + 0.06);
   place.quarters = at;

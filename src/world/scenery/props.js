@@ -13,7 +13,10 @@
 // mound. Fires, nodes and furnaces say where their flame goes in group.userData.flame
 // ({ y, colors, size }); spawners where things come out in userData.mouth.
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { piece, G, shade } from '../../render/ModelKit.js';
+import { SURFACE_BAKE, surfaceOf, surfaceCoords, noSurface } from '../../render/Surfaces.js';
+import { mulberry32 } from '../../core/rng.js';
 import { lump, limb, tier, lathe } from './kit.js';
 import { planBuilding, buildPlan } from '../build/kit.js';
 import { C, HEARTH, FORGE, HIVE, ARC, CARGO } from '../palette.js';
@@ -92,8 +95,8 @@ export function drum(P, pos, { fire = false, col = null } = {}) {
   const c = col ?? (fire ? C.rust : P.pick([0x8a2a2a, 0x3a5a7a, 0x4a6a3a, 0xb08a3e, C.rust]));
   const r = fire ? 0.42 : 0.36;
   const h = fire ? 0.9 : 1.0;
-  P.add(lathe([[r * 0.96, 0], [r, h * 0.12], [r * 0.97, h * 0.5], [r, h * 0.88], [r * 0.96, h], [0.0, h]], 14), c, { pos: [x, y, z], pattern: P.chance(0.5) ? 'rust' : 'panels', outline: 0.015 });
-  for (const t of [0.12, 0.5, 0.88]) P.add(G.torus(r + 0.01, 0.025, TAU, 4, 16), C.metalDark, { pos: [x, y + h * t, z], rot: [Math.PI / 2, 0, 0], outline: 0.004 });
+  P.add(lathe([[r * 0.96, 0], [r, h * 0.12], [r * 0.97, h * 0.5], [r, h * 0.88], [r * 0.96, h], [0.0, h]], 10), c, { pos: [x, y, z], pattern: P.chance(0.5) ? 'rust' : 'panels', outline: 0.015 });
+  for (const t of [0.12, 0.5, 0.88]) P.add(new THREE.CylinderGeometry(r + 0.015, r + 0.015, 0.05, 10, 1, true), C.metalDark, { pos: [x, y + h * t, z], outline: 0.004 });
   if (fire) {
     for (let i = 0; i < 4; i++) {
       const a = (i / 4) * TAU + P.r(0, 0.5);
@@ -127,7 +130,7 @@ function sandbags(P, w, rows, z, { y0 = 0 } = {}) {
     const n = Math.max(1, Math.round(w / 0.6) - (r % 2));
     for (let i = 0; i < n; i++) {
       const x = -((n - 1) * 0.6) / 2 + i * 0.6;
-      P.add(lump(1, { detail: 1, rough: 0.06, sy: 1 }), shade(SANDBAG, P.r(0.88, 1.06)), { pos: [x, y0 + 0.14 + r * 0.24, z], scale: [0.32, 0.15, 0.22], rot: [0, P.r(-0.15, 0.15), 0], pattern: 'fabric', outline: 0.012 });
+      P.add(lump(1, { detail: 0, rough: 0.05, sy: 1 }), shade(SANDBAG, P.r(0.88, 1.06)), { pos: [x, y0 + 0.14 + r * 0.24, z], scale: [0.32, 0.15, 0.22], rot: [0, P.r(-0.15, 0.15), 0], pattern: 'fabric', outline: 0.012 });
     }
   }
 }
@@ -318,9 +321,12 @@ const PROPS = {
       return;
     }
     if (k === 'den') {
-      for (let i = 0; i < 3; i++) rock(P, [-w / 2 + 0.75 + i * (w - 1.5) / 2, 0.55, P.r(-0.2, 0.2)], P.r(0.65, 0.8), C.stoneDark);
-      for (let i = 0; i < 5; i++) bar(P, [-w / 2 + i * w / 4, 0, -0.5], [-w / 2 + i * w / 4 + P.r(-0.3, 0.3), P.r(2.8, 3.6), -0.2], 0.12, C.woodDark, { round: true, pattern: 'bark' });
-      bar(P, [-w / 2, 2.0, -0.35], [w / 2, 2.1, -0.35], 0.07, C.wood, { round: true, pattern: 'bark' });
+      // Boulders heaped two deep, smaller ones wedged on top, a dead branch or two caught in it.
+      for (let i = 0; i < 3; i++) rock(P, [-w / 2 + 0.75 + i * (w - 1.5) / 2, 0.6, P.r(-0.2, 0.2)], P.r(0.7, 0.85), P.pick([C.stoneDark, C.stone]));
+      for (let i = 0; i < 2; i++) rock(P, [-w / 4 + i * w / 2 + P.r(-0.2, 0.2), 1.75, P.r(-0.15, 0.15)], P.r(0.55, 0.7), P.pick([C.stoneDark, C.stone]));
+      rock(P, [P.r(-0.3, 0.3), 2.6, 0], P.r(0.35, 0.45), C.stone);
+      for (let i = 0; i < 2; i++) { const x = P.r(-1.2, 1.2); bar(P, [x, 1.2, -0.6], [x + P.r(-0.6, 0.6), 2.9, 0.4], 0.06, C.woodDark, { round: true, pattern: 'bark' }); }
+      if (P.chance(0.5)) P.add(lump(1, { detail: 0, rough: 0.3, sy: 0.35 }), C.moss, { pos: [P.r(-0.8, 0.8), 2.25, 0], scale: 0.5, outline: 0.006 });
       return;
     }
     // Scav (and salvage): a frame, plates welded over it, a walkway behind, spikes on top.
@@ -441,7 +447,7 @@ const PROPS = {
     for (let i = 0; i < 9; i++) {
       if (i === 4) continue;
       const a = Math.PI / 2 + (i / 9) * TAU;
-      for (let r = 0; r < 3; r++) P.add(lump(1, { detail: 1, rough: 0.06 }), shade(SANDBAG, P.r(0.88, 1.06)), { pos: [Math.cos(a) * 1.0, 0.14 + r * 0.24, Math.sin(a) * 1.0], scale: [0.36, 0.15, 0.22], rot: [0, -a + Math.PI / 2 + (r % 2) * 0.3, 0], pattern: 'fabric', outline: 0.012 });
+      for (let r = 0; r < 3; r++) P.add(lump(1, { detail: 0, rough: 0.05 }), shade(SANDBAG, P.r(0.88, 1.06)), { pos: [Math.cos(a) * 1.0, 0.14 + r * 0.24, Math.sin(a) * 1.0], scale: [0.36, 0.15, 0.22], rot: [0, -a + Math.PI / 2 + (r % 2) * 0.3, 0], pattern: 'fabric', outline: 0.012 });
     }
     for (const a of [0, 2.1, 4.2]) bar(P, [0, 0.9, 0], [Math.cos(a) * 0.45, 0, Math.sin(a) * 0.45], 0.035, C.metalDark);
     P.add(G.box(0.35, 0.3, 0.6), C.metalDark, { pos: [0, 1.0, 0], pattern: 'panels', outline: 0.012 });
@@ -584,11 +590,60 @@ const PROPS = {
 
 export const PROP_KINDS = Object.keys(PROPS);
 
-// A prop of `kind` (see the top), seeded by rng (a function giving [0, 1)).
+// A prop of `kind` (see the top), seeded by rng (a function giving [0, 1)): one of a few variants
+// of that kind in that kit, each built once and collapsed — its pieces merged by colour and line
+// weight, their surfaces' coordinates worked out — so a camp of a hundred and more pieces bakes
+// from a handful of parts each, the same geometry reused and only moved into place.
+// o.fresh: build this one from rng itself, uncached (every prop its own).
+export const PROP_VARIANTS = 4;
+const variants = new Map();
 export function prop(kind, rng, o = {}) {
   const g = new THREE.Group();
   const build = PROPS[kind];
   if (!build) return g;
-  build(new Parts(rng, g), o);
+  if (o.fresh) {
+    build(new Parts(rng, g), o);
+    return g;
+  }
+  const s = o.s === undefined ? 1 : Math.round(o.s * 4) / 4;
+  const key = `${kind}|${kitOf(o)}|${s}|${Math.floor(rng() * PROP_VARIANTS)}|${SURFACE_BAKE.on ? 1 : 0}`;
+  let v = variants.get(key);
+  if (!v) variants.set(key, (v = collapse(build, key, { ...o, s })));
+  for (const part of v.parts) piece(g, part.geo, part.color, { outline: part.outline, glow: part.glow, surfaced: true });
+  if (v.flame) g.userData.flame = { ...v.flame };
+  if (v.mouth) g.userData.mouth = { ...v.mouth };
   return g;
+}
+
+// Builds a variant (seeded by its key) and merges its pieces as a world bake would: by colour,
+// glow and line weight, each piece's surface (its own pattern, or its colour's) worked out where
+// it stands within the prop.
+const _o = new THREE.Object3D();
+function collapse(build, key, o) {
+  let h = 2166136261;
+  for (let i = 0; i < key.length; i++) h = Math.imul(h ^ key.charCodeAt(i), 16777619);
+  const g = new THREE.Group();
+  build(new Parts(mulberry32(h >>> 0), g), o);
+  g.updateMatrixWorld(true);
+  const buckets = new Map();
+  g.traverse((m) => {
+    const p = m.isMesh && m.userData.piece;
+    if (!p) return;
+    let geo = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone();
+    for (const name of Object.keys(geo.attributes)) if (name !== 'position' && name !== 'normal') geo.deleteAttribute(name);
+    m.matrixWorld.decompose(_o.position, _o.quaternion, _o.scale);
+    const kind = !SURFACE_BAKE.on || p.glow ? null : p.pattern ?? surfaceOf(p.color);
+    if (kind) surfaceCoords(geo, kind, _o);
+    geo = geo.applyMatrix4(m.matrixWorld);
+    const k = `${p.color}|${p.outline}|${p.glow ? 1 : 0}`;
+    if (!buckets.has(k)) buckets.set(k, { color: p.color, outline: p.outline, glow: p.glow, geos: [], surfaces: false });
+    const b = buckets.get(k);
+    b.geos.push(geo);
+    if (kind) b.surfaces = true;
+  });
+  const parts = [...buckets.values()].map((b) => {
+    if (b.surfaces) for (const geo of b.geos) if (!geo.attributes.pat) noSurface(geo);
+    return { color: b.color, outline: b.outline, glow: b.glow, geo: mergeGeometries(b.geos) };
+  });
+  return { parts, flame: g.userData.flame, mouth: g.userData.mouth };
 }

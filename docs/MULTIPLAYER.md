@@ -416,11 +416,17 @@ shares it. Offline single-player runs the same director for one player.
   `evwon { id, i }` as a server op for each of their steps it counts for: any event of that kind
   at that place, whoever started it. A lost or abandoned one moves nothing on, so the step can
   call its event again once the place is free.
+- **Events that move** (`sim/Routes.js`): a Synth war-walker is walked by the sim along the roads
+  between waystones toward a settlement. The event's centre (`x`, `z`) is wherever it has got to,
+  so who's told of it, who's taking part and the map markers all follow it across regions. `wk`
+  carries the walker's state: `[x, z, hull, max, couplings left, couplings, metres to go]`. The
+  walker and its couplings are ordinary enemies on the wire; the sim sets their place each tick,
+  and the walker's velocity is its walking pace, which screens stride its legs by.
 - **Admins** start and settle events with `/admin event` ([DEPLOY.md](DEPLOY.md#admins)).
 - **Protocol:**
   - client → server: `evote { id, tier }`
-  - server → client: `wev { l: [{ id, k, nm, pl, st, x, z, r, lv, ti, bx, bz, n, tl?, s: [[id, kind, x, z, hp, max]], v?, w?, f?, c?, rx?, rz?, ct?, ph?, res?, lk? }], me: { id: [points, vote, chest] } }`
-    (`lk: 1`: a quest's event, its tier locked at Normal, no vote), `ovr { id, on }`, and the
+  - server → client: `wev { l: [{ id, k, nm, pl, st, x, z, r, lv, ti, bx, bz, n, tl?, s: [[id, kind, x, z, hp, max]], v?, w?, f?, c?, rx?, rz?, ct?, ph?, wk?, res?, lk? }], me: { id: [points, vote, chest] } }`
+    (`lk: 1`: a quest's event, its tier locked at Normal, no vote; `wk`: a war-walker's state), `ovr { id, on }`, and the
     server op `evwon { id, i }`
 
 ## Known limits
