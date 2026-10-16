@@ -207,6 +207,14 @@ A modular, procedural generator in `src/world/build/` that every builder can use
     (`physicscheck` scenery parity). Measured over six biomes at rest, frame time is within noise
     of the old primitives at a similar triangle count; draw calls rise by up to ~180 where many
     biomes' sets are in view. `tools/worldshots.js` `scenery()` and `measure()` capture and time it.
+  - *Props* follow it too, as bakeable pieces made of the scenery kit's components:
+    `src/world/scenery/props.js` builds every camp and stronghold piece kind
+    (`prop(kind, rng, { kit })`, styled per faction, inside the footprints in `PROP_SIZES`; wired
+    in by the camp kit), and `src/world/scenery/placeProps.js` builds the settlements', landmarks',
+    story sites' and world events' props — lamp posts, market stalls with their goods, the notice
+    board, the war table, town trees, planters, crops, broken rock for heaps and rubble, and the
+    event pylon, flare, Maker beacon and rift. `props()` and `placeProps()` in
+    `tools/worldshots.js` shoot a tile of each.
 - **G3 Special effects:** implemented for surface-aware impacts, particle-based flame tongues and
   weapon-attached melee sparks (emitted from transformed mesh geometry at the striking end),
   toggleable blood particles for organic enemy hits, nearby scenery flames with pooled flickering

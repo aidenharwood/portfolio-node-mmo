@@ -9,6 +9,7 @@ import { piece, flatten, G, shade } from '../render/ModelKit.js';
 import { C, HEARTH, FORGE, LAMP, CARGO, RUNE } from './palette.js';
 import { TOWN, CITY, HUB_RING, SIZES } from './places.js';
 import { building, bodyCols } from './build/kit.js';
+import { lampPost, stall as kitStall, noticeBoard, warTable as kitWarTable, townTree, shrub, crop as kitCrop, rockShape, seedOf } from './scenery/placeProps.js';
 
 const TAU = Math.PI * 2;
 const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
@@ -106,60 +107,26 @@ function sub(h, x, y, z, ry = 0) {
   return s;
 }
 
+// A street lamp (world/scenery/placeProps.js) at world (x, z).
 function lamp(f, x, z, tall = 3) {
-  const y = f.gy(x, z);
-  const [lx, lz] = [x - f.p.x, z - f.p.z];
-  piece(f.g, G.cyl(0.07, 0.1, tall, 6), C.metalDark, { pos: [lx, y + tall / 2, lz], outline: 0.01 });
-  piece(f.g, G.box(0.34, 0.34, 0.34), LAMP, { pos: [lx, y + tall + 0.1, lz], glow: true, outline: 0.012 });
-  piece(f.g, G.cone(0.32, 0.3, 4), C.metalDark, { pos: [lx, y + tall + 0.42, lz], rot: [0, Math.PI / 4, 0], outline: 0.01 });
+  lampPost(f.g, [x - f.p.x, f.gy(x, z), z - f.p.z], { tall, rng: seedOf(x, z) });
   f.col(x, z, 0.15, tall);
 }
 
-// A market stall (local to h, front +z): counter, posts, an awning, and its goods — weapons
-// racked, armour on a stand, or a bit of everything.
+// A market stall (local to h, front +z): a counter, posts, a striped awning, and its goods —
+// weapons racked, armour on a stand, or a bit of everything (world/scenery/placeProps.js).
 function stall(h, cloth, goods = 'all') {
-  piece(h, G.box(2.8, 1.0, 1.0), C.woodDark, { pos: [0, 0.5, 0], outline: 0.03 });
-  for (const x of [-1.35, 1.35]) piece(h, G.box(0.1, 2.6, 0.1), C.metal, { pos: [x, 1.3, -0.45], outline: 0.012 });
-  piece(h, G.box(3.1, 0.08, 1.8), cloth, { pos: [0, 2.6, 0.15], rot: [0.2, 0, 0], outline: 0.015 });
-  if (goods === 'weapons') {
-    piece(h, G.box(2.4, 0.08, 0.12), C.woodDark, { pos: [0, 2.1, -0.45], outline: 0.008 });
-    for (let i = 0; i < 4; i++) piece(h, G.box(0.08, 1.3, 0.14), C.metalDark, { pos: [-0.95 + i * 0.62, 1.6, -0.38], rot: [0.12, 0, 0.12], outline: 0.01 });
-    piece(h, G.box(0.55, 0.12, 0.24), C.metal, { pos: [0.6, 1.07, 0.1], rot: [0, 0.4, 0], outline: 0.01 });
-  } else if (goods === 'armor') {
-    piece(h, G.cyl(0.05, 0.05, 1.4, 5), C.metalDark, { pos: [-0.8, 1.7, -0.35], outline: 0.008 });
-    piece(h, G.box(0.62, 0.7, 0.32), C.steel, { pos: [-0.8, 1.95, -0.35], outline: 0.015 });
-    piece(h, G.sphere(0.2, 8, 6), C.steel, { pos: [-0.8, 2.5, -0.35], outline: 0.012 });
-    piece(h, G.box(0.55, 0.35, 0.42), C.hide, { pos: [0.55, 1.17, 0.05], outline: 0.012 });
-  } else {
-    piece(h, G.box(0.3, 0.3, 0.3), CARGO[0], { pos: [-0.7, 1.15, 0], outline: 0.012 });
-    piece(h, G.cyl(0.12, 0.12, 0.4, 8), HEARTH, { pos: [0.6, 1.2, 0], glow: true, outline: 0.012 });
-  }
+  kitStall(h, cloth, goods);
 }
 
 // A quest board (local to h, front +z): a roofed board on two posts with notices pinned to it.
 function questBoard(h) {
-  for (const x of [-0.95, 0.95]) piece(h, G.box(0.14, 2.6, 0.14), C.woodDark, { pos: [x, 1.3, 0], outline: 0.012 });
-  piece(h, G.box(2.0, 1.3, 0.1), C.wood, { pos: [0, 1.55, 0], outline: 0.02 });
-  piece(h, G.box(2.3, 0.08, 0.6), C.woodDark, { pos: [0, 2.62, 0.05], rot: [0.25, 0, 0], outline: 0.012 });
-  [[-0.6, 1.8], [-0.1, 1.95], [0.5, 1.75], [-0.45, 1.25], [0.2, 1.35], [0.65, 1.2]].forEach(([x, y], i) => {
-    piece(h, G.box(0.36, 0.42, 0.02), i % 3 ? 0xf0e6cc : 0xe8c870, { pos: [x, y, 0.07], rot: [0, 0, i % 2 ? 0.08 : -0.06], outline: 0.004 });
-  });
-  piece(h, G.box(0.16, 0.2, 0.16), LAMP, { pos: [1.05, 2.35, 0.2], glow: true, outline: 0.008 });
+  noticeBoard(h);
 }
 
 // The war table where a city's raids are planned: a round table under a holographic map.
 function warTable(h) {
-  piece(h, G.cyl(1.3, 1.1, 0.9, 16), C.metalDark, { pos: [0, 0.45, 0], outline: 0.025 });
-  piece(h, G.cyl(1.38, 1.38, 0.12, 16), C.steel, { pos: [0, 0.96, 0], outline: 0.015 });
-  piece(h, G.cyl(1.1, 1.1, 0.04, 20), RUNE, { pos: [0, 1.3, 0], glow: true, outline: 0 });
-  for (const [x, z, c] of [[0.4, -0.2, FORGE], [-0.5, 0.3, 0xff4a3a], [0.1, 0.6, FORGE], [-0.2, -0.6, 0xc46aff]]) {
-    piece(h, G.octa(0.12), c, { pos: [x, 1.55, z], scale: [1, 1.6, 1], glow: true, outline: 0.008 });
-  }
-  for (let i = 0; i < 4; i++) {
-    const [x, z] = polar((i / 4) * TAU + 0.4, 1.9);
-    piece(h, G.box(0.18, 1.6, 0.18), C.metalDark, { pos: [x, 0.8, z], outline: 0.01 });
-    piece(h, G.box(0.22, 0.12, 0.22), RUNE, { pos: [x, 1.66, z], glow: true, outline: 0 });
-  }
+  kitWarTable(h);
 }
 
 // A sealed gate in a city's gate yard: a great arch, runes up its pillars and a seal across the
@@ -381,7 +348,7 @@ export const HAMLET_BUILDERS = {
     for (let r = 0; r < 4; r++) {
       for (let k = 0; k < 5; k++) {
         const [cx, cz] = lp(Math.PI - 0.5 + (k - 2) * 0.1, 8.8 + r * 1.05);
-        piece(f.g, G.cone(0.3, 0.8, 5), crop, { pos: [cx, f.gy(cx, cz) + 0.38, cz], rot: [0, rnd() * 3, 0], outline: 0.01 });
+        kitCrop(f.g, [cx, f.gy(cx, cz), cz], crop, { grain: st === STYLES.dry, rng: seedOf(cx, cz, rnd()) });
       }
     }
     for (let k = -3; k <= 3; k++) {
@@ -389,8 +356,7 @@ export const HAMLET_BUILDERS = {
       piece(f.g, G.box(0.12, 1.0, 0.12), C.wood, { pos: [cx, f.gy(cx, cz) + 0.5, cz], outline: 0.01 });
     }
     const [lx, lz] = lp(0.95, 6.4);
-    piece(f.g, G.cyl(0.07, 0.09, 2.8, 6), C.metalDark, { pos: [lx, f.gy(lx, lz) + 1.4, lz], outline: 0.01 });
-    piece(f.g, G.sphere(0.18, 8, 6), LAMP, { pos: [lx, f.gy(lx, lz) + 2.9, lz], glow: true, outline: 0.01 });
+    lampPost(f.g, [lx, f.gy(lx, lz), lz], { tall: 2.8, hang: true, rng: seedOf(lx, lz) });
     flatten(f.g);
     w.finish(f.g);
     w.barrel(...f.toW(...lp(-1.3, 6.6)));
@@ -422,13 +388,13 @@ export const HAMLET_BUILDERS = {
       const s = 0.5 + rnd() * 0.7;
       const ox = hx + (rnd() - 0.5) * 2.4;
       const oz = hz + (rnd() - 0.5) * 2.4;
-      piece(f.g, G.dodeca(s), k % 2 ? C.stoneDark : ore, { pos: [ox, f.gy(ox, oz) + s * 0.4, oz], rot: [rnd(), rnd(), 0], scale: [1, 0.7, 1], glow: k % 2 === 0, outline: k % 2 ? 0.02 : 0 });
+      piece(f.g, rockShape(s, k), k % 2 ? C.stoneDark : ore, { pos: [ox, f.gy(ox, oz) + s * 0.35, oz], rot: [rnd(), rnd(), 0], scale: [1, 0.7, 1], glow: k % 2 === 0, pattern: k % 2 ? 'rock' : undefined, outline: k % 2 ? 0.02 : 0 });
     }
     f.col(hx, hz, 1.8, 1.5);
     const cart = f.put(...lp(1.25, 7.2), 1.25 + Math.PI / 2);
     piece(cart, G.box(1.8, 0.8, 1.1), C.rust, { pos: [0, 0.75, 0], outline: 0.02 });
     for (const x of [-0.6, 0.6]) for (const z of [-0.6, 0.6]) piece(cart, G.cylZ(0.28, 0.28, 0.14, 10), C.metalDark, { pos: [x, 0.28, z], rot: [0, Math.PI / 2, 0], outline: 0.01 });
-    piece(cart, G.dodeca(0.45), ore, { pos: [0, 1.25, 0], scale: [1.3, 0.6, 1], glow: true, outline: 0 });
+    piece(cart, rockShape(0.45, 9), ore, { pos: [0, 1.25, 0], scale: [1.3, 0.6, 1], glow: true, outline: 0 });
     f.col(...lp(1.25, 7.2), 1.1, 1.2);
     flatten(f.g);
     w.finish(f.g);
@@ -745,8 +711,10 @@ export function buildCity(w, p) {
     const [x, z] = f.at(a, 4.6);
     if (!f.clear(x, z, 0.8) || nearFolk(p, x, z, 1.8)) continue;
     const h = f.put(x, z, a);
-    piece(h, G.box(1.4, 0.6, 1.4), C.stoneDark, { pos: [0, 0.3, 0], outline: 0.015 });
-    piece(h, G.ico(0.7, 0), C.bush, { pos: [0, 0.95, 0], outline: 0.015 });
+    piece(h, G.box(1.4, 0.6, 1.4), C.stoneDark, { pos: [0, 0.3, 0], pattern: 'blocks', outline: 0.015 });
+    piece(h, G.box(1.55, 0.1, 1.55), C.stone, { pos: [0, 0.62, 0], outline: 0.01 });
+    piece(h, G.box(1.2, 0.06, 1.2), C.dirtDark, { pos: [0, 0.66, 0], outline: 0 });
+    shrub(h, [0, 0.7, 0], { rng: seedOf(x, z) });
     f.col(x, z, 0.8, 1.2);
   }
   houseRing(f, st, CITY.hall, { step: 0.62, skip: [[S.citadel, 0.75], [S.inn, 0.7]], storeys: 1, big: 1.35, flat: true, kit: 'city' });
@@ -768,9 +736,7 @@ export function buildCityWall(w, p) {
     if (quarters.some((b) => Math.abs(wrap(a - b)) < half + 0.05)) continue;
     const [x, z] = f.at(a, 38 + (Math.round(a / 0.16) % 2) * 3);
     if (!f.clear(x, z, 1.2)) continue;
-    const t = f.put(x, z);
-    piece(t, G.cyl(0.2, 0.3, 2.2, 7), C.woodDark, { pos: [0, 1.1, 0], outline: 0.03 });
-    piece(t, G.ico(1.5, 0), C.leaf, { pos: [0, 3.1, 0], outline: 0.04 });
+    townTree(f.put(x, z), [0, 0, 0], { s: 0.92, rng: seedOf(x, z) });
     f.col(x, z, 0.35, 3);
   }
   // Farcall (Act II) is the city of signal masts: they stand on its wall towers.
@@ -843,9 +809,7 @@ export const DISTRICT_BUILDERS = {
     for (const [la, d] of [[Math.PI * 0.5, 4], [-Math.PI * 0.6, 5]]) {
       const [x, z] = f.at(p.rot + la, d);
       if (nearFolk(p, x, z, 2.2)) continue;
-      const t = f.put(x, z);
-      piece(t, G.cyl(0.22, 0.32, 2.4, 7), C.woodDark, { pos: [0, 1.2, 0], outline: 0.03 });
-      piece(t, G.ico(1.6, 0), C.leaf, { pos: [0, 3.4, 0], outline: 0.04 });
+      townTree(f.put(x, z), [0, 0, 0], { s: 1.0, rng: seedOf(x, z) });
       f.col(x, z, 0.4, 3);
     }
     const g = f.put(p.x, p.z);

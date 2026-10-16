@@ -39,7 +39,7 @@ const RACE_KIT = { scav: 'scav', hive: 'nest', synth: 'relay', fauna: 'den', sal
 const kitOf = (o) => o.kit ?? RACE_KIT[o.race] ?? 'scav';
 
 // ---------------------------------------------------------------- components
-class Parts {
+export class Parts {
   constructor(rng, g) { this.rng = rng; this.g = g; }
   r(a, b) { return a + (b - a) * this.rng(); }
   pick(list) { return list[Math.floor(this.rng() * list.length)]; }
@@ -53,7 +53,7 @@ class Parts {
 }
 
 // A bar from a to b (a post, a brace, a cable), r thick.
-function bar(P, a, b, r, color, opts = {}) {
+export function bar(P, a, b, r, color, opts = {}) {
   const A = new THREE.Vector3(...a);
   const B = new THREE.Vector3(...b);
   const len = A.distanceTo(B);
@@ -63,12 +63,12 @@ function bar(P, a, b, r, color, opts = {}) {
 }
 
 // A rock: a roughened lump, its facets left hard.
-function rock(P, pos, s, color = C.stone, { sy = 0.8, seed = 0 } = {}) {
+export function rock(P, pos, s, color = C.stone, { sy = 0.8, seed = 0 } = {}) {
   P.add(lump(1, { detail: 1, rough: 0.24, floor: -0.4, seed: seed || Math.floor(P.r(1, 1e6)) }), color, { pos, scale: [s * P.r(0.9, 1.15), s * sy, s * P.r(0.85, 1.1)], rot: [0, P.r(0, TAU), 0], pattern: 'rock', outline: 0.02 });
 }
 
 // A plank crate, banded, a stencil on its side (or a steel cargo box for the Synths).
-function box(P, pos, s, { steel = false, ry = 0 } = {}) {
+export function box(P, pos, s, { steel = false, ry = 0 } = {}) {
   const [x, y, z] = pos;
   const col = steel ? P.pick([C.steel, C.hullDark, 0x4a5a6a]) : P.pick([C.wood, 0x8a6a48, 0x6a4a30, P.pick(CARGO)]);
   const rot = [0, ry, 0];
@@ -87,7 +87,7 @@ function box(P, pos, s, { steel = false, ry = 0 } = {}) {
 }
 
 // A drum: hooped, dented, its paint worn; or a fire barrel with vents glowing.
-function drum(P, pos, { fire = false, col = null } = {}) {
+export function drum(P, pos, { fire = false, col = null } = {}) {
   const [x, y, z] = pos;
   const c = col ?? (fire ? C.rust : P.pick([0x8a2a2a, 0x3a5a7a, 0x4a6a3a, 0xb08a3e, C.rust]));
   const r = fire ? 0.42 : 0.36;

@@ -267,3 +267,75 @@ export async function props({ w = 400, h = 300, cols = 6, seed = 1, kits = ['sca
   g.world.sceneryDirty = true;
   return 'ok';
 }
+
+// Place props (world/scenery/placeProps.js): lamps, stalls, boards, the war table, greenery,
+// crops, rocks and the world events' props, one close tile each. Sheet: tour_placeprops.png.
+export async function placeProps({ w = 400, h = 300, cols = 6, name = 'placeprops' } = {}) {
+  const P = await import('../src/world/scenery/placeProps.js');
+  const { bakeTree, piece } = await import('../src/render/ModelKit.js');
+  const { C } = await import('../src/world/palette.js');
+  const items = [
+    ['lamp', 3.2, (g) => P.lampPost(g, [0, 0, 0], { tall: 3 })],
+    ['lamp (hung)', 3.2, (g) => P.lampPost(g, [0, 0, 0], { tall: 3, hang: true })],
+    ['stall: weapons', 2.7, (g) => P.stall(g, 0xc0583a, 'weapons')],
+    ['stall: armour', 2.7, (g) => P.stall(g, 0x3a7ab0, 'armor')],
+    ['stall: goods', 2.7, (g) => P.stall(g, 0xd9a227, 'all')],
+    ['notice board', 3, (g) => P.noticeBoard(g)],
+    ['war table', 2, (g) => P.warTable(g)],
+    ['town tree', 4.2, (g) => P.townTree(g, [0, 0, 0])],
+    ['planter', 1.5, (g) => { piece(g, new THREE.BoxGeometry(1.4, 0.6, 1.4), C.stoneDark, { pos: [0, 0.3, 0], pattern: 'blocks' }); P.shrub(g, [0, 0.7, 0]); }],
+    ['crops', 1.2, (g) => { for (let i = 0; i < 9; i++) P.crop(g, [(i % 3) - 1, 0, Math.floor(i / 3) - 1], i < 3 ? 0xd8b84a : 0x5aa84e, { grain: i < 3 }); }],
+    ['ore heap', 1.5, (g) => { for (let k = 0; k < 5; k++) piece(g, P.rockShape(0.5 + (k % 3) * 0.25, k), k % 2 ? C.stoneDark : 0x7ab0d8, { pos: [(k - 2) * 0.6, 0.25, (k % 2) * 0.5], scale: [1, 0.7, 1], glow: k % 2 === 0, pattern: k % 2 ? 'rock' : undefined }); }],
+    ['event: pylon', 3.8, (g) => g.add(P.eventPylon().g)],
+    ['event: flare', 3, (g) => g.add(P.eventFlare().g)],
+    ['event: beacon', 4.6, (g) => g.add(P.eventBeacon().g)],
+    ['event: rift', 4.5, (g) => g.add(P.eventRift().g)],
+  ];
+  g.state = 'playing';
+  document.getElementById('loading')?.remove();
+  const x0 = g.player.position.x + 40;
+  const z0 = g.player.position.z + 40;
+  const y0 = g.world.groundHeight(x0, z0) + 3;
+  const pad = new THREE.Mesh(new THREE.CylinderGeometry(9, 9, 4, 32), new THREE.MeshLambertMaterial({ color: 0x8a9a6a }));
+  pad.position.set(x0, y0 - 2, z0);
+  g.scene.add(pad);
+  const pack = g.world.packScenery;
+  g.world.packScenery = function () { this.sceneryDirty = false; };
+  const hidden = [];
+  for (const set of Object.values(g.world.sets)) for (const m of [set.body, set.hull, set.mesh]) if (m?.visible) { m.visible = false; hidden.push(m); }
+  const sheet = document.createElement('canvas');
+  sheet.width = cols * w;
+  sheet.height = Math.ceil(items.length / cols) * h;
+  const ctx = sheet.getContext('2d');
+  items.forEach(([label, ht, build], i) => {
+    const root = new THREE.Group();
+    root.position.set(x0, y0, z0);
+    build(root);
+    bakeTree(root, { surfaces: true });
+    g.scene.add(root);
+    const d = Math.max(3.5, ht * 1.5);
+    const from = new THREE.Vector3(x0 + d * 0.55, y0 + d * 0.45 + ht * 0.3, z0 + d);
+    const at = new THREE.Vector3(x0, y0 + ht * 0.45, z0);
+    g.world.dayTime = 0.25;
+    view(x0 + 12, z0 + 12, from, at);
+    g.world.dayTime = 0.25;
+    const src = view(x0 + 12, z0 + 12, from, at);
+    const sw = src.width;
+    const sh = src.height;
+    const cw = Math.min(sw, (sh * w) / h);
+    const chh = (cw * h) / w;
+    ctx.drawImage(src, (sw - cw) / 2, (sh - chh) / 2, cw, chh, (i % cols) * w, Math.floor(i / cols) * h, w, h);
+    ctx.fillStyle = '#000a';
+    ctx.fillRect((i % cols) * w, Math.floor(i / cols) * h, w, 22);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 14px sans-serif';
+    ctx.fillText(label, (i % cols) * w + 6, Math.floor(i / cols) * h + 16);
+    g.scene.remove(root);
+  });
+  g.scene.remove(pad);
+  for (const m of hidden) m.visible = true;
+  g.world.packScenery = pack;
+  g.world.sceneryDirty = true;
+  await fetch(`/__shot/tour_${name}`, { method: 'POST', body: sheet.toDataURL('image/png') });
+  return 'ok';
+}
