@@ -222,7 +222,7 @@ export function storyIn(gen, rx, rz) {
     } else if (P.key === 'foundrybelow') {
       // The hatch at the back of the cut, facing the way you come in from the city.
       poi = { ...base, type: 'story', kind: 'foundrybelow', id: `p:${key}:foundrybelow`, r: P.r, tag: 'sfb' };
-      poi.npcs = [folkFor(poi, rng, 0, 'object', P.rot + Math.PI, 3, { object: 'foundrybelow:hatch', model: 'hatch', facing: P.rot })];
+      poi.npcs = [folkFor(poi, rng, 0, 'object', P.rot + Math.PI, 6.5, { object: 'foundrybelow:hatch', model: 'hatch', facing: P.rot })];
     } else if (P.key === 'relicdig') {
       poi = { ...base, type: 'story', kind: 'relicdig', id: `p:${key}:relicdig`, r: P.r, tag: 'sr' };
       poi.npcs = [folkFor(poi, rng, 0, 'story', P.rot, 4, { folk: 'chief' })];

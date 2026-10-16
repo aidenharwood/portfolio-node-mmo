@@ -13,7 +13,7 @@ import { HeadlessWorld } from '../server/world.js';
 import { SimHost } from '../server/simhost.js';
 import { loadCharacter } from '../server/characters.js';
 import { WorldSim } from '../src/sim/WorldSim.js';
-import { Dungeons } from '../src/sim/Dungeons.js';
+import { Dungeons, dungeonChoices } from '../src/sim/Dungeons.js';
 import { generateDungeon } from '../src/world/DungeonGen.js';
 import { Interior } from '../src/world/Interior.js';
 import { DUNGEONS, LAUNCH, CLOSE_AFTER, inPocket, pocketOrigin, lockKey } from '../src/world/dungeons.js';
@@ -158,6 +158,17 @@ check(!dun.enter({ id: 1, position: A.position, party: 'x', level: 8, flags: {} 
   check(!!hatch && !dun.enter(who({}), { d: 'foundrybelow', mode: 'run', tier: 0, via: 'entrance' }) && /sealed/.test(dun.error), `the Foundry Below refused at its hatch before the Titan's core is taken ("${dun.error}")`);
   check(!!hatch && !!dun.enter(who({ titan_core_taken: true }), { d: 'foundrybelow', mode: 'run', tier: 0, via: 'entrance' }), 'and let in once it is');
   if (hatch) dun.out(91);
+  // The same through a waygate (Brightwater's): listed sealed, then open.
+  const wg = w.npcById('n:0,0:b20');
+  const atGate = new THREE.Vector3(wg.x + 1, w.groundHeight(wg.x + 1, wg.z + 1), wg.z + 1);
+  const viaGate = (id, flags) => dun.enter({ id, position: atGate, party: `solo:${id}`, level: 21, flags }, { d: 'foundrybelow', mode: 'run', tier: 1, via: 'gate' });
+  const listed = (flags) => dungeonChoices(flags).find((c) => c.def.id === 'foundrybelow');
+  check(listed({})?.locked === true && listed({ titan_core_taken: true })?.locked === false, 'the waygates list it sealed, then open once the core is taken');
+  check(!viaGate(92, {}) && /sealed/.test(dun.error) && !!viaGate(93, { titan_core_taken: true }), 'refused through a waygate without it, let in with it');
+  dun.out(93);
+  // Its open-world copy, shared by the layer, in a shared slot of its own.
+  check(!!hatch && !!dun.enter(who({ titan_core_taken: true }), { d: 'foundrybelow', mode: 'open', via: 'entrance' }) && dun.runOf(91)?.shared && dun.runOf(91).slot === Object.keys(DUNGEONS).indexOf('foundrybelow'), `its open-world copy is shared, in slot ${dun.runOf(91)?.slot}`);
+  dun.out(91);
 }
 stand(A, gate.x + 1.5, gate.z + 1.5);
 const back = [A.position.x, A.position.y, A.position.z];

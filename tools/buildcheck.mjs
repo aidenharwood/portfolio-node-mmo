@@ -95,7 +95,7 @@ for (let ring = 0; ring < 24 && [...want.values()].some((v) => !v); ring++) {
   const ir = probe.gen.cities()[2];
   want.set('citywall:ironreach', probe.gen.region(ir.rx, ir.rz).pois.find((q) => q.type === 'citywall') ?? null);
   // The Fallen Titan with its core, and Brannock's Yard with its cradle (Act III).
-  for (const key of ['titan', 'yard']) {
+  for (const key of ['titan', 'yard', 'foundrybelow']) {
     const S = storyPlaces(probe.gen)[key];
     want.set(`story:${key}`, S ? probe.gen.region(S.rx, S.rz).pois.find((q) => q.story === key) ?? null : null);
   }

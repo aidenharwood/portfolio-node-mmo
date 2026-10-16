@@ -5,9 +5,9 @@
 // chosen tier (sim/Dungeons.js), with a reward chest at the end once a day per tier.
 //
 // The launch set follows the story: the Rustjaw Foundry (Ironjaw's fortress, Act I), the Sunken
-// Vault (the seal he was digging out, opened at the end of Act I) and the Brood Pits (out past
-// Farcall, for Act II). Two more themes — a Synth facility and a Wild cavern — are built by the
-// same generator, for the dev panel and the checks, until dungeons of their own arrive.
+// Vault (the seal he was digging out, opened at the end of Act I), the Brood Pits (out past
+// Farcall, for Act II) and the Foundry Below (past Ironreach, for Act III). Two more — a Synth
+// relay and a Wild cavern — are built by the same generator for the dev panel and the checks.
 
 // The grid every dungeon is laid out on, and the pockets they're built in.
 export const CELL = 2;            // metres per grid cell
