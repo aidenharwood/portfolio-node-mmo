@@ -223,7 +223,7 @@ export class Minimap {
           ctx.beginPath();
           ctx.arc(poi.x, poi.z, poi.type === 'city' ? poi.wall : poi.r, 0, Math.PI * 2);
           ctx.fill();
-          if (poi.type !== 'district') this.dot(poi.x, poi.z, poi.type === 'city' ? 4 : poi.type === 'town' ? 3.2 : poi.type === 'hamlet' ? 2 : 2.6, '#ffd27a');
+          if (poi.type !== 'district') this.dot(poi.x, poi.z, poi.type === 'city' ? 4 : poi.type === 'town' ? 3.2 : poi.type === 'hamlet' ? 2 : poi.type === 'campsite' ? 1.5 : 2.6, '#ffd27a');
         } else if (poi.type === 'landmark' || poi.type === 'story') this.dot(poi.x, poi.z, 2.6, poi.story ? '#ffcf7a' : '#c8b4ff');
       }
     }

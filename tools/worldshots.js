@@ -343,3 +343,54 @@ export async function placeProps({ w = 400, h = 300, cols = 6, name = 'placeprop
   await fetch(`/__shot/tour_${name}`, { method: 'POST', body: sheet.toDataURL('image/png') });
   return 'ok';
 }
+
+// Places on their plots (world/plots.js), seen from above at an angle: one tile per kind — a
+// campsite, a hamlet, a village, a town, and camps of every tier. Sheet: tour_plots.png.
+export async function plots({ w = 480, h = 360, cols = 4, name = 'plots', skip = 0, only = null, scale = 1 } = {}) {
+  g.state = 'playing';
+  g.hud?.hideOverlay?.();
+  document.getElementById('loading')?.remove();
+  const want = only ?? ['campsite', 'hamlet', 'settlement', 'town', 'camp:picket', 'camp:outpost', 'camp:camp', 'camp:base', 'camp:fort'];
+  const key = (p) => (p.type === 'camp' ? `camp:${p.stronghold ? 'fort' : p.tier}` : p.type === 'hub' ? 'hub' : p.type);
+  const found = new Map();
+  const seen = new Map();
+  for (let ring = 1; ring < 14 && found.size < want.length; ring++) {
+    for (let rx = -ring; rx <= ring; rx++) for (let rz = -ring; rz <= ring; rz++) {
+      if (Math.max(Math.abs(rx), Math.abs(rz)) !== ring) continue;
+      for (const p of g.world.gen.region(rx, rz).pois) {
+        const k = key(p);
+        if (!want.includes(k) || found.has(k)) continue;
+        const n = (seen.get(k) ?? 0) + 1;
+        seen.set(k, n);
+        if (n > skip) found.set(k, p);
+      }
+    }
+  }
+  const list = want.filter((k) => found.has(k)).map((k) => [k, found.get(k)]);
+  const sheet = document.createElement('canvas');
+  sheet.width = cols * w;
+  sheet.height = Math.ceil(list.length / cols) * h;
+  const ctx = sheet.getContext('2d');
+  list.forEach(([k, p], i) => {
+    const R = (p.type === 'town' ? p.r + 12 : p.type === 'citywall' ? p.wall + 8 : p.radius ?? p.r ?? 12) * scale;
+    const y = g.world.groundHeight(p.x, p.z);
+    g.world.dayTime = 0.25;
+    const from = new THREE.Vector3(p.x + R * 0.5, y + R * 1.9 + 6, p.z + R * 1.3 + 4);
+    const at = new THREE.Vector3(p.x, y, p.z);
+    // (Until everything round it has streamed in and been built.)
+    for (let k = 0; k < 200 && (k < 2 || g.world.jobs?.length); k++) view(p.x, p.z, from, at);
+    const src = view(p.x, p.z, from, at);
+    const sw = src.width;
+    const sh = src.height;
+    const cw = Math.min(sw, (sh * w) / h);
+    const chh = (cw * h) / w;
+    ctx.drawImage(src, (sw - cw) / 2, (sh - chh) / 2, cw, chh, (i % cols) * w, Math.floor(i / cols) * h, w, h);
+    ctx.fillStyle = '#000a';
+    ctx.fillRect((i % cols) * w, Math.floor(i / cols) * h, w, 22);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 14px sans-serif';
+    ctx.fillText(`${k} — ${p.name ?? ''}`, (i % cols) * w + 6, Math.floor(i / cols) * h + 16);
+  });
+  await fetch(`/__shot/tour_${name}`, { method: 'POST', body: sheet.toDataURL('image/png') });
+  return list.map(([k, p]) => `${k}@${Math.round(p.x)},${Math.round(p.z)}`).join(' ');
+}

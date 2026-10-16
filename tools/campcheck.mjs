@@ -32,7 +32,8 @@ function fingerprint(gen) {
   let h = 0x811c9dc5;
   for (const r of regionsTo(gen, 6)) {
     for (const p of r.pois) {
-      if (p.type === 'camp' || p.type === 'frontier') continue;
+      // (Campsites, like pickets, are placed after everything else from streams of their own.)
+      if (p.type === 'camp' || p.type === 'frontier' || p.type === 'campsite') continue;
       const s = `${p.id}@${p.x.toFixed(2)},${p.z.toFixed(2)};`;
       for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619) >>> 0;
     }
@@ -198,7 +199,7 @@ function layouts() {
     const solid = L.pieces.filter((p) => p.r > 0);
     if (!L.posts.every((q) => solid.every((p) => Math.hypot(q.x - p.x, q.z - p.z) >= p.r + 0.6))) fail('posts clear of pieces', def);
     if (!L.posts.every((q, i) => L.posts.every((o, j) => i === j || Math.hypot(q.x - o.x, q.z - o.z) >= 1.2))) fail('posts 1.2 m apart', def);
-    if (def.tier === 'outpost' ? L.gates.length : !L.gates.length) fail('gates by tier', def);
+    if (def.tier === 'outpost' || def.tier === 'picket' ? L.gates.length : !L.gates.length) fail('gates by tier', def);
     if (!!L.throne !== !!def.stronghold) fail('a throne only in a stronghold', def);
     const wet = campLayout({ ...def, id: `${def.id}w` }, (wx) => wx > 5);
     if (![...wet.posts, ...wet.spawners, ...wet.pieces].every((q) => q.x <= 5)) fail('nothing stands in the water', def);

@@ -215,6 +215,21 @@ A modular, procedural generator in `src/world/build/` that every builder can use
     board, the war table, town trees, planters, crops, broken rock for heaps and rubble, and the
     event pylon, flare, Maker beacon and rift. `props()` and `placeProps()` in
     `tools/worldshots.js` shoot a tile of each.
+  - *Plots* (`src/world/plots.js`): places no longer all stand on circles. A plot is a polygon
+    worked out from a place's seed and bounding radius alone (no draws from the generator's
+    streams, so nothing already placed moves, and the server agrees): a rectangle, a strip, an L,
+    a T, a cross, a wedge or an irregular blob, turned any way, inside the place's old radius (a
+    town's reaches 10 m past its old wall, inside the ground kept clear for it), its deepest point
+    at the place's own spot, and leaving any room asked for round it. Terrain pads take a plot
+    (`padEdge`), so levelled and trodden ground, grass and scenery clearing follow its outline.
+    Camps lay out on theirs (world/campLayout.js: perimeter, gates and stronghold towers along the
+    outline, everything else sampled inside it, the keep and alarm waves by it); towns, Brightwater
+    and the city walls are walled round theirs (straight runs, corner towers, gates where roads
+    cross), with town houses filling its corners; hamlets', villages', campsites', landmarks',
+    ruins' and story places' trodden ground is theirs. Places now run from a campsite (travellers
+    round a fire: tents, bedrolls, two or three folk, now and then a trader) and a picket (a few
+    lookouts, no road of their own) to sprawling bases. `plots()` in `tools/worldshots.js` shoots
+    one of each kind from above.
 - **G3 Special effects:** implemented for surface-aware impacts, particle-based flame tongues and
   weapon-attached melee sparks (emitted from transformed mesh geometry at the striking end),
   toggleable blood particles for organic enemy hits, nearby scenery flames with pooled flickering

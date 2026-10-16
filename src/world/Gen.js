@@ -18,9 +18,14 @@
 //             of each act's lands, in districts. Brightwater, at the hub, is a town.
 import { makeNoise2D, fbm, smoothstep } from '../core/noise.js';
 import { mulberry32 } from '../core/rng.js';
-import { SIZES, CITIES, CITY_WALL, HAMLETS, planHamlet, dressVillage, planTown, planCity, planHub, hamletName, townName, pathBearing } from './places.js';
+import { SIZES, CITIES, CITY_WALL, HAMLETS, planHamlet, planCampsite, campsiteKind, campsiteName, dressVillage, planTown, planCity, planHub, hamletName, townName, pathBearing, hamletPlot, villagePlot, campsitePlot, townPlot, cityPlot, hubPlot } from './places.js';
 import { storyPlaces, storyIn } from './story.js';
-import { TIERS, campLayout } from './campLayout.js';
+import { TIERS, campLayout, campPlot } from './campLayout.js';
+import { padEdge, plotOf } from './plots.js';
+
+// A landmark's, a ruin's or a story place's ground: an irregular plot of radius R round it, always
+// holding the middle two-thirds of it (where its bespoke works and folk stand).
+const sitePlot = (p, R) => plotOf(p, { R, shapes: 'site', inner: R * 0.62 });
 
 export const REGION = 240;
 export const WATER_LEVEL = -0.9;
@@ -90,6 +95,13 @@ const CAMP_NAME = {
   hive: ['Brood Pit', 'Spawning Mound', 'Hive Node', 'Egg Field', 'Creep', 'Chitin Spire'],
   synth: ['Relay Node', 'Foundry Post', 'Signal Spire', 'Assembly Yard', 'Conduit Hub', 'Array'],
   fauna: ['Den', 'Lair', 'Hollow', 'Nest', 'Burrows', 'Run'],
+};
+// A picket's name: a few of the faction's lookouts round a fire.
+const PICKET_NAME = {
+  scav: ['Lookout', 'Picket', 'Watch Fire', 'Scav Pickets'],
+  hive: ['Scout Brood', 'Creep Patch', 'Spore Picket'],
+  synth: ['Sensor Post', 'Picket Node', 'Watch Relay'],
+  fauna: ['Hunting Ground', 'Scrape', 'Lie-up'],
 };
 const STRONGHOLD_NAME = {
   scav: 'Warlord Fort', hive: 'Queen\'s Hive', synth: 'Colossus Foundry', fauna: 'Behemoth Lair',
@@ -349,8 +361,10 @@ export class WorldGen {
       h += (Math.max(h, m.top) - h) * k;
     }
     for (const p of feats.pads) {
-      const d = Math.hypot(x - p.x, z - p.z);
-      if (d < p.r + p.fall) h += (p.h - h) * smoothstep(p.r + p.fall, p.r, d);
+      // (Its bounding circle first: a plot's outline lies inside it.)
+      if (Math.hypot(x - p.x, z - p.z) >= p.r + p.fall) continue;
+      const e = padEdge(p, x, z);
+      if (e < p.fall) h += (p.h - h) * smoothstep(p.fall, 0, e);
     }
     return h;
   }
@@ -756,14 +770,16 @@ export class WorldGen {
       }
       return null;
     };
-    const pad = (x, z, r, h, fall = 12, dirt = false) => region.pads.push({ x, z, r, h, fall, dirt });
+    // A pad levels the ground (to h, falling away over `fall` metres) inside radius r, or inside a
+    // plot's outline (world/plots.js; `margin` metres out from it) where it's given one.
+    const pad = (x, z, r, h, fall = 12, dirt = false, plot = null, margin = 0) => region.pads.push({ x, z, r, h, fall, dirt, plot, margin });
     let chestN = 0;
     const chest = (x, z, extra = {}) => region.pois.push({ type: 'chest', id: `k:${key}:${chestN++}`, x, z, level: level + (extra.bonus ?? 0), ...extra });
 
     if (hub) {
       // Brightwater: a town now, its walls round the old camp.
       taken.push({ x: 0, z: 0, r: HUB.radius + 14 });
-      pad(0, 0, HUB.radius + 3, 0, 20);
+      pad(0, 0, HUB.radius + 7, 0, 20, false, hubPlot(HUB), 3);
       pad(0, 0, 14, 0, 4, true);
       region.pois.push({ type: 'hub', id: 'hub', x: 0, z: 0, radius: HUB.radius, name: HUB.name });
       region.pois.push({ type: 'waystone', id: 'w-hub', x: 0, z: 18, name: 'Brightwater' });
@@ -778,11 +794,14 @@ export class WorldGen {
           const wall = city ? CITY_WALL : SIZES.town.r;
           h = (city ?? town).h;
           taken.push({ x: w.x, z: w.z, r: wall + 12 });
-          pad(w.x, w.z, wall + 2, h, city ? 22 : 16);
-          pad(w.x, w.z, city ? SIZES.city.r + 6 : 11, h, 3, city ? 'stone' : true);
-          region.pois.push(city
+          const place = city
             ? { type: 'city', id: `y:${key}`, key, x: w.x, z: w.z, r: SIZES.city.r, wall, h, name: city.name, act: city.act, blurb: city.blurb, level, seed: Math.floor(rng() * 1e9) }
-            : { type: 'town', id: `o:${key}`, key, x: w.x, z: w.z, r: wall, h, name: town.name, level, seed: Math.floor(rng() * 1e9) });
+            : { type: 'town', id: `o:${key}`, key, x: w.x, z: w.z, r: wall, h, name: town.name, level, seed: Math.floor(rng() * 1e9) };
+          // Its ground: its plot (world/places.js), a couple of metres out; its plaza paved or trodden.
+          const plot = city ? cityPlot(place) : townPlot(place);
+          pad(w.x, w.z, plot.R + 2, h, city ? 22 : 16, false, plot, 2);
+          pad(w.x, w.z, city ? SIZES.city.r + 6 : 11, h, 3, city ? 'stone' : true);
+          region.pois.push(place);
         } else if (rng() < (ring === 1 ? 0.55 : 0.4)) {
           // A friendly village round the waystone (so on the roads), in about two regions of five.
           const kinds = affinity(SETTLEMENTS, biome, ring);
@@ -806,7 +825,9 @@ export class WorldGen {
             };
             dressVillage(place, extra);
             region.pois.push(place);
-            pad(c.x, c.z, SETTLEMENT_RADIUS, c.h, 10, true);
+            // Level ground under all its buildings; its trodden yard the shape of its plot.
+            pad(c.x, c.z, SETTLEMENT_RADIUS, c.h, 10, false);
+            pad(c.x, c.z, SETTLEMENT_RADIUS + 1, c.h, 4, true, villagePlot(place), 1);
             h = c.h;
           }
         }
@@ -824,8 +845,10 @@ export class WorldGen {
           if (c) {
             const rot = rng() * Math.PI * 2;
             const id = `l:${key}`;
-            region.pois.push({ type: 'landmark', id, kind, x: c.x, z: c.z, r: L.r, rot, h: c.h, name: L.name(rng), level, seed: Math.floor(rng() * 1e9) });
-            if (L.pad) pad(c.x, c.z, L.r * 0.85, c.h, 10, kind === 'wreck');
+            const lm = { type: 'landmark', id, kind, x: c.x, z: c.z, r: L.r, rot, h: c.h, name: L.name(rng), level, seed: Math.floor(rng() * 1e9) };
+            region.pois.push(lm);
+            // Its ground: an irregular plot round it (world/plots.js), never less than its middle.
+            if (L.pad) pad(c.x, c.z, L.r * 0.85 + 1, c.h, 10, kind === 'wreck', sitePlot(lm, L.r * 0.85), 1);
             const [lx, lz] = L.chest;
             chest(c.x + Math.cos(rot) * lx + Math.sin(rot) * lz, c.z - Math.sin(rot) * lx + Math.cos(rot) * lz, { landmark: id, bonus: 2 });
           }
@@ -873,8 +896,9 @@ export class WorldGen {
       const c = spot(25, { r: r + 4, maxSlope: 0.35 });
       if (c) {
         const id = `r:${key}`;
-        region.pois.push({ type: 'ruin', id, x: c.x, z: c.z, r });
-        pad(c.x, c.z, r + 1, c.h, 8);
+        const ruin = { type: 'ruin', id, x: c.x, z: c.z, r };
+        region.pois.push(ruin);
+        pad(c.x, c.z, r + 2, c.h, 8, false, sitePlot(ruin, r + 1), 1);
         chest(c.x, c.z, { ruin: id, bonus: 1 });
       }
     }
@@ -887,12 +911,12 @@ export class WorldGen {
     // The story's places here (world/story.js): their ground was kept clear from the start.
     for (const p of storyIn(this, rx, rz)) {
       region.pois.push(p);
-      if (p.type === 'camp') pad(p.x, p.z, p.radius + (p.stronghold ? 4 : 2), p.h, p.stronghold ? 14 : 11, true);
+      if (p.type === 'camp') pad(p.x, p.z, p.radius + (p.stronghold ? 4 : 2), p.h, p.stronghold ? 14 : 11, true, campPlot(p), p.stronghold ? 4 : 2);
       else if (p.kind === 'vault') {
         pad(p.x, p.z, p.r, p.h, 8, true);
         pad(p.x, p.z, 7, p.h - 3.5, 4, true);
-      } else if (p.type === 'story') pad(p.x, p.z, p.r, p.h, 6, p.kind === 'relicdig' || (p.kind === 'array' && 'stone'));
-      else pad(p.x, p.z, p.r * 0.85, p.h, 10, true);
+      } else if (p.type === 'story') pad(p.x, p.z, p.r + 1, p.h, 6, p.kind === 'relicdig' || (p.kind === 'array' && 'stone'), sitePlot(p, p.r), 1);
+      else pad(p.x, p.z, p.r * 0.85 + 1, p.h, 10, true, sitePlot(p, p.r * 0.85), 1);
     }
 
     // A hamlet: a few homes off the road, in most regions (fewer where there's a village or a
@@ -909,8 +933,9 @@ export class WorldGen {
         };
         planHamlet(place, extra);
         region.pois.push(place);
+        // Level ground under all its buildings; its trodden yard the shape of its plot.
         pad(c.x, c.z, SIZES.hamlet.r, c.h, 9);
-        pad(c.x, c.z, 5, c.h, 3, true);
+        pad(c.x, c.z, SIZES.hamlet.r + 1, c.h, 3, true, hamletPlot(place), 1);
       }
     }
 
@@ -982,10 +1007,61 @@ export class WorldGen {
         if (campLayout(poi, this.campProbe).posts.length < TIERS[tier].garrison[0]) { taken.pop(); continue; }
         region.pois.push(poi);
         placed.push(poi);
-        pad(c.x, c.z, R + 2, c.h, R > 20 ? 16 : 11, true);
+        // Its yard: its plot's outline, a couple of metres out.
+        pad(c.x, c.z, R + 2, c.h, R > 20 ? 16 : 11, true, campPlot(poi), 2);
         const spur = spurTo(c.x, c.z, R);
         if (spur.pts.length) roads.push(spur.pts);
         draws += spur.used;
+      }
+    }
+
+    // Pickets: a few of the faction's lookouts round a fire, off the roads, from a stream of their
+    // own (after everything else here, so nothing already placed moves), with no road of their own.
+    if (!city && !hub) {
+      const pr = mulberry32(hash2(rx, rz, this.seed ^ 0x91c7));
+      const R = TIERS.picket.R;
+      const roads = this.roadsKnown(region).roads;
+      const style = { scav: 'scav', hive: 'nest', synth: 'relay', fauna: 'den' }[race];
+      for (let i = 0, n = (level >= 3 ? 1 : 0) + (pr() < 0.6 ? 1 : 0); i < n; i++) {
+        const ok = (x, z) => {
+          for (let k = 0; k < 12; k++) {
+            const a = (k / 12) * Math.PI * 2;
+            if (!this.owns(rx, rz, x + Math.sin(a) * (R + 11), z + Math.cos(a) * (R + 11))) return false;
+          }
+          return roads.every((path) => path.every(([px, pz]) => Math.hypot(px - x, pz - z) > R + 8));
+        };
+        const c = spot(R + 22, { r: R + 2, maxSlope: 0.35, minHub: 90, rand: pr, camp: true, tries: 80, ok });
+        if (!c) continue;
+        const names = PICKET_NAME[race];
+        const poi = {
+          type: 'camp', id: `k:${key}:${i}`, x: c.x, z: c.z, radius: R, tier: 'picket', race, style, level,
+          name: `${region.name.split(' ')[0]} ${names[Math.floor(pr() * names.length)]}`, seed: Math.floor(pr() * 1e9),
+        };
+        if (campLayout(poi, this.campProbe).posts.length < TIERS.picket.garrison[0]) { taken.pop(); continue; }
+        region.pois.push(poi);
+        pad(c.x, c.z, R + 2, c.h, 9, true, campPlot(poi), 1.5);
+      }
+    }
+    // Campsites: travellers stopped for the night — a fire, a tent or two, two or three folk — out
+    // in the wilds, from a stream of their own (after everything else here).
+    if (!city) {
+      const cr = mulberry32(hash2(rx, rz, this.seed ^ 0x3c5e));
+      if (cr() < (hub ? 0.3 : 0.55)) {
+        const roads = this.roadsKnown(region).roads;
+        const R = SIZES.campsite.r;
+        // By a road as often as not (travellers keep to them), but never on it.
+        const ok = (x, z) => roads.every((path) => path.every(([px, pz]) => Math.hypot(px - x, pz - z) > R + 3));
+        const c = spot(R + 20, { r: R + 2, maxSlope: 0.3, minHub: 60, rand: cr, tries: 80, ok });
+        if (c) {
+          const way = region.pois.find((p) => p.type === 'waystone');
+          const place = {
+            type: 'campsite', id: `w:${key}`, key, x: c.x, z: c.z, r: R, kind: campsiteKind(biome, cr),
+            rot: way ? Math.atan2(way.x - c.x, way.z - c.z) : cr() * Math.PI * 2, h: c.h, name: campsiteName(cr), level, seed: Math.floor(cr() * 1e9),
+          };
+          planCampsite(place, cr);
+          region.pois.push(place);
+          pad(c.x, c.z, R + 1, c.h, 6, true, campsitePlot(place), 1);
+        }
       }
     }
 
@@ -1100,6 +1176,8 @@ export class WorldGen {
       if (n) stops.push(n);
     }
     for (const p of region.pois) {
+      // (A picket has no road of its own: it's a few lookouts out in the wilds.)
+      if (p.tier === 'picket') continue;
       if (p.type === 'camp' || p.type === 'tower' || p.type === 'ruin' || p.type === 'hub') stops.push({ x: p.x, z: p.z, inset: (p.radius ?? p.r ?? 3) * 0.7 });
       else if (p.type === 'landmark') stops.push({ x: p.x, z: p.z, inset: p.r + 2 });
       else if (p.type === 'hamlet') stops.push({ x: p.x, z: p.z, inset: p.r * 0.45 });

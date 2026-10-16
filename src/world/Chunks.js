@@ -12,6 +12,7 @@ import { smoothstep } from '../core/noise.js';
 import { toonMaterial, chainCompile } from '../render/Toon.js';
 import { withTerrain } from '../render/Surfaces.js';
 import { WATER_LEVEL } from './Gen.js';
+import { padEdge } from './plots.js';
 
 export const CHUNK = 64;
 export const RES0 = 32;               // LOD0 cells per side (2 m)
@@ -243,9 +244,9 @@ export class Chunk {
     if (h < WATER_LEVEL + 0.7) out.lerp(SAND, smoothstep(WATER_LEVEL + 0.7, WATER_LEVEL + 0.1, h));
     if (h < WATER_LEVEL - 0.3) out.copy(LAKEBED);
     for (const p of feats.pads) {
-      if (!p.dirt) continue;
-      const d = Math.hypot(x - p.x, z - p.z);
-      if (d < p.r + 4) out.lerp(p.dirt === 'stone' ? PAVE : DIRT, smoothstep(p.r + 4, p.r - 1, d) * 0.85);
+      if (!p.dirt || Math.hypot(x - p.x, z - p.z) >= p.r + 4) continue;
+      const e = padEdge(p, x, z);
+      if (e < 4) out.lerp(p.dirt === 'stone' ? PAVE : DIRT, smoothstep(4, -1, e) * 0.85);
     }
     return out.multiplyScalar(0.94 + gen.nD(x * 0.15, z * 0.15) * 0.06);
   }

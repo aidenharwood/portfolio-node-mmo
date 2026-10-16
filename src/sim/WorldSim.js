@@ -20,7 +20,7 @@
 import * as THREE from 'three';
 import { mulberry32 } from '../core/rng.js';
 import { campUnits, campSquad, roamPack, roamHorde, strongholdWave } from '../combat/races.js';
-import { TIERS, tierOf, campLayout } from '../world/campLayout.js';
+import { TIERS, tierOf, campLayout, campPlot } from '../world/campLayout.js';
 import { inPocket } from '../world/dungeons.js';
 
 const DEFEND = { first: 3, gap: 5, reach: 45, idle: 20 }; // a defence's waves, and how long it waits for someone
@@ -48,13 +48,24 @@ const RESPAWN_CLEARANCE = 26; // no player within this of a slot for it to refil
 export const MAX_CAMP_ENEMIES = 600; // alive across every camp: past it, squads wait
 const ROAMERS_PER_PLAYER = 3;
 const ROAM_DESPAWN = 95;
-const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
-const FORT_INNER = 12.5;     // a stronghold's walls stand 15 m out from its middle (world/World.js buildFort)
-
-// Where a camp's enemies may be put: inside a fort's walls, for a stronghold; anywhere otherwise.
-const campKeep = (def) => (def?.style === 'fort'
-  ? (x, z) => Math.abs(x - def.x) <= FORT_INNER && Math.abs(z - def.z) <= FORT_INNER
-  : null);
+// Where a camp's enemies may be put: inside a stronghold's walls (its plot, world/campLayout.js),
+// for a stronghold; anywhere otherwise.
+const KEEP_MARGIN = 2.5;
+const campKeep = (def) => {
+  if (def?.style !== 'fort') return null;
+  const plot = campPlot(def);
+  return (x, z) => plot.inside(x - def.x, z - def.z, KEEP_MARGIN);
+};
+// How far out from a stronghold's middle along bearing a its ground still keeps a body inside.
+function keepReach(def, a) {
+  const plot = campPlot(def);
+  let reach = 0;
+  for (let d = 0.5; d < plot.R; d += 0.5) {
+    if (!plot.inside(Math.sin(a) * d, Math.cos(a) * d, KEEP_MARGIN + 1)) break;
+    reach = d;
+  }
+  return reach;
+}
 
 export class WorldSim {
   constructor(host) {
@@ -279,7 +290,8 @@ export class Encounters {
     const rng = mulberry32(def.seed ?? 1);
     const list = campUnits(def, rng);
     const L = this.layoutOf(def);
-    let k = 0;
+    // (A boss with no throne takes the first post; the rest start after it.)
+    let k = !L.throne && list.some((s) => s.opts.boss) ? 1 : 0;
     return list.map((s) => {
       const at = (s.opts.boss ? L.throne ?? L.posts[0] : L.posts[k++ % Math.max(1, L.posts.length)]) ?? { x: 0, z: 0 };
       return { ...s, x: def.x + at.x, z: def.z + at.z, enemy: null, respawnAt: 0 };
@@ -457,15 +469,11 @@ export class Encounters {
     // A fort's come out of its keep, inside the walls on the side away from the fight (from
     // outside they'd have no way in but the gate); an open camp's march in from beyond its edge.
     const keep = campKeep(def);
-    const out = keep ? FORT_INNER - 1.5 : def.radius + 5;
     units.forEach((u, i) => {
       const a = away + (i - (n - 1) / 2) * (keep ? 0.35 : 0.16);
+      const out = keep ? keepReach(def, a) : def.radius + 5;
       let x = def.x + Math.sin(a) * out;
       let z = def.z + Math.cos(a) * out;
-      if (keep) {
-        x = def.x + clamp(x - def.x, -FORT_INNER + 1, FORT_INNER - 1);
-        z = def.z + clamp(z - def.z, -FORT_INNER + 1, FORT_INNER - 1);
-      }
       if (this.world.isWater(x, z)) { x = def.x; z = def.z; }
       const e = this.sim.spawnEnemy(u.type, new THREE.Vector3(x, 0, z), { level: def.level, camp, elite: u.opts.elite, variant: u.opts.variant, transient: true });
       camp.enemies.push(e);

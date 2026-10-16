@@ -4,7 +4,7 @@
 // server checks that much); the rest is dressing, made the same every time from their seed.
 import { mulberry32 } from '../core/rng.js';
 import { LOOK_OPTIONS } from '../models/heroLooks.js';
-import { HAMLETS, DISTRICT_TITLE } from './places.js';
+import { HAMLETS, CAMPSITES, DISTRICT_TITLE } from './places.js';
 import { STORY_FOLK } from './story.js';
 
 const FIRST = ['Ada', 'Bram', 'Cass', 'Dov', 'Esme', 'Finn', 'Gale', 'Hedda', 'Ira', 'Joss', 'Kit', 'Lio', 'Mara', 'Nils', 'Orla', 'Pip',
@@ -17,6 +17,7 @@ export const HAMLET_TITLE = { farm: 'Farm hamlet', prospect: 'Prospectors\' haml
 export function placeTitle(p) {
   if (p.type === 'settlement') return KIND_TITLE[p.kind] ?? 'Village';
   if (p.type === 'hamlet') return HAMLET_TITLE[p.kind] ?? 'Hamlet';
+  if (p.type === 'campsite') return CAMPSITES[p.kind]?.title ?? 'Campsite';
   if (p.type === 'town' || p.type === 'hub') return 'Town';
   if (p.type === 'city') return `City · Act ${p.act}`;
   if (p.type === 'district') return DISTRICT_TITLE[p.kind] ?? 'District';
@@ -26,6 +27,7 @@ export function placeTitle(p) {
 // Which village kit's people a place's folk dress and talk like.
 function kindOf(place) {
   if (place.type === 'hamlet') return HAMLETS[place.kind]?.outfit ?? 'homestead';
+  if (place.type === 'campsite') return CAMPSITES[place.kind]?.outfit ?? 'caravan';
   if (place.type === 'town' || place.type === 'hub') return 'town';
   if (place.type === 'city') return 'city';
   if (place.type === 'district') return place.kind === 'gates' ? 'gates' : 'city';

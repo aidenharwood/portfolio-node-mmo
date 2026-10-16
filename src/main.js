@@ -80,7 +80,7 @@ const IDLE_INPUT = { down: () => false, wasPressed: () => false, mouseDX: 0, mou
 const MOVING = 4010; // close code: the realm is moving us to another layer (reconnect at once)
 // Places that bring folk with them (world/places.js), and the services that stand where folk
 // would — things to interact with rather than people.
-const PEOPLED = new Set(['hub', 'settlement', 'hamlet', 'town', 'city', 'district']);
+const PEOPLED = new Set(['hub', 'settlement', 'hamlet', 'campsite', 'town', 'city', 'district']);
 const PROPS = {
   board: { name: 'Quest Board', prompt: 'Read the quest board', height: 2.6 },
   gate: { name: 'Sealed Gate', prompt: 'Inspect the sealed gate', height: 9.6 },

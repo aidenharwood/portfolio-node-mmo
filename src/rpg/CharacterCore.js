@@ -44,7 +44,7 @@ export const ROLLED = new Set(['pick', 'drop', 'chest', 'turnin', 'talk', 'rest'
 export const LOOT_LIFE = [75, 120, 300, Infinity, Infinity]; // seconds on the ground, by rarity tier
 const MAX_GROUND = 30;
 const REACH = { trader: 9, npc: 9, chest: 7, loot: 7, waystone: 9, reactor: 9, use: 6 };
-const PLACE_TYPES = ['settlement', 'hamlet', 'town', 'city'];
+const PLACE_TYPES = ['settlement', 'hamlet', 'campsite', 'town', 'city'];
 
 const build = (recipe) => { try { return recipe ? itemFromRecipe(recipe) : null; } catch { return null; } };
 const validLoc = (loc) => loc && ((loc.src === 'slot' && Number.isInteger(loc.i) && loc.i >= 0 && loc.i < 3)

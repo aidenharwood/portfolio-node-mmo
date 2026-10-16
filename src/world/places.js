@@ -1,4 +1,5 @@
 import { VILLAGE_OBJECTS } from '../rpg/sidequests.js';
+import { plotOf } from './plots.js';
 
 // Settlements of every size: hamlets, villages (the kits in world/Gen.js SETTLEMENTS), towns and
 // the four story cities. With the world generator (world/Gen.js) this decides where each place's
@@ -12,6 +13,7 @@ import { VILLAGE_OBJECTS } from '../rpg/sidequests.js';
 // Angles are world bearings (0 = +z, as polar() below); a place's `rot` faces its front.
 const TAU = Math.PI * 2;
 export const SIZES = {
+  campsite: { r: 10, title: 'Campsite' },
   hamlet: { r: 12, title: 'Hamlet' },
   village: { r: 18, title: 'Village' },
   town: { r: 31, title: 'Town' },
@@ -111,6 +113,49 @@ export function planHamlet(place, rng) {
   const npcs = [folk(place, rng, 0, 'giver', place.rot + 0.6, 3.4)];
   const n = 1 + (rng() < 0.5 ? 1 : 0);
   for (let i = 1; i <= n; i++) npcs.push(folk(place, rng, i, 'flavor', place.rot + [4.0, 5.6][i - 1], 3.2 + rng() * 1.5));
+  place.npcs = npcs;
+}
+
+// ---------------------------------------------------------------- plots
+// The ground each kind of settlement stands on (world/plots.js): its shape, inside the radius the
+// generator keeps clear for it, leaving room round its middle for the folk and services that stand
+// on rings there. Its pads, its walls and (where they're laid out by it) its buildings follow it.
+export const hamletPlot = (p) => plotOf(p, { R: p.r, shapes: 'hamlet', inner: 5.5 });
+export const villagePlot = (p) => plotOf(p, { R: p.r, shapes: 'hamlet', inner: 9.5 });
+export const campsitePlot = (p) => plotOf(p, { R: p.r, shapes: 'campsite', inner: 5.5 });
+// (A town's walls stand further out than its old round wall did, where its corners reach: still
+// inside the ground the generator keeps clear round it, its radius + 12.)
+export const townPlot = (p) => plotOf(p, { R: p.r + 10, shapes: 'town', inner: TOWN.house + 2 });
+// (A city's wall: a many-sided ring of straight runs, just outside where its round wall stood.)
+export const cityPlot = (p) => plotOf(p, { R: p.wall + 6, shapes: { blob: 1 }, inner: p.wall + 1 });
+export const hubPlot = (hub) => plotOf({ id: 'hub', seed: 0x5eed }, { R: hub.radius + 4, shapes: 'town', inner: hub.radius - 6 });
+
+// ---------------------------------------------------------------- campsites
+// Travellers stopped for the night: who they are (by the land), what they're called, and the two
+// or three of them round the fire — now and then one with goods to sell.
+export const CAMPSITES = {
+  wayfarers: { title: 'Wayfarers\' Camp', outfit: 'caravan' },
+  hunters: { title: 'Hunters\' Camp', outfit: 'homestead' },
+  prospectors: { title: 'Prospectors\' Camp', outfit: 'mining' },
+  pilgrims: { title: 'Pilgrims\' Camp', outfit: 'stilts' },
+};
+const CAMPSITE_BY_BIOME = {
+  meadow: 'wayfarers', forest: 'hunters', highland: 'hunters', snow: 'hunters', marsh: 'pilgrims', ash: 'prospectors',
+  mountain: 'prospectors', desert: 'wayfarers', badlands: 'prospectors', jungle: 'hunters', crystal: 'pilgrims', fungal: 'pilgrims',
+};
+const CAMP_A = ['Ember', 'Dusk', 'Long', 'Quiet', 'Last', 'Low', 'Cold', 'Far', 'Lantern', 'Ash', 'Wren', 'Thistle'];
+const CAMP_B = ['Fire', 'Rest', 'Hearth', 'Stop', 'Bivouac', 'Night'];
+export const campsiteKind = (biome, rng) => (rng() < 0.7 ? CAMPSITE_BY_BIOME[biome] ?? 'wayfarers' : pickOf(rng, Object.keys(CAMPSITES)));
+export const campsiteName = (rng) => `${pickOf(rng, CAMP_A)} ${pickOf(rng, CAMP_B)}`;
+
+export function planCampsite(place, rng) {
+  place.tag = 'w';
+  const n = 2 + (rng() < 0.4 ? 1 : 0);
+  const npcs = [];
+  for (let i = 0; i < n; i++) {
+    const role = i === 0 && rng() < 0.35 ? 'trader' : 'flavor';
+    npcs.push(folk(place, rng, i, role, place.rot + (i / n) * Math.PI * 2 + 0.4, 2.6 + rng() * 0.6, role === 'trader' ? { stock: 'all' } : {}));
+  }
   place.npcs = npcs;
 }
 

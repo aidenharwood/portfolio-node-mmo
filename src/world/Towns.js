@@ -7,7 +7,10 @@
 import * as THREE from 'three';
 import { piece, flatten, G, shade } from '../render/ModelKit.js';
 import { C, HEARTH, FORGE, LAMP, CARGO, RUNE } from './palette.js';
-import { TOWN, CITY, HUB_RING, SIZES } from './places.js';
+import { TOWN, CITY, HUB_RING, SIZES, townPlot, cityPlot, hubPlot, campsitePlot } from './places.js';
+import { plotOf } from './plots.js';
+import { prop } from './scenery/props.js';
+import { mulberry32 } from '../core/rng.js';
 import { building, bodyCols } from './build/kit.js';
 import { lampPost, stall as kitStall, noticeBoard, warTable as kitWarTable, townTree, shrub, crop as kitCrop, rockShape, seedOf } from './scenery/placeProps.js';
 
@@ -211,14 +214,46 @@ function stackOn(f, x, z, a, top) {
   piece(h, G.cyl(0.42, 0.42, 0.06, 10), FORGE, { pos: [0, y + S + 0.27, 0], glow: true, outline: 0 });
 }
 
-function ringWall(f, R, { ht = 3.2, thick = 0.8, gate = 4.8, tower = 1.8, every = 9, color = C.stone, cap = C.stoneDark, band = HEARTH, roof = C.metalDark, masts = false, stacks = false }) {
-  const gates = crossings(f, R);
-  const half = (gate / 2 + tower / 2) / R;
-  const n = Math.max(12, Math.round((TAU * R) / 3.4));
-  const step = TAU / n;
-  const len = 2 * R * Math.sin(step / 2) + 0.12;
-  const towerAt = (a, big) => {
-    const [x, z] = f.at(a, R);
+// Where the roads cross a plot's outline (how far round it, 0–1), merged when within `merge` metres.
+function plotCrossings(f, plot, merge) {
+  const out = [];
+  for (const [ax, az, bx, bz] of f.lines) {
+    const pax = ax - f.p.x;
+    const paz = az - f.p.z;
+    const pbx = bx - f.p.x;
+    const pbz = bz - f.p.z;
+    let run = 0;
+    for (const e of plot.edges) {
+      // Segment a-b against the edge.
+      const rx = pbx - pax;
+      const rz = pbz - paz;
+      const den = rx * e.dz - rz * e.dx;
+      if (Math.abs(den) > 1e-9) {
+        const t = ((e.ax - pax) * e.dz - (e.az - paz) * e.dx) / den;
+        const u = ((e.ax - pax) * rz - (e.az - paz) * rx) / den;
+        if (t >= 0 && t <= 1 && u >= 0 && u <= 1) {
+          const at = (run + u * e.len) / plot.perimeter;
+          if (!out.some((g) => Math.min(Math.abs(g - at), 1 - Math.abs(g - at)) * plot.perimeter < merge)) out.push(at);
+        }
+      }
+      run += e.len;
+    }
+  }
+  return out;
+}
+
+// A wall round a place along its plot's outline (world/plots.js): straight runs of panel on a
+// footing with a glowing band along each side, a tower at every corner and every so often along a
+// long side, and a gate — two towers and a beam over the road — wherever a road comes through.
+function plotWall(f, plot, { ht = 3.2, thick = 0.8, gate = 4.8, tower = 1.8, every = 9, color = C.stone, cap = C.stoneDark, band = HEARTH, roof = C.metalDark, masts = false, stacks = false }) {
+  const P = plot.perimeter;
+  const gates = plotCrossings(f, plot, gate + tower * 2);
+  const half = (gate / 2 + tower / 2) / P;
+  const near = (t, w) => gates.some((g) => Math.min(Math.abs(g - t), 1 - Math.abs(g - t)) < w);
+  const world = (q) => [f.p.x + q.x, f.p.z + q.z];
+  const towerAt = (q, big) => {
+    const [x, z] = world(q);
+    const a = q.a;
     const y = f.gy(x, z);
     const T = tower * (big ? 1.2 : 1);
     const th = ht + (big ? 2.4 : 1.4);
@@ -232,28 +267,48 @@ function ringWall(f, R, { ht = 3.2, thick = 0.8, gate = 4.8, tower = 1.8, every 
     else if (stacks && !big && (towers++) % 2 === 0) stackOn(f, x, z, a, y + th + 1.2);
   };
   let towers = 0;
-  for (let i = 0; i < n; i++) {
-    const a = i * step + step / 2;
-    if (gates.some((g) => Math.abs(wrap(a - g)) < half)) continue;
-    const [x, z] = f.at(a, R);
-    const y = f.gy(x, z);
-    piece(f.g, G.box(len, ht, thick), color, { pos: [x - f.p.x, y + ht / 2 - 0.2, z - f.p.z], rot: [0, a, 0], outline: 0.03 });
-    piece(f.g, G.box(len, 0.3, thick + 0.25), cap, { pos: [x - f.p.x, y + ht - 0.05, z - f.p.z], rot: [0, a, 0], outline: 0.02 });
-    const ix = -Math.sin(a) * (thick / 2 + 0.03);
-    const iz = -Math.cos(a) * (thick / 2 + 0.03);
-    piece(f.g, G.box(len, 0.1, 0.05), band, { pos: [x - f.p.x + ix, y + ht - 0.6, z - f.p.z + iz], rot: [0, a, 0], glow: true, outline: 0 });
-    f.col(x, z, len / 2 + 0.05, ht);
-    if (i % every === 0 && !gates.some((g) => Math.abs(wrap(a - g)) < half + step * 1.5)) towerAt(a, false);
+  // Along each side, from corner to corner, in runs of about 3.4 m.
+  let run = 0;
+  for (const e of plot.edges) {
+    const n = Math.max(1, Math.round(e.len / 3.4));
+    const len = e.len / n;
+    const a = Math.atan2(e.nx, e.nz);
+    for (let i = 0; i < n; i++) {
+      const t = (run + (i + 0.5) * len) / P;
+      if (near(t, half + len / 2 / P)) continue;
+      const q = plot.at(t);
+      const [x, z] = world(q);
+      const y = f.gy(x, z);
+      piece(f.g, G.box(len + 0.12, ht, thick), color, { pos: [x - f.p.x, y + ht / 2 - 0.2, z - f.p.z], rot: [0, a, 0], outline: 0.03 });
+      piece(f.g, G.box(len + 0.12, 0.3, thick + 0.25), cap, { pos: [x - f.p.x, y + ht - 0.05, z - f.p.z], rot: [0, a, 0], outline: 0.02 });
+      piece(f.g, G.box(len + 0.12, 0.1, 0.05), band, { pos: [x - f.p.x - e.nx * (thick / 2 + 0.03), y + ht - 0.6, z - f.p.z - e.nz * (thick / 2 + 0.03)], rot: [0, a, 0], glow: true, outline: 0 });
+      f.col(x, z, len / 2 + 0.05, ht);
+      // A tower every so often along a long side.
+      if (n >= every && i % every === Math.floor(every / 2) && !near(t, half + (len * 1.5) / P)) towerAt(q, false);
+    }
+    run += e.len;
   }
+  // A tower at each corner.
+  for (const c of plot.corners()) {
+    const t = plot.tOf(Math.atan2(c.x, c.z));
+    if (near(t, half + tower / P)) continue;
+    towerAt({ x: c.x, z: c.z, a: c.a }, false);
+  }
+  // The gates: a tower either side and a beam across the road.
   for (const g0 of gates) {
-    for (const s of [-1, 1]) towerAt(g0 + s * half, true);
-    const [ax, az] = f.at(g0 - half, R);
-    const [bx, bz] = f.at(g0 + half, R);
+    const qa = plot.at(g0 - half);
+    const qb = plot.at(g0 + half);
+    towerAt(qa, true);
+    towerAt(qb, true);
+    const [ax, az] = world(qa);
+    const [bx, bz] = world(qb);
     const y = Math.max(f.gy(ax, az), f.gy(bx, bz)) + ht + 1.6;
     const mx = (ax + bx) / 2 - f.p.x;
     const mz = (az + bz) / 2 - f.p.z;
-    piece(f.g, G.box(Math.hypot(bx - ax, bz - az) + tower, 0.7, thick + 0.4), cap, { pos: [mx, y, mz], rot: [0, g0, 0], outline: 0.03 });
-    piece(f.g, G.box(1.2, 0.5, 0.06), band, { pos: [mx - Math.sin(g0) * (thick / 2 + 0.25), y, mz - Math.cos(g0) * (thick / 2 + 0.25)], rot: [0, g0, 0], glow: true, outline: 0 });
+    const across = Math.atan2(bz - az, ax - bx);
+    const qm = plot.at(g0);
+    piece(f.g, G.box(Math.hypot(bx - ax, bz - az) + tower, 0.7, thick + 0.4), cap, { pos: [mx, y, mz], rot: [0, across, 0], outline: 0.03 });
+    piece(f.g, G.box(1.2, 0.5, 0.06), band, { pos: [mx - qm.nx * (thick / 2 + 0.25), y, mz - qm.nz * (thick / 2 + 0.25)], rot: [0, qm.a, 0], glow: true, outline: 0 });
   }
 }
 
@@ -343,6 +398,77 @@ function citadel(h) {
 // A few homes round a fire, their fronts on the road in (local +z); the folk Gen placed stand in
 // the yard, so buildings keep to the back and sides.
 const lp = polar;
+// ---------------------------------------------------------------- campsites
+// Travellers stopped for the night (world/places.js planCampsite): a fire at the heart of their
+// ground (its plot, world/plots.js), a tent or two facing it, bedrolls and logs to sit on round it,
+// a stack of firewood, packs, a lantern hung on a pole. Nothing on the spots its folk stand on.
+export function buildCampsite(w, p) {
+  const plot = campsitePlot(p);
+  const rng = mulberry32(((p.seed ?? 1) ^ 0xca5e) >>> 0);
+  const g = w.anchor(p.x, p.z);
+  const y0 = g.position.y;
+  const folk = (p.npcs ?? []).map((n) => [n.x - p.x, n.z - p.z]);
+  const taken = [[0, 0, 1.3]];
+  const room = (x, z, r) => plot.inside(x, z, r * 0.3) && folk.every(([fx, fz]) => Math.hypot(fx - x, fz - z) > r + 0.9) && taken.every(([tx, tz, tr]) => Math.hypot(tx - x, tz - z) > tr + r + 0.4);
+  const at = (x, z, ry = Math.atan2(-x, -z)) => {
+    const o = new THREE.Group();
+    o.position.set(x, w.groundHeight(p.x + x, p.z + z) - y0, z);
+    o.rotation.y = ry;
+    g.add(o);
+    return o;
+  };
+  const near = (r, lo, hi, tries = 40) => {
+    for (let k = 0; k < tries; k++) {
+      const a = rng() * Math.PI * 2;
+      const d = lo + rng() * (hi - lo);
+      const x = Math.sin(a) * d;
+      const z = Math.cos(a) * d;
+      if (room(x, z, r)) { taken.push([x, z, r]); return [x, z]; }
+    }
+    return null;
+  };
+  w.campfire(p.x, p.z, { scale: 0.8, style: 'ring' });
+  // Tents, facing the fire.
+  const kit = p.kind === 'prospectors' ? 'scav' : 'salvage';
+  for (let i = 0, n = 1 + (rng() < 0.55 ? 1 : 0); i < n; i++) {
+    const s = near(1.5, 3.4, plot.R - 1, 80);
+    if (!s) continue;
+    at(...s).add(prop('tent', rng, { kit, fresh: true }));
+    w.addCollider(p.x + s[0], p.z + s[1], 1.3, 1.8, undefined, 'planks');
+  }
+  // Logs to sit on and bedrolls, round the fire.
+  for (let i = 0; i < 3; i++) {
+    const s = near(0.6, 1.7, 2.6);
+    if (!s) continue;
+    const o = at(...s, Math.atan2(-s[0], -s[1]) + Math.PI / 2);
+    if (i === 0 || rng() < 0.5) {
+      piece(o, G.cyl(0.18, 0.2, 1.3, 8), C.wood, { pos: [0, 0.18, 0], rot: [0, 0, Math.PI / 2], pattern: 'bark' });
+    } else {
+      piece(o, G.box(0.7, 0.1, 1.6), CLOTH[Math.floor(rng() * CLOTH.length)], { pos: [0, 0.05, 0], pattern: 'fabric', outline: 0.01 });
+      piece(o, G.capsule(0.12, 0.45, 6), shade(CLOTH[Math.floor(rng() * CLOTH.length)], 0.8), { pos: [0, 0.14, -0.7], rot: [0, 0, Math.PI / 2], outline: 0.008 });
+    }
+  }
+  // Firewood stacked, packs and a crate.
+  const wood = near(0.7, 3, 5);
+  if (wood) {
+    const o = at(...wood);
+    for (let k = 0; k < 6; k++) piece(o, G.cyl(0.08, 0.09, 1.0, 6), C.woodDark, { pos: [-0.25 + (k % 3) * 0.22, 0.09 + Math.floor(k / 3) * 0.17, 0], rot: [Math.PI / 2, 0, 0], pattern: 'bark', outline: 0.006 });
+    w.addCollider(p.x + wood[0], p.z + wood[1], 0.5, 0.4);
+  }
+  for (const kind of ['crate', 'barrel']) {
+    if (rng() < 0.4) continue;
+    const s = near(0.5, 2.8, 5);
+    if (!s) continue;
+    at(...s).add(prop(kind, rng, { kit: 'salvage' }));
+    w.addCollider(p.x + s[0], p.z + s[1], kind === 'crate' ? 0.55 : 0.4, 0.9);
+  }
+  // A lantern hung from a pole.
+  const pole = near(0.3, 2.5, 4.5);
+  if (pole) lampPost(at(...pole, rng() * Math.PI * 2), [0, 0, 0], { tall: 2.4, hang: true, rng });
+  flatten(g);
+  w.finish(g);
+}
+
 export const HAMLET_BUILDERS = {
   // A farm: two cottages and a shed round the fire, a little field out back behind a fence.
   farm(w, p) {
@@ -591,15 +717,27 @@ const nearFolk = (p, x, z, r) => (p.npcs ?? []).some((n) => Math.hypot(n.x - x, 
 
 // A ring of houses at radius `d` round the place: wherever there's room off the roads, the folk
 // and the bearings in `skip` ([bearing, half-width]).
-function houseRing(f, st, d, { step = 0.36, skip = [], storeys = 0.3, flat = false, big = 1, kit = st.kit } = {}) {
+// plot: the ground it must keep inside (world/plots.js); `fill`, houses also go where its ground
+// runs on past the ring (a long side, a corner), in a second row facing the same way.
+function houseRing(f, st, d, { step = 0.36, skip = [], storeys = 0.3, flat = false, big = 1, kit = st.kit, plot = null } = {}) {
   const { rnd } = f;
   const pick = (list) => list[Math.floor(rnd() * list.length)];
   let n = 0;
+  const spots = [];
   for (let a = rnd() * step; a < TAU - step * 0.5; a += step) {
+    spots.push([a, d]);
+    // Where the plot reaches on past this ring, another row behind it.
+    if (plot) for (let dd = d + 9; plot.inside(Math.sin(a) * dd, Math.cos(a) * dd, 6); dd += 9) spots.push([a + step * 0.5, dd]);
+  }
+  for (const [a, dist] of spots) {
     if (skip.some(([b, hw]) => Math.abs(wrap(a - b)) < hw)) continue;
     const wd = (5.4 + rnd() * 2.4) * big;
     const dp = (4.4 + rnd() * 1.4) * big;
-    const [x, z] = f.at(a, d);
+    // (Stepped in toward the street where the plot's edge comes close.)
+    let at = dist;
+    while (plot && at > dist - 3 && !plot.inside(Math.sin(a) * at, Math.cos(a) * at, Math.hypot(wd, dp) / 2 + 1.5)) at -= 0.75;
+    const [x, z] = f.at(a, at);
+    if (plot && !plot.inside(x - f.p.x, z - f.p.z, Math.hypot(wd, dp) / 2 + 1.5)) continue;
     if (!f.clear(x, z, Math.hypot(wd, dp) / 2) || nearFolk(f.p, x, z, Math.hypot(wd, dp) / 2 + 1)) continue;
     // Not over the way into a building already standing.
     if (f.doorsteps?.some((s) => inFootprint(s, x, z, a, wd / 2 + 0.6, dp / 2 + 0.6))) continue;
@@ -694,13 +832,13 @@ export function buildTown(w, p) {
       f.col(x, z, 2, 3);
     }
   }
-  houseRing(f, st, TOWN.house, { flat });
+  houseRing(f, st, TOWN.house, { flat, plot: townPlot(p) });
   lampRing(f, TOWN.street + 1.6);
   for (const a of [0.5, 2.6, 4.7]) {
     const [x, z] = f.at(a, 3.4);
     if (f.clear(x, z, 0.2) && !nearFolk(p, x, z, 1.5)) lamp(f, x, z, 2.6);
   }
-  ringWall(f, R, { color: st.wall, cap: st.trim, roof: st.roofs[0] });
+  plotWall(f, townPlot(p), { color: st.wall, cap: st.trim, roof: st.roofs[0] });
   flatten(f.g);
   w.finish(f.g);
 }
@@ -755,7 +893,7 @@ export function buildCityWall(w, p) {
   }
   // Farcall (Act II) is the city of signal masts, Ironreach (Act III) the foundry city: masts or
   // smokestacks stand on their wall towers.
-  ringWall(f, p.wall, { ht: 5.6, thick: 1.4, gate: 6.4, tower: 3, every: 7, color: C.stone, cap: C.stoneDark, roof: st.roofs[0], masts: p.act === 2, stacks: p.act === 3 });
+  plotWall(f, cityPlot(p), { ht: 5.6, thick: 1.4, gate: 6.4, tower: 3, every: 7, color: C.stone, cap: C.stoneDark, roof: st.roofs[0], masts: p.act === 2, stacks: p.act === 3 });
   flatten(f.g);
   w.finish(f.g);
 }
@@ -874,7 +1012,7 @@ export function buildBrightwater(w, p) {
   const skip = [[S.workshop, 0.5], [S.guns, 0.45], [S.armour, 0.45], [0, 0.3]];
   houseRing(f, st, HUB_RING.house, { step: 0.33, skip });
   lampRing(f, 16.5, 0.7);
-  ringWall(f, p.radius, { ht: 3, thick: 0.6, color: 0xc8d0da, cap: C.metalDark, band: HEARTH, roof: C.metalDark });
+  plotWall(f, hubPlot(p), { ht: 3, thick: 0.6, color: 0xc8d0da, cap: C.metalDark, band: HEARTH, roof: C.metalDark });
   flatten(f.g);
   w.finish(f.g);
 }

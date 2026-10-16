@@ -22,14 +22,15 @@ import { withSurfaces } from '../render/Surfaces.js';
 import { piece, bakeTree, flatten, G, shade } from '../render/ModelKit.js';
 import { building, bodyCols, KIT } from './build/kit.js';
 import { buildCampPieces } from './build/campKit.js';
-import { campLayout } from './campLayout.js';
+import { prop } from './scenery/props.js';
+import { campLayout, campPlot } from './campLayout.js';
 import { KINDS, sceneryKey, sceneryTint, sceneryModel } from './scenery/models.js';
 import { mulberry32 } from '../core/rng.js';
 import { WorldGen, REGION, WATER_LEVEL, HUB } from './Gen.js';
 import { Chunk, CHUNK, RES0 } from './Chunks.js';
 import { C, HEARTH, FORGE, HIVE, ARC, CARGO, RUNE } from './palette.js';
 import { LANDMARK_BUILDERS, SETTLEMENT_BUILDERS } from './Landmarks.js';
-import { HAMLET_BUILDERS, DISTRICT_BUILDERS, buildTown, buildCity, buildCityWall, buildBrightwater, serviceProps } from './Towns.js';
+import { HAMLET_BUILDERS, DISTRICT_BUILDERS, buildTown, buildCity, buildCityWall, buildBrightwater, buildCampsite, serviceProps } from './Towns.js';
 import { STORY_BUILDERS, foundryYard, placeObjects, objectProps } from './StorySites.js';
 import { NPCS } from './mapData.js';
 import { inPocket, POCKET } from './dungeons.js';
@@ -93,7 +94,7 @@ const LANDMARK_LOAD = 420; // landmarks and cities are big: built before they lo
 const LANDMARK_UNLOAD = 480;
 const BIG = new Set(['landmark', 'city', 'district', 'citywall']);
 // Settlements of every size: what counts as one (a safe place), and how far its ground reaches.
-const PLACES = new Set(['settlement', 'hamlet', 'town', 'city']);
+const PLACES = new Set(['settlement', 'hamlet', 'campsite', 'town', 'city']);
 const placeReach = (p) => (p.type === 'city' ? p.wall : p.type === 'hub' ? p.radius : p.r);
 const FOLK = new Map(NPCS.map((n) => [n.id, n]));
 const ROAD_LOAD = 420;
@@ -1047,7 +1048,10 @@ export class World {
         const pad = p.type === 'hub' ? HUB.radius + 6 : p.type === 'camp' ? p.radius + (p.stronghold ? 12 : 5)
           : PLACES.has(p.type) ? placeReach(p) + 6 : ['district', 'citywall', 'hubtown'].includes(p.type) ? 0 : p.type === 'landmark' ? p.r + 3
             : p.type === 'story' ? p.r + 6 : p.type === 'tower' ? 6 : p.type === 'ruin' ? p.r + 4 : p.type === 'mesa' ? 0 : 3;
-        if (pad && Math.hypot(x - p.x, z - p.z) < pad) return true;
+        if (!pad || Math.hypot(x - p.x, z - p.z) >= pad) continue;
+        // A camp's ground is its plot: the wilds come up to a few metres off its outline.
+        if (p.type === 'camp' && campPlot(p).sdf(x - p.x, z - p.z) > pad - p.radius) continue;
+        return true;
       }
       return gen.nearRoad(x, z);
     };
@@ -1250,6 +1254,7 @@ export class World {
       case 'landmark': LANDMARK_BUILDERS[p.kind]?.(this, p); break;
       case 'settlement': SETTLEMENT_BUILDERS[p.kind]?.(this, p); serviceProps(this, p); placeObjects(this, p); break;
       case 'hamlet': HAMLET_BUILDERS[p.kind]?.(this, p); break;
+      case 'campsite': buildCampsite(this, p); break;
       case 'town': buildTown(this, p); break;
       case 'hubtown': buildBrightwater(this, this.poiById('hub')); break;
       case 'city': buildCity(this, p); break;
@@ -1433,6 +1438,11 @@ export class World {
       }
       flameY = 0.35;
       colors = [HIVE, 0xf0d8ff];
+    } else if (style === 'ring') {
+      // A travellers' fire: logs in a ring of stones (world/scenery/props.js).
+      g.add(prop('fire', mulberry32(Math.round(x * 7 + z * 13) >>> 0), { kit: 'den', fresh: true }));
+      flameY = 0.3;
+      colors = [0xff7a1a, 0xffd84a];
     } else {
       piece(g, G.cyl(0.42, 0.38, 0.9, 12), C.rust, { pos: [0, 0.45, 0] });
       for (const y of [0.15, 0.75]) piece(g, G.torus(0.43, 0.035, Math.PI * 2, 4, 14), C.metalDark, { pos: [0, y, 0], rot: [Math.PI / 2, 0, 0], outline: 0.01 });
@@ -1448,7 +1458,7 @@ export class World {
     flame.position.y = flameY;
     g.add(flame);
     (this.own?.group ?? this.root).add(g);
-    const sourceSize = style === 'reactor' ? 1.25 : style === 'node' ? 1.05 : 0.9;
+    const sourceSize = style === 'reactor' ? 1.25 : style === 'node' ? 1.05 : style === 'ring' ? 0.75 : 0.9;
     this.flame(flame, x * 7 + z, null, 0, colors, sourceSize);
     this.addCollider(x, z, (style === 'reactor' ? 1.3 : 0.5) * scale, style === 'reactor' ? 2.0 : 1.0);
   }

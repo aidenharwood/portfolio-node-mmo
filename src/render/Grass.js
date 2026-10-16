@@ -12,6 +12,7 @@ import { toonMaterial, chainCompile, noInk } from './Toon.js';
 import { WIND, WIND_DIR } from './Wind.js';
 import { BIOME_COLOR } from '../world/Chunks.js';
 import { WATER_LEVEL } from '../world/Gen.js';
+import { padEdge } from '../world/plots.js';
 
 const HN = 128;            // height texels per side
 const CN = 64;             // colour/density texels per side
@@ -220,8 +221,9 @@ export class Grass {
           if (d > 0) {
             // Yards and flattened ground round buildings: none on dirt, a little elsewhere.
             for (const p of gen.featuresNear(x, z).pads) {
-              const dist = Math.hypot(x - p.x, z - p.z);
-              if (dist < p.r + 3) d *= p.dirt ? smooth(p.r - 1, p.r + 3, dist) : 0.35 + 0.65 * smooth(p.r * 0.5, p.r + 3, dist);
+              if (Math.hypot(x - p.x, z - p.z) >= p.r + 3) continue;
+              const e = padEdge(p, x, z);
+              if (e < 3) d *= p.dirt ? smooth(-1, 3, e) : 0.35 + 0.65 * smooth(-p.r * 0.5, 3, e);
             }
           }
         }

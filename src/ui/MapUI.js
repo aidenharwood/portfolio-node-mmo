@@ -244,6 +244,7 @@ export class MapUI {
           out.push({ kind: 'settlement', x: p.x, z: p.z, name: p.name, id: linked ? wayId : null, active: linked && g.attuned.has(wayId) });
         }
         else if (p.type === 'hamlet') out.push({ kind: 'hamlet', x: p.x, z: p.z, name: p.name });
+        else if (p.type === 'campsite') out.push({ kind: 'campsite', x: p.x, z: p.z, name: p.name });
         else if (p.type === 'town') out.push({ kind: 'town', x: p.x, z: p.z, name: p.name, id: way?.id, active: !!way && g.attuned.has(way.id) });
         else if (p.type === 'landmark' || p.type === 'story') out.push({ kind: 'landmark', x: p.x, z: p.z, name: p.name, story: !!p.story });
       }
@@ -543,6 +544,9 @@ export class MapUI {
       } else if (p.kind === 'hamlet') {
         this.icon(sx, sy, 'hamlet');
         if (this.zoom > 0.6 || this.hover === p) this.queueLabel(sx, sy + 15, p.name, '#ffe2a8', 11, 30);
+      } else if (p.kind === 'campsite') {
+        this.icon(sx, sy, 'campsite');
+        if (this.zoom > 1 || this.hover === p) this.queueLabel(sx, sy + 13, p.name, '#ffe2a8', 10, 20);
       } else if (p.kind === 'town') {
         this.icon(sx, sy, 'town');
         if (p.active) this.icon(sx + 13, sy - 11, 'badge');
@@ -820,6 +824,17 @@ export class MapUI {
       ctx.fillStyle = '#f0c75e';
       ctx.strokeRect(-6, -4, 12, 9);
       ctx.fillRect(-6, -4, 12, 9);
+    } else if (kind === 'campsite') {
+      // A little tent by a fire.
+      ctx.fillStyle = '#ffd27a';
+      ctx.beginPath();
+      ctx.moveTo(-7, 5); ctx.lineTo(-2, -5); ctx.lineTo(3, 5); ctx.closePath();
+      ctx.stroke();
+      ctx.fill();
+      ctx.fillStyle = '#ff9a3a';
+      ctx.beginPath();
+      ctx.moveTo(4, 5); ctx.lineTo(6, 0); ctx.lineTo(8, 5); ctx.closePath();
+      ctx.fill();
     } else if (kind === 'settlement' || kind === 'hamlet' || kind === 'town') {
       // A house (smaller for a hamlet); a town's inside a ring of walls.
       if (kind === 'hamlet') ctx.scale(0.7, 0.7);
