@@ -200,6 +200,7 @@ Several sessions can work at once, one lane each. Each lane's owner updates only
 | Engine | `local_3d40571d` (stabilise session) | — (S-1 to S-4 in `review`, on branches `s-1-collider-parity`, `s-2-deploy-verification`, `s-3-persistence`, `s-4-doc-fixes`) | G-6 |
 | Story | `local_6ee40182` (Act II story session) | A-5, A-6, A-7 in `review` (Act II merged to local `main` as 9e151bc, not pushed; waiting on restart, playtest and the user's read of the lines) | A-8, A-9; DEC-1b and DEC-10 (Act III) when the user wants |
 | Act II tech | `local_65f79a66` (A-1 session, own worktree) | — (A-1 `done`) | — |
+| World | act lands and camps session | W-2 (waypoints, map, the 2026-10-16 bug batch) on branch `fixes-and-waypoints`; W-1 merged, in `review` | G-2 (dungeon variety), as part of W-2 |
 | Free to claim | — | — | A-2; A-4 once S-1 is `done` |
 
 Story design runs ahead of the code that needs it. It isn't blocked by the Engine lane, and an act's bible and beat sheet should be settled before that act's quest tasks (A-5, B-1, C-1) come up below. None of the free tasks touch the files S-1 is changing (`world/World.js`, `server/world.js`, `tools/physicscheck.mjs`).
@@ -1019,7 +1020,7 @@ Don't start these unless a trigger fires. Trigger: a layer's p95 tick time creep
 - External crash reporting.
 
 ### W-1 Act lands and procedural camps
-- status: review
+- status: review (merged to `main` as 9116173 on 2026-10-16; waiting on the user's playtest and a server restart)
 - size: L
 - why: Synths turned up at level 4; camps emptied under a crowd and all looked alike.
 - spec: [2026-10-15-act-lands-and-camps-design.md](superpowers/specs/2026-10-15-act-lands-and-camps-design.md) · plan: [2026-10-15-act-lands-and-camps.md](superpowers/plans/2026-10-15-act-lands-and-camps.md)
@@ -1041,6 +1042,51 @@ Don't start these unless a trigger fires. Trigger: a layer's p95 tick time creep
   - **Client build of a base:** 50–70 ms. Baking about 1,550 prop meshes accounts for 46 ms of it. Caching baked prop variants was suggested to the scenery session.
   - **Also fixed:** siege engines behind a wall never fired, because rooted enemies took a path (`EnemySim.wayTo`).
   - **Known flake:** hordecheck's "Splitting" check fails about 1 run in 12, on main too.
+  - 2026-10-16: a fresh reviewer (final whole-branch review) found four bugs, fixed with tests in campcheck:
+    - A stronghold could be re-cleared for its full bonus every 30 s lull. Cleared now stays cleared until the garrison returns.
+    - Squads vanished when nobody was within 30 m of their spawner. They now walk to their posts and stay.
+    - Saved generated quests at camps that no longer exist locked their giver. They're now dropped on load.
+    - A boss camp with no dry posts could throw.
+  - 2026-10-16: merged to `main` (fast-forward to 9116173); branch and worktree removed.
+  - **Deferred minors** (from the review):
+    - The offline save writes Infinity camp timers as null, so a camp's dead refill at once after a reload.
+    - A quiet refill can pop in view of someone 73–98 m off.
+    - Story-camp posts can sit on quest folk, and the boss shares `posts[0]` with a guard.
+    - `FORT_INNER` (12.5 m) still assumes the old fort.
+    - Region generation is about 6× slower (up to 13 ms).
+    - The map's act sampling costs about 13 ms a repaint, and a label can land on the wrong land.
+    - The act banner can be missed after a quick teleport.
+    - Stale contract distances for camps that moved.
+
+### W-2 Waypoints, map and the 2026-10-16 bug batch
+- status: doing
+- size: L
+- why: the user's list of 2026-10-16: waypoints in every settlement (and what that does to the map), plus six bugs and issues.
+- where: branch `fixes-and-waypoints` (worktree `../portfolio-node-mmo-fixes`, cut from `main` at 09c4ab1, with its own `node_modules`). A temporary `game-fixes` entry (port 5178) is in `.claude/launch.json`; remove it when the worktree goes.
+- shared files: the scenery session (plots) owns `src/world/campLayout.js`, `Gen.js`, `places.js`, `Towns.js` and `World.js`'s camp and scatter clearing until it says it has landed. 09c4ab1 ("Plots") is on `main`; confirm with it before the waypoint work touches those files.
+- items:
+  - [x] **Melee enemies dealt no damage to the player.** Fixed as c6c85fa on the branch (not merged).
+    - Cause: `componentAtPoint` looked the hit point up in `hitRegions`, which knows only enemy anatomy. A player has no enemy type, so every sweep that reached a player found no body part, and `performSweep` dropped it. It now uses `bodyRegions`.
+    - Checks: `tools/aicheck.mjs` covers a cutter's swing at a player (it fails with the old line). In the game, a cutter's swing landed for 11 damage. `npm test` green.
+  - [ ] **First-person ink lines are blown up on lower-detail settings.**
+    - Investigating; no cause found yet.
+    - Leads: Low quality (`render/Quality.js`) turns post-process ink off, so the inverted-hull outlines are what draw. Hull ink is a fixed width in world units, and `render/ViewModel.js` puts the viewmodel on the 'view' `INK_SCALE` (`render/Toon.js`, 0.3) and scales it with `VM_INK` 0.42 / `VM_INK_ADS` 0.15 each frame. Check whether low detail draws the world hulls (or the body's hulls) over the view, or leaves the view scale unapplied.
+  - [ ] **Area names on the map:** one line, translucent, e.g. "BRAMBLE WILDS (Lv. 12)", and no longer linked to waystones.
+    - The code is in `ui/MapUI.js`: `queueLabel` (around line 522) and the region `location` entries that carry a waystone id (around line 229).
+  - [ ] **Waypoints in every settlement**, and the map changes that follow.
+    - Today waystones are one per region (`Gen.js` `waystoneSpot`), with villages, towns and cities built round them. Hamlets and the others have none.
+    - Needs: a waystone in every settlement; the map showing settlements as travel points; deciding what the region-level waystone becomes.
+    - Touches the scenery session's files (see above).
+  - [ ] **Zoomed out, quest markers branch off the waystone of the settlement they're in** (in `ui/MapUI.js`).
+  - [ ] **Players can still go into the next act's lands early.**
+    - W-1 built a soft wall (banner, posts, map borders, no barrier), by the user's choice on 2026-10-15. This report reads as wanting a hard gate.
+    - Open: how hard (a barrier until the act's story is reached, or an act level?), and online or offline only?
+  - [ ] **Dungeons are reskins of each other:** they need variation and randomness.
+    - This is G-2 (dungeon variety: route archetypes on top of today's fixed main route), raised by the user's report. Do it as G-2, and widen its scope if the user wants more randomness than archetypes give.
+- open questions for the user:
+  - The act gate's rule.
+  - What the region waystone becomes once every settlement has one.
+  - Whether dungeon variety means new room shapes and layouts, or random encounters and loot within today's shapes.
 
 ---
 
@@ -1078,6 +1124,8 @@ Append-only. Newest last. Format: `YYYY-MM-DD — ID — what changed — checks
 - 2026-10-16 — B-2 — the Fallen Titan, the Salvage Rig and Brannock's Yard, and quests c6–c7 (The Fallen Titan, Reading the Core), with moments and `titan_core_taken`; a fresh review's fixes (gated defences, the rig beyond the Titan). On branch `act-iii`, e02e275..68c16c2. `npm test` green on a clean checkout — read the c6–c7 lines; merge `p-walker`, then `act-iii`; restart the server on 8080.
 - 2026-10-16 — B-3 — the Foundry Below (a Synth dungeon past Ironreach, sealed until the Titan's core is taken; Forge-Overseer boss), its hatch, quest c8, `foundry_below_cleared` and Down the Line; a fresh review's fixes. On branch `act-iii`, 66ffc11..89529fe. `npm test` green on a clean checkout — read the c8 lines; G-2's twist is still to come.
 - 2026-10-16 — P-1, P-2, B-1, B-2, B-3 — merged into local `main` as aeb5bb3 (`act-iii`, which carries `p-walker`'s commits), at the user's word. Merged in a separate worktree on top of main's scenery-kit commits (87a24ee) with no conflicts; `npm test` green on the merged tree. `main` was fast-forwarded with the main checkout's uncommitted work left in place (the user's WorldEvents.js hunk set aside and restored). Not pushed — restart the server on 8080; read the c1–c8 lines; playtest Act III so far. The tasks stay in `review` until then.
+- 2026-10-16 — W-1 — act lands and procedural camps (with the scenery props and the final review's four fixes) merged into local `main` as 9116173, a fast-forward with the user's uncommitted WORK_PLAN edits set aside and restored; branch and worktree removed — `npm test` green on `main` — not pushed; restart the server on 8080; playtest the Rustjaw Foundry and a base (F3 frame cost).
+- 2026-10-16 — W-2 — started the user's batch on branch `fixes-and-waypoints` (worktree `../portfolio-node-mmo-fixes`). Melee damage to the player fixed (c6c85fa). Ink lines under investigation; the rest are todo, with open questions in W-2 — `npm test` green; the melee fix was checked in the game — answer W-2's open questions; nothing to merge yet.
 ---
 
 ## 12. Backlog and open questions
