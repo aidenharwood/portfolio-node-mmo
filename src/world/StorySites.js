@@ -8,6 +8,7 @@
 import * as THREE from 'three';
 import { piece, bakeTree, flatten, G, shade } from '../render/ModelKit.js';
 import { C, HEARTH, FORGE, LAMP, RUNE, CARGO } from './palette.js';
+import { rockShape } from './scenery/placeProps.js';
 
 const TAU = Math.PI * 2;
 const VOID = 0x0a0c12;
@@ -107,7 +108,7 @@ export const OBJECT_MODELS = {
     parts(w, n.id, (onG, offG) => {
       place(onG, top);
       place(offG, top);
-      for (let k = 0; k < 5; k++) piece(offG, G.dodeca(0.32), 0x2a2420, { pos: [Math.sin(k * 1.3) * 0.5, 0.25, Math.cos(k * 1.3) * 0.5], outline: 0.01 });
+      for (let k = 0; k < 5; k++) piece(offG, rockShape(0.32), 0x2a2420, { pos: [Math.sin(k * 1.3) * 0.5, 0.25, Math.cos(k * 1.3) * 0.5], outline: 0.01 });
       piece(onG, G.cone(1.1, 2.6, 8), FORGE, { pos: [0, 1.4, 0], glow: true, outline: 0.02 });
       piece(onG, G.cone(0.65, 1.8, 7), LAMP, { pos: [0, 1.1, 0.05], glow: true, outline: 0 });
       piece(onG, G.sphere(0.25, 8, 6), FORGE, { pos: [-0.2, -7.2, 0], glow: true, outline: 0 });
@@ -135,9 +136,9 @@ export const OBJECT_MODELS = {
   sporepod(w, p, n, g, wa) {
     piece(g, G.cone(0.5, 0.7, 6), C.chitin, { pos: [0, 0.35, 0], outline: 0.02 });
     const { on, off } = parts(w, n.id, (onG, offG) => {
-      piece(offG, G.dodeca(0.8), C.resin, { pos: [0, 1.15, 0], scale: [1, 1.35, 1], outline: 0.03 });
+      piece(offG, rockShape(0.8), C.resin, { pos: [0, 1.15, 0], scale: [1, 1.35, 1], outline: 0.03 });
       for (let k = 0; k < 4; k++) piece(offG, G.sphere(0.2, 10, 8), 0xc46aff, { pos: [Math.sin(k * 1.6) * 0.62, 0.9 + (k % 2) * 0.5, Math.cos(k * 1.6) * 0.62], glow: true, outline: 0.01 });
-      piece(onG, G.dodeca(0.7), C.metalDark, { pos: [0, 0.95, 0], scale: [1, 0.8, 1], rot: [0.3, 0.7, 0], outline: 0.03 });
+      piece(onG, rockShape(0.7), C.metalDark, { pos: [0, 0.95, 0], scale: [1, 0.8, 1], rot: [0.3, 0.7, 0], outline: 0.03 });
     });
     place(on, wa);
     place(off, wa);
@@ -148,7 +149,7 @@ export const OBJECT_MODELS = {
   vaultdoor(w, p, n, g, wa) {
     for (let k = 0; k < 7; k++) {
       const a = -1.2 + k * 0.4;
-      piece(g, G.dodeca(2.4), k % 2 ? C.stoneDark : shade(C.stoneDark, 0.9), { pos: [Math.sin(a) * 4.6, 2.2 + (k % 3) * 0.6, -1.6 - Math.cos(a) * 0.8], rot: [k, k * 1.7, 0], scale: [1, 1.3, 0.9], outline: 0.04 });
+      piece(g, rockShape(2.4), k % 2 ? C.stoneDark : shade(C.stoneDark, 0.9), { pos: [Math.sin(a) * 4.6, 2.2 + (k % 3) * 0.6, -1.6 - Math.cos(a) * 0.8], rot: [k, k * 1.7, 0], scale: [1, 1.3, 0.9], outline: 0.04 });
     }
     piece(g, G.torus(3.2, 0.5, TAU, 8, 32), C.stoneDark, { pos: [0, 3.4, 0], outline: 0.04 });
     for (let k = 0; k < 8; k++) {
@@ -197,9 +198,9 @@ export const OBJECT_MODELS = {
     for (let k = 0; k < 9; k++) {
       const a = -1.9 + k * 0.48;
       const s = 2.2 + ((k * 37) % 7) * 0.2;
-      piece(g, G.dodeca(s), k % 2 ? C.resin : C.resinDark, { pos: [Math.sin(a) * 4.4, s * 0.55, -1.6 - Math.cos(a) * 1.4], rot: [k, k * 1.3, 0], scale: [1, 1.2, 1], outline: 0.04 });
+      piece(g, rockShape(s), k % 2 ? C.resin : C.resinDark, { pos: [Math.sin(a) * 4.4, s * 0.55, -1.6 - Math.cos(a) * 1.4], rot: [k, k * 1.3, 0], scale: [1, 1.2, 1], outline: 0.04 });
     }
-    piece(g, G.dodeca(3.4), C.resin, { pos: [0, 4.8, -2.2], scale: [1.6, 0.7, 1.2], outline: 0.04 });
+    piece(g, rockShape(3.4), C.resin, { pos: [0, 4.8, -2.2], scale: [1.6, 0.7, 1.2], outline: 0.04 });
     piece(g, G.cylZ(2.4, 2.4, 0.4, 20), VOID, { pos: [0, 2.2, -0.8], scale: [1, 1.15, 1], outline: 0 });
     piece(g, G.torus(2.5, 0.35, TAU * 0.62, 6, 20), C.chitin, { pos: [0, 2.2, -0.4], rot: [0, 0, Math.PI * 0.19], outline: 0.03 });
     for (let k = 0; k < 5; k++) {
@@ -262,9 +263,9 @@ export const OBJECT_MODELS = {
     for (const s of [-1, 1]) piece(g, G.box(0.22, 2.2, 0.22), C.wood, { pos: [s * 1.1, 1.1, 0], outline: 0.012 });
     piece(g, G.box(2.6, 0.22, 0.26), C.wood, { pos: [0, 2.2, 0], outline: 0.012 });
     const { on, off } = parts(w, n.id, (onG, offG) => {
-      for (let k = 0; k < 5; k++) piece(offG, G.dodeca(0.5 + (k % 3) * 0.15), k % 2 ? C.stoneDark : C.stone, { pos: [-0.8 + k * 0.4, 0.35 + (k % 2) * 0.3, 0.3], rot: [k, k * 2, 0], outline: 0.02 });
+      for (let k = 0; k < 5; k++) piece(offG, rockShape(0.5 + (k % 3) * 0.15), k % 2 ? C.stoneDark : C.stone, { pos: [-0.8 + k * 0.4, 0.35 + (k % 2) * 0.3, 0.3], rot: [k, k * 2, 0], outline: 0.02 });
       piece(onG, G.box(1.8, 1.9, 0.1), VOID, { pos: [0, 1, -0.05], outline: 0 });
-      piece(onG, G.dodeca(0.3), C.stoneDark, { pos: [1.2, 0.2, 0.6], outline: 0.015 });
+      piece(onG, rockShape(0.3), C.stoneDark, { pos: [1.2, 0.2, 0.6], outline: 0.015 });
     });
     place(on, wa);
     place(off, wa);
@@ -554,7 +555,7 @@ export const STORY_BUILDERS = {
       const [hx, hz] = out(p.x, p.z, a, 14 + rnd() * 2);
       const [x, y, z] = local(g, hx, hz, w);
       const s = 1.2 + rnd() * 0.8;
-      piece(g, G.dodeca(s), k % 2 ? C.dirtDark : C.dirt, { pos: [x, y + s * 0.35, z], rot: [rnd(), rnd() * 3, 0], scale: [1.4, 0.6, 1.2], outline: 0.02 });
+      piece(g, rockShape(s), k % 2 ? C.dirtDark : C.dirt, { pos: [x, y + s * 0.35, z], rot: [rnd(), rnd() * 3, 0], scale: [1.4, 0.6, 1.2], outline: 0.02 });
     }
     const [cx, cz] = out(p.x, p.z, p.rot + Math.PI * 0.6, 10);
     const [x, y, z] = local(g, cx, cz, w);
@@ -597,8 +598,8 @@ export function foundryYard(w, p) {
     if (hz > p.z + 14 && Math.abs(hx - p.x) < 8) continue; // the gate's road
     const [x, y, z] = local(g, hx, hz, w);
     const s = 1.4 + rnd();
-    piece(g, G.dodeca(s), 0x2a2420, { pos: [x, y + s * 0.3, z], rot: [rnd(), rnd() * 3, 0], scale: [1.3, 0.55, 1.1], outline: 0.02 });
-    piece(g, G.dodeca(s * 0.4), FORGE, { pos: [x, y + s * 0.62, z], rot: [rnd(), rnd() * 3, 0], scale: [1.2, 0.4, 1], glow: true, outline: 0 });
+    piece(g, rockShape(s), 0x2a2420, { pos: [x, y + s * 0.3, z], rot: [rnd(), rnd() * 3, 0], scale: [1.3, 0.55, 1.1], outline: 0.02 });
+    piece(g, rockShape(s * 0.4), FORGE, { pos: [x, y + s * 0.62, z], rot: [rnd(), rnd() * 3, 0], scale: [1.2, 0.4, 1], glow: true, outline: 0 });
     w.addCollider(hx, hz, s * 1.1, s * 0.6);
   }
   const [bx, by, bz] = local(g, p.x - 4, p.z + 17, w);

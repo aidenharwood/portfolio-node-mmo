@@ -11,6 +11,8 @@ import { fist, sculptHead } from '../models/Human.js';
 import { C, RUNE, LAVA, LAMP, HEARTH, CARGO } from './palette.js';
 import { building } from './build/kit.js';
 import { kitStyleOf } from './build/styles.js';
+import { lump } from './scenery/kit.js';
+import { lampPost as kitLamp, stall as kitStall, crop as kitCrop, rockShape, seedOf } from './scenery/placeProps.js';
 
 const TAU = Math.PI * 2;
 const _a = new THREE.Vector3();
@@ -310,8 +312,8 @@ export const LANDMARK_BUILDERS = {
       beam(g, [0, 12 + i * 0.5, 0], tip, 0.55, bark, { taper: 0.5 });
       tips.push(tip);
     }
-    for (const t of tips) piece(g, G.ico(4 + rnd() * 1.6, 0), leaf, { pos: [t[0], t[1] + 1.2, t[2]], rot: [rnd(), rnd(), rnd()], outline: 0.06 });
-    piece(g, G.ico(5.5, 0), shade(leaf, 0.9), { pos: [0, 21, 0], outline: 0.06 });
+    for (const t of tips) piece(g, lump(1, { detail: 1, rough: 0.2, sy: 0.85, seed: Math.round(t[0] * 10) }), leaf, { pos: [t[0], t[1] + 1.2, t[2]], rot: [rnd(), rnd(), rnd()], scale: 4 + rnd() * 1.6, outline: 0.06 });
+    piece(g, lump(1, { detail: 1, rough: 0.18, sy: 0.85, seed: 3 }), shade(leaf, 0.9), { pos: [0, 21, 0], scale: 5.5, outline: 0.06 });
     for (let i = 0; i < 10; i++) {
       const t = tips[i % tips.length];
       piece(g, G.sphere(0.32, 8, 6), LAMP, { pos: [t[0] + (rnd() - 0.5) * 5, t[1] - 2.6, t[2] + (rnd() - 0.5) * 5], glow: true, outline: 0.01 });
@@ -442,7 +444,7 @@ export const LANDMARK_BUILDERS = {
       const y = gy(span * s, 0);
       for (let k = 0; k < 4; k++) {
         const r = 2.6 - k * 0.2;
-        piece(g, G.dodeca(r), k % 2 ? C.redrock : C.redrockDark, { pos: [span * s, y + 1 + k * 2, 0], rot: [k, k * 1.3, 0], scale: [1, 0.75, 0.9], outline: 0.05 });
+        piece(g, rockShape(r), k % 2 ? C.redrock : C.redrockDark, { pos: [span * s, y + 1 + k * 2, 0], rot: [k, k * 1.3, 0], scale: [1, 0.75, 0.9], outline: 0.05 });
       }
       col(span * s, 0, 2.6, top + 1);
     }
@@ -568,10 +570,9 @@ function house(g, x, y, z, ry, { wd = 6, dp = 5, ht = 3.2, wall = C.hab, roof = 
   return h;
 }
 
+// A lamp post, its lantern hung from a bracket (world/scenery/placeProps.js).
 function lampPost(g, x, y, z) {
-  piece(g, G.cyl(0.07, 0.09, 3, 6), C.metalDark, { pos: [x, y + 1.5, z], outline: 0.01 });
-  piece(g, G.box(0.5, 0.06, 0.06), C.metalDark, { pos: [x + 0.22, y + 3, z], outline: 0.01 });
-  piece(g, G.sphere(0.16, 8, 6), LAMP, { pos: [x + 0.45, y + 2.85, z], glow: true, outline: 0.01 });
+  kitLamp(g, [x, y, z], { tall: 3, hang: true, rng: seedOf(x, z) });
 }
 
 // The trader's stall, just behind where they stand.
@@ -584,11 +585,8 @@ function traderStall(w, p, f) {
   s.position.set(lx, f.gy(lx, lz), lz);
   s.rotation.y = a + Math.PI;
   f.g.add(s);
-  piece(s, G.box(2.6, 0.95, 0.9), C.woodDark, { pos: [0, 0.48, 0], outline: 0.03 });
-  for (const x of [-1.25, 1.25]) piece(s, G.box(0.1, 2.5, 0.1), C.metal, { pos: [x, 1.25, -0.4], outline: 0.012 });
-  piece(s, G.box(2.9, 0.08, 1.6), CARGO[1], { pos: [0, 2.5, 0.2], rot: [0.18, 0, 0], outline: 0.015 });
-  piece(s, G.box(0.3, 0.3, 0.3), CARGO[0], { pos: [-0.7, 1.12, 0], outline: 0.012 });
-  piece(s, G.cyl(0.12, 0.12, 0.4, 8), HEARTH, { pos: [0.6, 1.17, 0], glow: true, outline: 0.012 });
+  s.scale.setScalar(0.93);
+  kitStall(s, CARGO[1], 'all', seedOf(p.x, p.z));
   f.col(lx, lz, 1.3, 1);
 }
 
@@ -632,7 +630,7 @@ export const SETTLEMENT_BUILDERS = {
     for (let r = 0; r < 6; r++) {
       for (let k = 0; k < 9; k++) {
         const [lx, lz] = polar(back + (k - 4) * 0.07, 15 + r * 1.3);
-        piece(g, G.cone(0.35, 0.9, 5), crop, { pos: [lx, gy(lx, lz) + 0.4, lz], rot: [0, rnd() * 3, 0], outline: 0.01 });
+        kitCrop(g, [lx, gy(lx, lz), lz], crop, { grain: crop === 0xd8b84a, rng: seedOf(lx, lz, rnd()) });
       }
     }
     for (let k = -5; k <= 5; k++) {
@@ -716,7 +714,7 @@ export const SETTLEMENT_BUILDERS = {
     for (let k = 0; k < 7; k++) {
       const [ox, oz] = [heap[0] + (rnd() - 0.5) * 4, heap[1] + (rnd() - 0.5) * 4];
       const s = 0.7 + rnd() * 1.2;
-      piece(g, G.dodeca(s), k % 3 ? C.stoneDark : ore, { pos: [ox, gy(ox, oz) + s * 0.4, oz], rot: [rnd(), rnd(), 0], scale: [1, 0.7, 1], glow: k % 3 === 0, outline: k % 3 ? 0.03 : 0 });
+      piece(g, rockShape(s), k % 3 ? C.stoneDark : ore, { pos: [ox, gy(ox, oz) + s * 0.4, oz], rot: [rnd(), rnd(), 0], scale: [1, 0.7, 1], glow: k % 3 === 0, outline: k % 3 ? 0.03 : 0 });
     }
     col(heap[0], heap[1], 2.6, 2);
     // Crane
