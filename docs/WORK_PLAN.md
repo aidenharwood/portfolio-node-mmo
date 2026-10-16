@@ -201,6 +201,7 @@ Several sessions can work at once, one lane each. Each lane's owner updates only
 | Story | `local_6ee40182` (Act II story session) | A-5, A-6, A-7 in `review` (Act II merged to local `main` as 9e151bc, not pushed; waiting on restart, playtest and the user's read of the lines) | A-8, A-9; DEC-1b and DEC-10 (Act III) when the user wants |
 | Act II tech | `local_65f79a66` (A-1 session, own worktree) | — (A-1 `done`) | — |
 | World | act lands and camps session | W-2 (waypoints, map, the 2026-10-16 bug batch) on branch `fixes-and-waypoints`; W-1 merged, in `review` | G-2 (dungeon variety), as part of W-2 |
+| World look | scenery session | W-3 (streets for towns and story cities; Brightwater, villages and hamlets next) | story sites; `npm test` and a walk-through |
 | Free to claim | — | — | A-2; A-4 once S-1 is `done` |
 
 Story design runs ahead of the code that needs it. It isn't blocked by the Engine lane, and an act's bible and beat sheet should be settled before that act's quest tasks (A-5, B-1, C-1) come up below. None of the free tasks touch the files S-1 is changing (`world/World.js`, `server/world.js`, `tools/physicscheck.mjs`).
@@ -1090,6 +1091,40 @@ Don't start these unless a trigger fires. Trigger: a layer's p95 tick time creep
 
 ---
 
+### W-3 The world's look: scenery, props, plots and streets
+- status: doing
+- owner: the scenery session ("Scenery objects base model system")
+- size: L
+- why: the user, 2026-10-15/16: the world looked blocky and basic; everything was circular; larger settlements should have rows and streets, and the story cities too.
+- where: on `main`, in the shared checkout. Shared files: `src/world/Gen.js`, `places.js`, `Towns.js`, `World.js`, `campLayout.js`, `plots.js` and `streets.js`. The waypoint work (W-2) also needs these; coordinate with this session before changing them.
+- items:
+  - [x] **Scenery kit.** Trees, rocks, cacti, mushrooms, palms, bushes, ferns, reeds, grass and flowers are seeded models built from components, with biome styles, variants and far models (`src/world/scenery/kit.js`, `models.js`). Committed as 8dc0271.
+  - [x] **Camp props.** Every camp and stronghold piece kind, styled per faction (`scenery/props.js`), as bb3acd0. Cached, pre-merged variants and heaped den walls followed as 1867b51.
+  - [x] **Place props.** Lamps, stalls, the notice board, the war table, town trees, planters, crops, rubble and the four event props (`scenery/placeProps.js`), as 87a24ee.
+  - [x] **Plots.** Places stand on rectangles, strips, Ls, Ts, crosses, wedges and blobs instead of circles (`src/world/plots.js`). Pads, scenery clearing, camp layouts and town and city walls follow them. New campsites and pickets. Committed as 09c4ab1, with `npm test` green.
+  - [ ] **Streets for towns** (`src/world/streets.js`; `places.js` `townPlan`/`planTown`; `Towns.js` `buildTown`). In "Current progress" (8eda0c3), not yet checked in full.
+    - Built: a main street along the plot and a cross street, meeting at a plaza.
+    - Services: the inn, workshop and Warden post sit on plaza-front lots with their keepers at the doors. The stalls and board are on the plaza, and the waygate stands before the workshop.
+    - Houses: in rows down the streets and backing onto the wall, each facing its street.
+    - Roads: inside the walls they give way to the paved streets. Gates stand where roads cross the wall and where the streets run out to it.
+    - The draws from the region stream are unchanged, so no other place moves.
+  - [ ] **Streets for the story cities.** In 8eda0c3 too; `buildcheck` green; not looked at in the game yet.
+    - The grid: avenues along and across the wall's axis, a square heart where they cross (the citadel and inn on lots facing its plaza, the board and war table on it), and the four districts out along the avenues.
+    - Districts: each on its own small street plan. The market's stalls round its square, the crafts quarter's great workshop on a lot of its own, the homes round a green, and the gate yard's two sealed gates facing each other.
+    - The rest: terraces backed against the wall in the quarters, trees down the avenues (in place of the ring boulevard), avenue gates, and paved avenues, squares and lanes.
+    - The districts moved (only they did), so campcheck's fingerprint now leaves them out, as it does camps and campsites.
+  - [ ] **Brightwater.** Still on rings (`HUB_RING`), round the old camp.
+  - [ ] **Villages and hamlets.** Their buildings still stand at fixed bearings round the middle (`Landmarks.js` `SETTLEMENT_BUILDERS`, `Towns.js` `HAMLET_BUILDERS`). Only their trodden ground follows their plot.
+  - [ ] **Story sites** (`StorySites.js`). Not reworked: their ground follows a plot, but their works are as they were.
+  - [ ] `npm test` after the street work: not run yet. Last full run green at 09c4ab1.
+  - [ ] (user) Walk a town and a city in the game, and say whether the streets read right.
+- open questions for the user:
+  - Small towns are 56 m squares (their plot has to leave room for the services round the plaza), so they hold about 20 houses. Should towns be allowed bigger plots? That would widen the ground the generator keeps clear round them.
+- notes:
+  - 2026-10-16: towns' plots come out as squares, mild rectangles or blobs. A town needs 27 m of room round its middle, so thin Ls and strips fall back to a square.
+  - 2026-10-16: city walls are 14-sided rings of straight wall just outside the old round wall. The city-wall point of interest now carries its city's id and seed, so it builds the same plot the generator padded.
+  - 2026-10-16: the waypoint session (W-2) was told the plot work landed at 09c4ab1. The street work has landed since in 8eda0c3.
+
 ## 10. Next up
 
 Moved to the lanes table in section 5: each lane's "Doing" and "Then" columns say what's next. Note any task that was skipped or reordered in the progress log.
@@ -1127,6 +1162,7 @@ Append-only. Newest last. Format: `YYYY-MM-DD — ID — what changed — checks
 - 2026-10-16 — W-1 — act lands and procedural camps (with the scenery props and the final review's four fixes) merged into local `main` as 9116173, a fast-forward with the user's uncommitted WORK_PLAN edits set aside and restored; branch and worktree removed — `npm test` green on `main` — not pushed; restart the server on 8080; playtest the Rustjaw Foundry and a base (F3 frame cost).
 - 2026-10-16 — W-2 — started the user's batch on branch `fixes-and-waypoints` (worktree `../portfolio-node-mmo-fixes`). Melee damage to the player fixed (c6c85fa). Ink lines under investigation; the rest are todo, with open questions in W-2 — `npm test` green; the melee fix was checked in the game — answer W-2's open questions; nothing to merge yet.
 ---
+- 2026-10-16 — W-3 — scenery kit (8dc0271), camp props (bb3acd0), place props (87a24ee), prop cache and heaped den walls (1867b51) and plots with campsites and pickets (09c4ab1), all on `main`. Street plans for towns and the story cities' grid (both in 8eda0c3), with roads giving way inside walls. Brightwater, villages, hamlets and story sites still to do — `npm test` green at 09c4ab1; after the street work only `buildcheck` and a fingerprint diff (only the city districts moved) — walk a town and a city, and answer W-3's open question on town size.
 
 ## 12. Backlog and open questions
 

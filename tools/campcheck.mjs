@@ -32,8 +32,9 @@ function fingerprint(gen) {
   let h = 0x811c9dc5;
   for (const r of regionsTo(gen, 6)) {
     for (const p of r.pois) {
-      // (Campsites, like pickets, are placed after everything else from streams of their own.)
-      if (p.type === 'camp' || p.type === 'frontier' || p.type === 'campsite') continue;
+      // (Campsites, like pickets, are placed after everything else from streams of their own; a
+      // city's districts stand where its street grid puts them.)
+      if (p.type === 'camp' || p.type === 'frontier' || p.type === 'campsite' || p.type === 'district') continue;
       const s = `${p.id}@${p.x.toFixed(2)},${p.z.toFixed(2)};`;
       for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619) >>> 0;
     }

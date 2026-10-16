@@ -230,6 +230,16 @@ A modular, procedural generator in `src/world/build/` that every builder can use
     round a fire: tents, bedrolls, two or three folk, now and then a trader) and a picket (a few
     lookouts, no road of their own) to sprawling bases. `plots()` in `tools/worldshots.js` shoots
     one of each kind from above.
+  - *Streets* (`src/world/streets.js`, in progress, see WORK_PLAN W-3): a street plan cuts a
+    plot into a main street and a cross street meeting at a plaza, back streets where there's
+    room, and lots in rows facing the streets, round the plaza and backing onto the wall
+    (rectangles at any turn, tested for overlap). Towns and the story cities are laid out on them:
+    a town's services on plaza-front lots, its houses in rows; a city on a grid, with avenues
+    through a square heart, four districts out along them (each on a plan of its own), terraces
+    in the quarters, trees down the avenues. Their streets are paved (crisp-edged pads), and the
+    roads give way to them inside the walls, with gates where the streets reach the wall.
+    Brightwater, villages, hamlets and story sites are still laid out round their middles.
+    `shootAt()` in `tools/worldshots.js` shoots any spot once it has streamed in.
 - **G3 Special effects:** implemented for surface-aware impacts, particle-based flame tongues and
   weapon-attached melee sparks (emitted from transformed mesh geometry at the striking end),
   toggleable blood particles for organic enemy hits, nearby scenery flames with pooled flickering
