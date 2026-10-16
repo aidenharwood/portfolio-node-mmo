@@ -19,7 +19,8 @@
 // Players are proxies the host keeps current: { id, position, velocity, radius, height, alive }.
 import * as THREE from 'three';
 import { mulberry32 } from '../core/rng.js';
-import { campUnits, roamPack, roamHorde, strongholdWave } from '../combat/races.js';
+import { campUnits, campSquad, roamPack, roamHorde, strongholdWave } from '../combat/races.js';
+import { TIERS, tierOf, campLayout } from '../world/campLayout.js';
 import { inPocket } from '../world/dungeons.js';
 
 const DEFEND = { first: 3, gap: 5, reach: 45, idle: 20 }; // a defence's waves, and how long it waits for someone
@@ -35,10 +36,16 @@ const LOD_STEP = 0.3;
 const HORDE_CHANCE = 0.25; // of a roaming spawn in a region of level 10 and up, a warband instead
 const HORDE_GAP = 320;     // metres between warbands
 const WAVES = { first: 10, every: 22, count: 3, quiet: 90 }; // stronghold reinforcements
-const SPAWN_DIST = 55;
+const SPAWN_DIST = 55;     // a dungeon room's; a camp's grow with it (reach)
 const DESPAWN_DIST = 80;
+const CAMP_REACH = 45;     // a camp wakes, and calls squads, with someone this far beyond its edge
+const CAMP_LEAVE = 70;     // and sleeps once everyone's this far beyond it
+const LULL = 30;           // seconds without squads after a camp's cleared
+const QUIET_REFILL = 60;   // seconds after everyone's gone that a camp fills up again
+const SQUAD_AGGRO = 30;    // a squad goes for someone this near its spawner, else to its posts
 const FORGET_DIST = 400;
-const RESPAWN_CLEARANCE = 26; // no player within this of a slot for it to refill
+const RESPAWN_CLEARANCE = 26; // no player within this of a slot for it to refill (a dungeon room's)
+export const MAX_CAMP_ENEMIES = 600; // alive across every camp: past it, squads wait
 const ROAMERS_PER_PLAYER = 3;
 const ROAM_DESPAWN = 95;
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
@@ -259,28 +266,30 @@ export class Encounters {
 
   get world() { return this.sim.world; }
 
+  // A camp's layout (world/campLayout.js), laid out as the screens lay it out.
+  layoutOf(def) { return campLayout(def, this.world.gen?.campProbe); }
+
+  // How far beyond a camp's middle it wakes (a dungeon room: as it always has).
+  reach(def) { return def.room ? SPAWN_DIST : def.radius + CAMP_REACH; }
+
+  // A camp's garrison, one slot each: its own roster stood on its layout's posts (the boss on
+  // its throne); a dungeon room's, where the dungeon put them.
   makeSlots(def) {
     if (def.units) return def.units.map((u) => ({ ...u, enemy: null, respawnAt: 0 }));
     const rng = mulberry32(def.seed ?? 1);
     const list = campUnits(def, rng);
-    return list.map((s, i) => {
-      let x = def.x;
-      let z = def.z;
-      if (s.opts.boss) z -= def.radius * 0.6;
-      else {
-        const a = (i / list.length) * Math.PI * 2 + 0.4;
-        const r = def.radius * (0.35 + ((i * 37) % 10) / 20);
-        x += Math.cos(a) * r;
-        z += Math.sin(a) * r;
-      }
-      return { ...s, x, z, enemy: null, respawnAt: 0 };
+    const L = this.layoutOf(def);
+    let k = 0;
+    return list.map((s) => {
+      const at = s.opts.boss ? (L.throne ?? L.posts[0]) : L.posts[k++ % Math.max(1, L.posts.length)] ?? { x: 0, z: 0 };
+      return { ...s, x: def.x + at.x, z: def.z + at.z, enemy: null, respawnAt: 0 };
     });
   }
 
   campFor(def) {
     let camp = this.camps.get(def.id);
     if (!camp) {
-      camp = { def, state: 'dormant', slots: this.makeSlots(def), enemies: [], cleared: false };
+      camp = { def, state: 'dormant', slots: this.makeSlots(def), enemies: [], cleared: false, target: 0, nextWave: 0, lullUntil: 0, quietSince: null };
       const saved = this.saved[def.id];
       if (Array.isArray(saved)) camp.slots.forEach((s, i) => { s.respawnAt = this.sim.time + (saved[i] ?? 0); });
       this.camps.set(def.id, camp);
@@ -302,32 +311,44 @@ export class Encounters {
     this.scanTimer -= dt;
     if (this.scanTimer <= 0) {
       this.scanTimer = 0.5;
-      for (const p of players) for (const def of this.world.campsNear(p.position.x, p.position.z, SPAWN_DIST + 20)) this.campFor(def);
+      const scan = Math.max(SPAWN_DIST, TIERS.base.R + CAMP_REACH) + 20;
+      for (const p of players) for (const def of this.world.campsNear(p.position.x, p.position.z, scan)) this.campFor(def);
     }
     for (const camp of this.camps.values()) {
       const d = this.nearest(camp.def.x, camp.def.z);
       camp.near = d;
       if (camp.state === 'dormant') {
-        if (d < SPAWN_DIST) this.activate(camp, time);
+        if (d < this.reach(camp.def)) this.activate(camp, time);
         else if (d > FORGET_DIST && !camp.def.room) this.forget(camp, time);
         continue;
       }
       camp.enemies = camp.enemies.filter((e) => !e.removeMe || e.alive);
-      if (d > DESPAWN_DIST && !camp.enemies.some((e) => e.alive && e.engaged)) {
-        this.despawn(camp);
+      if (d > (camp.def.room ? DESPAWN_DIST : camp.def.radius + CAMP_LEAVE) && !camp.enemies.some((e) => e.alive && e.engaged)) {
+        this.despawn(camp, time);
         continue;
       }
       let alive = 0;
-      for (const slot of camp.slots) {
-        if (slot.enemy && slot.enemy.alive) { alive++; continue; }
-        if (slot.enemy && !slot.enemy.alive) {
-          slot.enemy = null;
-          slot.respawnAt = time + (camp.def.respawn ?? (camp.def.stronghold ? 300 : 75)) * (0.8 + Math.random() * 0.4);
+      if (camp.def.room) {
+        // A dungeon room's residents come back one by one, `def.respawn` after each falls.
+        for (const slot of camp.slots) {
+          if (slot.enemy && slot.enemy.alive) { alive++; continue; }
+          if (slot.enemy && !slot.enemy.alive) {
+            slot.enemy = null;
+            slot.respawnAt = time + (camp.def.respawn ?? 75) * (0.8 + Math.random() * 0.4);
+          }
+          if (!slot.enemy && time >= slot.respawnAt && this.nearest(slot.x, slot.z) > RESPAWN_CLEARANCE) {
+            this.spawnSlot(camp, slot);
+            alive++;
+          }
         }
-        if (!slot.enemy && time >= slot.respawnAt && this.nearest(slot.x, slot.z) > RESPAWN_CLEARANCE) {
-          this.spawnSlot(camp, slot);
-          alive++;
+      } else {
+        // A camp in the land is held by squads (updateWaves); the fallen wait for them.
+        for (const slot of camp.slots) {
+          if (slot.enemy && !slot.enemy.alive) { slot.enemy = null; slot.respawnAt = Infinity; }
         }
+        alive = camp.enemies.reduce((n, e) => n + (e.alive ? 1 : 0), 0);
+        if (alive === 0 && !camp.cleared) camp.lullUntil = time + LULL;
+        alive = this.updateWaves(camp, time, alive);
       }
       if (alive === 0 && !camp.cleared) {
         camp.cleared = true;
@@ -445,9 +466,72 @@ export class Encounters {
     this.sim.emit({ k: 'wave', at: new THREE.Vector3(def.x, 0, def.z), name: def.name, n });
   }
 
+  // ------------------------------------------------------------ squads
+  // A camp in the land, held: while someone alive is near it and it's short of its target (its
+  // garrison, more for a crowd, up to its tier's cap), a squad comes from one of its spawners
+  // every so often, filling its empty posts first. Cleared, it lulls a while. With nobody near,
+  // it fills again a minute after the last of them left. Returns how many of it are alive.
+  updateWaves(camp, time, alive) {
+    const def = camp.def;
+    const reach = this.reach(def);
+    const live = this.sim.players.filter((p) => p.alive && Math.hypot(p.position.x - def.x, p.position.z - def.z) < reach);
+    const T = TIERS[tierOf(def)];
+    if (!live.length) {
+      camp.quietSince ??= time;
+      if (time - camp.quietSince >= QUIET_REFILL) {
+        for (const slot of camp.slots) if (!slot.enemy) { this.spawnSlot(camp, slot); alive++; }
+        camp.quietSince = time;
+      }
+      return alive;
+    }
+    camp.quietSince = null;
+    const crowd = Math.min(2.5, 1 + 0.5 * (live.length - 1));
+    camp.target = Math.min(Math.round(camp.slots.length * crowd), T.cap);
+    if (!camp.nextWave) camp.nextWave = time + T.every * (0.85 + Math.random() * 0.3);
+    if (alive >= camp.target || time < camp.nextWave || time < camp.lullUntil) return alive;
+    let all = 0;
+    for (const c of this.camps.values()) for (const e of c.enemies) if (e.alive) all++;
+    if (all >= MAX_CAMP_ENEMIES) { camp.nextWave = time + 5; return alive; }
+    camp.nextWave = time + T.every * (0.85 + Math.random() * 0.3);
+    const size = T.squad[0] + Math.floor(Math.random() * (T.squad[1] - T.squad[0] + 1));
+    return alive + this.sendSquad(camp, live, Math.min(size, camp.target - alive, MAX_CAMP_ENEMIES - all));
+  }
+
+  // A squad of `n` from the camp's spawner furthest from those there: into its empty posts first
+  // (never its boss's: a named foe comes back only with the camp), then more off its roster.
+  sendSquad(camp, live, n) {
+    const def = camp.def;
+    const L = this.layoutOf(def);
+    if (!L.spawners.length || n <= 0) return 0;
+    const near = (x, z) => Math.min(...live.map((p) => Math.hypot(p.position.x - x, p.position.z - z)));
+    const sp = L.spawners.reduce((b, q) => (near(def.x + q.x, def.z + q.z) > near(def.x + b.x, def.z + b.z) ? q : b));
+    const sx = def.x + sp.x;
+    const sz = def.z + sp.z;
+    const foe = live.find((p) => Math.hypot(p.position.x - sx, p.position.z - sz) < SQUAD_AGGRO) ?? null;
+    const empty = camp.slots.filter((s) => !s.enemy && !s.opts.boss).slice(0, n);
+    const extra = campSquad(def, n - empty.length, Math.random);
+    const spot = () => new THREE.Vector3(sx + (Math.random() - 0.5) * 4, 0, sz + (Math.random() - 0.5) * 4);
+    let sent = 0;
+    for (const slot of empty) {
+      const e = this.spawnSlot(camp, slot, spot());
+      if (foe) e.aggro(true, foe);
+      sent++;
+    }
+    for (const u of extra) {
+      const post = L.posts[Math.floor(Math.random() * L.posts.length)] ?? { x: 0, z: 0 };
+      const e = this.sim.spawnEnemy(u.type, spot(), { level: def.level, camp, elite: u.opts.elite, variant: u.opts.variant, transient: true });
+      e.home.set(def.x + post.x, e.home.y, def.z + post.z);
+      camp.enemies.push(e);
+      if (foe) e.aggro(true, foe);
+      sent++;
+    }
+    this.sim.emit({ k: 'reinforce', at: new THREE.Vector3(sx, 0, sz), p: [Math.round(sx), Math.round(sz)], race: def.race, kind: sp.kind, n: sent, name: def.name });
+    return sent;
+  }
+
   // Far-off camps leave memory; their respawn timers go into the saved table.
   forget(camp, time) {
-    const left = camp.slots.map((s) => Math.max(0, Math.round(s.respawnAt - time)));
+    const left = camp.slots.map((s) => Math.max(0, Math.round(Math.min(s.respawnAt, time + QUIET_REFILL) - time)));
     if (left.some((v) => v > 0)) this.saved[camp.def.id] = left;
     else delete this.saved[camp.def.id];
     this.camps.delete(camp.def.id);
@@ -458,19 +542,27 @@ export class Encounters {
     for (const slot of camp.slots) if (time >= slot.respawnAt) this.spawnSlot(camp, slot);
   }
 
-  spawnSlot(camp, slot) {
+  // `at`: somewhere else it comes in from (a squad's spawner); its post stays its home.
+  spawnSlot(camp, slot, at = null) {
     const level = camp.def.level + (slot.opts.boss ? 1 : Math.random() < 0.3 ? 1 : 0);
     // A story stronghold's boss has a name of its own (Ironjaw), and a tag quests know it by; so
     // does a dungeon's mini-boss.
     const story = slot.opts.boss ? camp.def.boss : slot.opts.name ? { name: slot.opts.name } : null;
-    const e = this.sim.spawnEnemy(slot.type, new THREE.Vector3(slot.x, 0, slot.z), {
+    const e = this.sim.spawnEnemy(slot.type, at ?? new THREE.Vector3(slot.x, 0, slot.z), {
       level, camp, elite: slot.opts.elite, champion: slot.opts.champion, variant: slot.opts.variant, name: story?.name, tag: story?.tag,
     });
+    if (at) e.home.set(slot.x, e.home.y, slot.z);
     slot.enemy = e;
     camp.enemies.push(e);
+    return e;
   }
 
-  despawn(camp) {
+  // (`time`: a camp in the land fills again a minute after the last of them left it.)
+  despawn(camp, time = null) {
+    if (time !== null && !camp.def.room) {
+      const refill = (camp.quietSince ?? time) + QUIET_REFILL;
+      for (const slot of camp.slots) if (!slot.enemy || !slot.enemy.alive) slot.respawnAt = Math.min(slot.respawnAt, refill);
+    }
     for (const slot of camp.slots) {
       if (slot.enemy) {
         this.sim.removeEnemy(slot.enemy);

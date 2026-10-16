@@ -2,7 +2,11 @@
 // may hold, that the world's settled places don't move when camps change, and — as they arrive —
 // camp layouts, their placement and the reinforcement waves that hold them.
 // Run: node tools/campcheck.mjs [--seed N] [--fingerprint]
+import * as THREE from 'three';
 import { WorldGen, ACTS } from '../src/world/Gen.js';
+import { HeadlessWorld } from '../server/world.js';
+import { WorldSim, MAX_CAMP_ENEMIES } from '../src/sim/WorldSim.js';
+import { storyPlaces } from '../src/world/story.js';
 import { TIERS, campLayout } from '../src/world/campLayout.js';
 import { PIECE_BUILDERS } from '../src/world/build/campKit.js';
 
@@ -181,6 +185,157 @@ function layouts() {
   }
 }
 layouts();
+
+// ---------------------------------------------------------------- reinforcement waves
+// A headless sim (as tools/hordecheck.mjs runs one) at a base, with stand-in players.
+function waves() {
+  console.log('Waves:');
+  const world = new HeadlessWorld(12345);
+  const events = [];
+  const cleared = [];
+  const host = { world, emit: (ev) => events.push(ev), onKilled() {}, onCampCleared: (c) => cleared.push(c) };
+  let base = null;
+  for (let ring = 1; ring < 12 && !base; ring++) {
+    for (let rx = -ring; rx <= ring && !base; rx++) {
+      for (let rz = -ring; rz <= ring && !base; rz++) {
+        if (Math.max(Math.abs(rx), Math.abs(rz)) !== ring) continue;
+        base = world.gen.region(rx, rz).pois.find((p) => p.type === 'camp' && p.tier === 'base' && !p.stronghold && !p.story) ?? null;
+      }
+    }
+  }
+  const player = (id) => ({ id, position: new THREE.Vector3(), velocity: new THREE.Vector3(), radius: 0.45, height: 2, alive: true });
+  const fresh = (n) => {
+    const sim = new WorldSim(host);
+    const ps = Array.from({ length: n }, (_, i) => player(i + 1));
+    sim.setPlayers(ps);
+    return { sim, ps };
+  };
+  const put = (p, x, z) => p.position.set(x, world.groundHeight(x, z), z);
+  const atGate = (p, i = 0) => put(p, base.x + base.radius + 4, base.z + i * 2);
+  const run = (sim, ps, seconds, each = null) => {
+    for (let t = 0; t < seconds; t += 0.1) {
+      world.track(ps.map((p) => p.position));
+      sim.update(0.1);
+      each?.(t);
+    }
+  };
+  const kill = (sim, e) => sim.applyHit(e.id, { by: 1, damage: e.hp + (e.shield ?? 0) + 1, source: 'melee', poise: 0, knockback: 0, dir: { x: 0, z: 1 } });
+  const alive = (camp) => camp.enemies.filter((e) => e.alive).length;
+  const reinforced = (from = 0) => events.slice(from).filter((e) => e.k === 'reinforce').length;
+
+  // 1. One player at the gate: a full garrison; ten down, and squads bring it back.
+  {
+    const { sim, ps } = fresh(1);
+    atGate(ps[0]);
+    run(sim, ps, 1);
+    const camp = sim.encounters.camps.get(base.id);
+    const garrison = camp?.slots.length ?? 0;
+    check(camp?.state === 'active' && alive(camp) === garrison, `a base wakes with its garrison (${camp && alive(camp)} of ${garrison})`);
+    for (const e of camp.enemies.filter((x) => x.alive).slice(0, 10)) kill(sim, e);
+    const from = events.length;
+    let most = 0;
+    run(sim, ps, 25, () => { most = Math.max(most, alive(camp)); });
+    check(reinforced(from) >= 1 && alive(camp) > garrison - 10 && most <= garrison, `squads come to fill it (${reinforced(from)} in 25 s; ${alive(camp)} of ${garrison}, never above)`);
+  }
+  // 2. Four players: the target rises to 2.5× (capped), and is never passed.
+  {
+    const { sim, ps } = fresh(4);
+    ps.forEach((p, i) => atGate(p, i));
+    run(sim, ps, 1);
+    const camp = sim.encounters.camps.get(base.id);
+    const want = Math.min(Math.round(camp.slots.length * 2.5), TIERS.base.cap);
+    let most = 0;
+    run(sim, ps, 120, () => { most = Math.max(most, alive(camp)); });
+    check(camp.target === want && most <= want && most > camp.slots.length, `four there: the target is ${camp.target} (want ${want}), the most at once ${most}`);
+  }
+  // 3. Dead players call nothing.
+  {
+    const { sim, ps } = fresh(4);
+    ps.forEach((p, i) => { atGate(p, i); p.alive = i === 0; });
+    run(sim, ps, 1);
+    const camp = sim.encounters.camps.get(base.id);
+    check(camp.target === camp.slots.length, `the dead don't raise the crowd (target ${camp.target} for ${camp.slots.length})`);
+    put(ps[0], base.x + base.radius + 60, base.z);
+    for (const e of camp.enemies.filter((x) => x.alive).slice(0, 10)) kill(sim, e);
+    const from = events.length;
+    run(sim, ps, 60);
+    check(reinforced(from) === 0, `with only the dead near, no squads come (${reinforced(from)})`);
+  }
+  // 4. Four players clearing it: it can be cleared, and a lull follows.
+  {
+    const { sim, ps } = fresh(4);
+    ps.forEach((p, i) => atGate(p, i));
+    run(sim, ps, 1);
+    const camp = sim.encounters.camps.get(base.id);
+    cleared.length = 0;
+    run(sim, ps, 90, (t) => {
+      if (!cleared.includes(camp) && Math.round(t * 10) % 5 === 0) for (const e of camp.enemies) if (e.alive) kill(sim, e);
+    });
+    check(cleared.includes(camp), 'four players can clear a base');
+    if (cleared.includes(camp)) {
+      // Cleared again, then 28 s with nobody killing: no squad in the lull.
+      for (const e of camp.enemies) if (e.alive) kill(sim, e);
+      run(sim, ps, 1);
+      const from = events.length;
+      run(sim, ps, 28);
+      check(reinforced(from) === 0, `a lull of 30 s after it's cleared (${reinforced(from)} squads)`);
+    }
+  }
+  // 5. Nobody near: it fills again a minute after they've gone.
+  {
+    const { sim, ps } = fresh(1);
+    atGate(ps[0]);
+    run(sim, ps, 1);
+    const camp = sim.encounters.camps.get(base.id);
+    const garrison = camp.slots.length;
+    for (const e of camp.enemies.filter((x) => x.alive).slice(0, Math.floor(garrison / 2))) kill(sim, e);
+    run(sim, ps, 0.5);
+    put(ps[0], base.x + base.radius + 200, base.z);
+    run(sim, ps, 59);
+    const short = camp.slots.some((sl) => sl.respawnAt > sim.time);
+    run(sim, ps, 2);
+    atGate(ps[0]);
+    run(sim, ps, 1);
+    check(short && camp.state === 'active' && alive(camp) === garrison, `left alone a minute, it fills again (short at 59 s: ${short}; ${alive(camp)} of ${garrison} at 61 s)`);
+  }
+  // 6. A story camp's named foe is never sent again by a squad.
+  {
+    let story = null;
+    for (const S of Object.values(storyPlaces(world.gen))) story ??= world.gen.region(S.rx, S.rz).pois.find((p) => p.type === 'camp' && p.boss) ?? null;
+    if (!story) console.log('  (no story camp with a named foe)');
+    else {
+      const { sim, ps } = fresh(1);
+      put(ps[0], story.x + story.radius + 4, story.z);
+      run(sim, ps, 1);
+      const camp = sim.encounters.camps.get(story.id);
+      run(sim, ps, 60, () => { for (const e of camp.enemies) if (e.alive && !e.isBoss) kill(sim, e); });
+      const bosses = camp.enemies.filter((e) => e.alive && (e.isBoss || (story.boss.tag && e.tag === story.boss.tag)));
+      check(bosses.length === 1, `${story.name}: one named foe, however many squads (${bosses.length})`);
+    }
+  }
+  // 7. Eight players at a base for two minutes: the cost, and the cap.
+  {
+    const one = fresh(1);
+    atGate(one.ps[0]);
+    run(one.sim, one.ps, 2);
+    let t0 = performance.now();
+    run(one.sim, one.ps, 30);
+    const solo = (performance.now() - t0) / 300;
+    const { sim, ps } = fresh(8);
+    ps.forEach((p, i) => put(p, base.x + base.radius + 4, base.z - 8 + i * 2));
+    run(sim, ps, 2);
+    const camp = sim.encounters.camps.get(base.id);
+    let most = 0;
+    t0 = performance.now();
+    run(sim, ps, 120, (t) => {
+      if (Math.round(t * 10) % 5 === 0) { const live = camp.enemies.filter((e) => e.alive); if (live.length) kill(sim, live[Math.floor(Math.random() * live.length)]); }
+      most = Math.max(most, sim.enemies.filter((e) => e.alive).length);
+    });
+    const crowd = (performance.now() - t0) / 1200;
+    check(crowd < solo * 2.5 + 0.5 && most <= MAX_CAMP_ENEMIES, `eight at a base: ${crowd.toFixed(2)} ms a tick (one: ${solo.toFixed(2)} ms), at most ${most} alive`);
+  }
+}
+if (!arg('--seed')) waves();
 
 for (const seed of SEEDS) {
   console.log(`Seed ${seed}:`);
