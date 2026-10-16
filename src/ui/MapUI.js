@@ -10,7 +10,7 @@
 //   Seen from above like the minimap, with the compass's north (−z) at the top and east (+x) to
 // the right. (The map tiles and fog are painted with +z at the top, so they're drawn flipped.)
 import { drawMark, drawMarks, TONES } from './questMarks.js';
-import { HUB, REGION } from '../world/Gen.js';
+import { HUB, REGION, ACTS } from '../world/Gen.js';
 import { CHUNK } from '../world/Chunks.js';
 import { PARTY_COLOR } from './PartyUI.js';
 import { FogLayer } from './MapFog.js';
@@ -389,6 +389,74 @@ export class MapUI {
           ctx.stroke();
         }
       }
+    }
+
+    // The act lands' borders (world/Gen.js ACTS), dashed where the land's been seen, each land
+    // named once at the middle of what's seen of it.
+    {
+      const gen = g.world.gen;
+      const step = Math.max(12, (x1 - x0) / 160);
+      const sx0 = Math.floor(x0 / step) * step;
+      const sz0 = Math.floor(z0 / step) * step;
+      const nx = Math.ceil((x1 - sx0) / step) + 1;
+      const nz = Math.ceil((z1 - sz0) / step) + 1;
+      const acts = new Int8Array(nx * nz);
+      const seen = {};
+      for (let i = 0; i < nx; i++) {
+        for (let k = 0; k < nz; k++) {
+          const x = sx0 + i * step;
+          const zz = sz0 + k * step;
+          if (!d.isKnown(x, zz)) continue;
+          const a = (acts[i * nz + k] = gen.actAt(x, zz));
+          const S = (seen[a] ??= { x: 0, z: 0, n: 0 });
+          S.x += x; S.z += zz; S.n++;
+        }
+      }
+      ctx.save();
+      ctx.strokeStyle = 'rgba(255,190,90,0.85)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 5]);
+      ctx.beginPath();
+      for (let i = 0; i < nx; i++) {
+        for (let k = 0; k < nz; k++) {
+          const a = acts[i * nz + k];
+          if (!a) continue;
+          const x = sx0 + i * step;
+          const zz = sz0 + k * step;
+          const east = i + 1 < nx ? acts[(i + 1) * nz + k] : 0;
+          const north = k + 1 < nz ? acts[i * nz + k + 1] : 0;
+          if (east && east !== a) {
+            const [ax, ay] = toScreen(x + step / 2, zz - step / 2);
+            const [bx, by] = toScreen(x + step / 2, zz + step / 2);
+            ctx.moveTo(ax, ay); ctx.lineTo(bx, by);
+          }
+          if (north && north !== a) {
+            const [ax, ay] = toScreen(x - step / 2, zz + step / 2);
+            const [bx, by] = toScreen(x + step / 2, zz + step / 2);
+            ctx.moveTo(ax, ay); ctx.lineTo(bx, by);
+          }
+        }
+      }
+      ctx.stroke();
+      ctx.font = '600 13px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = 'rgba(255,210,140,0.95)';
+      ctx.strokeStyle = 'rgba(20,16,10,0.75)';
+      ctx.lineWidth = 3;
+      ctx.setLineDash([]);
+      if (Object.keys(seen).length > 1) {
+        for (const [a, S] of Object.entries(seen)) {
+          const [lx, ly] = toScreen(S.x / S.n, S.z / S.n);
+          // (Flipped back here, as the picture's flipped onto the screen: the right way up there.)
+          ctx.save();
+          ctx.translate(lx, ly);
+          ctx.scale(1, -1);
+          ctx.strokeText(ACTS[a - 1].name.toUpperCase(), 0, 0);
+          ctx.fillText(ACTS[a - 1].name.toUpperCase(), 0, 0);
+          ctx.restore();
+        }
+      }
+      ctx.restore();
     }
 
     // The fog over the cells not yet seen (ui/MapFog.js).
