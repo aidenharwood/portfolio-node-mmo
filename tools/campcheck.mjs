@@ -144,6 +144,32 @@ function placement(gen) {
   check(thin === 0, `water and cliffs leave every camp room for its garrison (${thin} short)`);
 }
 
+// ---------------------------------------------------------------- frontier posts
+// Where a road crosses into a later act's lands, a Warden post stands on the near side of it.
+function frontiers(gen) {
+  let crossings = 0;
+  let missed = 0;
+  let wrongSide = 0;
+  const regions = regionsTo(gen, 18);
+  const posts = regions.flatMap((r) => r.pois.filter((p) => p.type === 'frontier'));
+  for (const r of regions) {
+    for (const path of r.roads) {
+      for (let i = 1; i < path.length; i++) {
+        const [ax, az] = path[i - 1];
+        const [bx, bz] = path[i];
+        const [A, B] = [gen.actAt(ax, az), gen.actAt(bx, bz)];
+        if (A === B) continue;
+        crossings++;
+        const near = posts.filter((p) => Math.hypot(p.x - (ax + bx) / 2, p.z - (az + bz) / 2) < 25);
+        if (!near.length) missed++;
+        else if (!near.some((p) => gen.actAt(p.x, p.z) < p.act && p.act === Math.max(A, B))) wrongSide++;
+      }
+    }
+  }
+  check(crossings > 0 && missed === 0, `a frontier post at every road into a later act (${crossings} crossings, ${missed} without)`);
+  check(wrongSide === 0, `on the near side, naming the act ahead (${wrongSide} wrong)`);
+}
+
 // ---------------------------------------------------------------- layouts
 const STYLES = { scav: 'scav', salvage: 'scav', nest: 'hive', relay: 'synth', den: 'fauna' };
 function layouts() {
@@ -343,6 +369,7 @@ for (const seed of SEEDS) {
   check(fingerprint(gen) === FINGERPRINTS[seed], `the settled places are where they were (seed ${seed})`);
   actLands(gen);
   placement(gen);
+  frontiers(gen);
 }
 
 console.log(failed ? `campcheck: ${failed} failed` : 'campcheck: all good');

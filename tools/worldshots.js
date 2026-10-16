@@ -109,11 +109,11 @@ export async function tour(what, { cols = 4, w = 480, h = 360 } = {}) {
   return list.map(([k, it]) => `${k}@${Math.round(it.x)},${Math.round(it.z)}`).join(' ');
 }
 
-// One big frame of a single place: tour1('landmark', 'wreck').
+// One big frame of a single place: tour1('landmark', 'wreck'), tour1('frontier', 'frontier').
 export async function tour1(type, kind, { dist = 2.6, height = 0.9, yaw = 0.6 } = {}) {
   g.state = 'playing';
   document.getElementById('loading')?.remove();
-  const items = type === 'biome' ? find([kind], (r) => (r.key && r.biome && !r.hub ? r.biome : null)) : find([kind], (p) => (p.type === type ? p.kind : null));
+  const items = type === 'biome' ? find([kind], (r) => (r.key && r.biome && !r.hub ? r.biome : null)) : find([kind], (p) => (p.type === type ? p.kind ?? p.type : null));
   const it = items.get(kind);
   if (!it) return 'not found';
   const r = it.r ?? 18;

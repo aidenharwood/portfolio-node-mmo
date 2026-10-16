@@ -990,6 +990,30 @@ export class WorldGen {
     }
 
     this.buildRoads(region);
+    // Frontier posts: where one of its roads crosses into a later act's lands, a Warden post on
+    // the near side, about 10 m short of the line, across the road. (No draws: they follow from
+    // the roads.)
+    let fn = 0;
+    for (const path of region.roads) {
+      for (let i = 1; i < path.length; i++) {
+        const A = this.actAt(path[i - 1][0], path[i - 1][1]);
+        const B = this.actAt(path[i][0], path[i][1]);
+        if (A === B) continue;
+        const dir = A < B ? -1 : 1; // along the path toward the near side
+        let k = A < B ? i - 1 : i;
+        let walked = 0;
+        while (walked < 10 && k + dir >= 0 && k + dir < path.length) {
+          walked += Math.hypot(path[k + dir][0] - path[k][0], path[k + dir][1] - path[k][1]);
+          k += dir;
+        }
+        let [x, z] = path[k];
+        if (this.actAt(x, z) >= Math.max(A, B)) [x, z] = A < B ? path[i - 1] : path[i];
+        if (region.pois.some((p) => p.type === 'frontier' && Math.hypot(p.x - x, p.z - z) < 15)) continue;
+        const [ox, oz] = path[Math.max(0, k - 1)];
+        const [qx, qz] = path[Math.min(path.length - 1, k + 1)];
+        region.pois.push({ type: 'frontier', id: `f:${key}:${fn++}`, x, z, rot: Math.atan2(qx - ox, qz - oz), act: Math.max(A, B), name: ACTS[Math.max(A, B) - 1].name });
+      }
+    }
     // Towns and cities lay out their services between the streets the roads come in by; a city's
     // districts are points of interest of their own, so it streams in a district at a time.
     for (const p of [...region.pois]) {

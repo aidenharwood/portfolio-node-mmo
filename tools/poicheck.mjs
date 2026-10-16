@@ -27,6 +27,7 @@ const want = new Map([
   ['citywall:', null],
   ...DISTRICTS.map((k) => [`district:${k}`, null]),
   ...CAMPS.map((k) => [`camp:${k}`, null]),
+  ['frontier:', null],
 ]);
 const keyOf = (p) => (p.type === 'camp' ? `camp:${p.stronghold ? `fort:${p.race}` : `${p.style}:${p.tier}`}` : `${p.type}:${p.kind ?? ''}`);
 for (let ring = 0; ring < 24 && [...want.values()].some((v) => !v); ring++) {

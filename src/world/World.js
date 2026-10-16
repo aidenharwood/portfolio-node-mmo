@@ -118,6 +118,8 @@ const FLORA_TYPES = {
   shard: [new THREE.OctahedronGeometry(0.25).scale(0.6, 2.2, 0.6).translate(0, 0.5, 0), 3000],
   cap: [new THREE.SphereGeometry(0.2, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2).scale(1, 0.6, 1).translate(0, 0.38, 0), 2500],
 };
+// The colours a later act's lands show at their border (scatterChunk).
+const BORDER_GLOW = { 2: HIVE, 3: ARC, 4: 0xf0d890 };
 const FLORA_COLOR = {
   highland: 0x7fe8ff, snow: 0xbff4ff, ash: 0xff8a2a, marsh: 0xb84aff, forest: 0x6affc8, meadow: 0x7fe8ff, mountain: 0x7fe8ff,
   desert: 0xffb347, badlands: 0xff8a2a, jungle: 0x6affa0, crystal: 0xb07aff, fungal: 0xff6ae0,
@@ -1060,6 +1062,14 @@ export class World {
         const y = this.analyticHeight(x, z);
         if (y < WATER_LEVEL + 0.3 || near || blocked(x, z)) continue;
         const slope = this.slopeFast(x, z);
+        // The edge of a later act's lands: for 30 m in from the border, its colours grow out of the
+        // ground (the Hive's violet, the Synths' arc light, the Makers' gold).
+        const act = gen.actAt(x, z);
+        if (act > 1 && slope < 0.9 && rnd() < 0.3
+          && (gen.actAt(x - 30, z) < act || gen.actAt(x + 30, z) < act || gen.actAt(x, z - 30) < act || gen.actAt(x, z + 30) < act)) {
+          _col.set(BORDER_GLOW[act]);
+          for (let k = 0; k < 2; k++) push('shard', x + (rnd() - 0.5) * 1.2, y, z + (rnd() - 0.5) * 1.2, 0.6 + rnd() * 1.1, { tilt: 0.6, color: _col });
+        }
         // Glowing flora and ground cover.
         const fr = rnd();
         if (fr < (biome === 'crystal' ? 0.09 : 0.035) && slope < 0.9 && !(biome === 'meadow' && rnd() < 0.85)) {
@@ -1231,6 +1241,7 @@ export class World {
     switch (p.type) {
       case 'hub': this.buildHub(); break;
       case 'camp': this.buildCamp(p); break;
+      case 'frontier': this.buildFrontier(p); break;
       case 'tower': this.buildTower(p); break;
       case 'ruin': this.buildRuin(p); break;
       case 'mesa': this.buildMesa(p); break;
@@ -1556,6 +1567,28 @@ export class World {
   }
 
   // ------------------------------------------------------------ camps
+  // A Warden frontier post (world/Gen.js): two pillars across the road with a beam over it, the
+  // colours of the lands ahead hung from it, and a board by the roadside.
+  buildFrontier(p) {
+    const g = this.anchor(p.x, p.z, p.rot);
+    const look = [FORGE, HIVE, ARC, 0xf0d890][p.act - 1] ?? FORGE;
+    for (const s of [-1, 1]) {
+      const y = this.groundHeight(p.x + Math.cos(p.rot) * 3.5 * s, p.z - Math.sin(p.rot) * 3.5 * s) - g.position.y;
+      piece(g, G.box(0.5, 4.4, 0.5), C.woodDark, { pos: [3.5 * s, y + 2.2, 0], outline: 0.02 });
+      piece(g, G.box(0.7, 0.4, 0.7), C.stone, { pos: [3.5 * s, y + 0.2, 0], outline: 0.02 });
+      piece(g, G.box(0.14, 1.6, 0.6), look, { pos: [3.5 * s - 0.33 * s, y + 3.2, 0], glow: true, outline: 0.01 });
+      this.addCollider(p.x + Math.cos(p.rot) * 3.5 * s, p.z - Math.sin(p.rot) * 3.5 * s, 0.45, 4.4);
+    }
+    piece(g, G.box(7.8, 0.4, 0.45), C.wood, { pos: [0, 4.3, 0], outline: 0.02 });
+    piece(g, G.box(2.2, 1.2, 0.06), C.canvas, { pos: [0, 3.5, 0.05], outline: 0.012 });
+    piece(g, G.box(2.2, 0.22, 0.07), look, { pos: [0, 3.3, 0.06], glow: true, outline: 0 });
+    // The board: the lands ahead, and their levels, for those who read it.
+    piece(g, G.box(0.12, 1.1, 0.12), C.woodDark, { pos: [5.2, 0.55, -1.2], outline: 0.01 });
+    piece(g, G.box(1.3, 0.8, 0.08), C.wood, { pos: [5.2, 1.3, -1.2], rot: [0, 0.3, 0], outline: 0.012 });
+    piece(g, G.box(1.0, 0.1, 0.09), look, { pos: [5.2, 1.45, -1.2], rot: [0, 0.3, 0], glow: true, outline: 0 });
+    this.finish(g);
+  }
+
   buildCamp(camp) {
     // Laid out from its definition (world/campLayout.js), built piece by piece from its faction's
     // kit (world/build/campKit.js); a stronghold is a walled base with a throne.
