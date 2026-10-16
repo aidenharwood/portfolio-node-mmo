@@ -221,6 +221,11 @@ function build(shape, R, rot, poly) {
   return plot;
 }
 
+// A plot of a given outline ([[x, z], …] round a place's spot, R its reach): a street's, a plaza's.
+export function plotFrom(poly, R = Math.max(...poly.map(([x, z]) => Math.hypot(x, z)))) {
+  return build('poly', R, 0, poly);
+}
+
 // A place's plot (memoised by id, seed and options). Its seed is the place's own, or its id's.
 const memo = new Map();
 export function plotOf(place, opts = {}) {

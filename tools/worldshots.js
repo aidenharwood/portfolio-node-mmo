@@ -394,3 +394,27 @@ export async function plots({ w = 480, h = 360, cols = 4, name = 'plots', skip =
   await fetch(`/__shot/tour_${name}`, { method: 'POST', body: sheet.toDataURL('image/png') });
   return list.map(([k, p]) => `${k}@${Math.round(p.x)},${Math.round(p.z)}`).join(' ');
 }
+
+// One frame of world point (x, z) once everything round it has streamed in and been built: the
+// camera `up` metres above and `back` metres off it (south-east, or along bearing `yaw`).
+export async function shootAt(x, z, { up = 40, back = 30, yaw = 0.6, name = 'at' } = {}) {
+  g.state = 'playing';
+  document.getElementById('loading')?.remove();
+  const p = g.player;
+  p.position.set(x, g.world.groundHeight(x, z) + 1, z);
+  g.world.prime(p.position);
+  for (let k = 0; k < 400 && (k < 3 || g.world.jobs?.length); k++) g.world.update(0.016, 0, p.position);
+  g.world.dayTime = 0.25;
+  for (let i = 0; i < 40; i++) g.world.updateSky(0.1, p.position);
+  const y = g.world.groundHeight(x, z);
+  const c = g.camera;
+  const keep = [c.position.clone(), c.quaternion.clone()];
+  c.position.set(x + Math.sin(yaw) * back, y + up, z + Math.cos(yaw) * back);
+  c.lookAt(x, y, z);
+  c.updateMatrixWorld();
+  g.post.render(0, g);
+  await fetch(`/__shot/${name}`, { method: 'POST', body: g.renderer.domElement.toDataURL('image/png') });
+  c.position.copy(keep[0]);
+  c.quaternion.copy(keep[1]);
+  return name;
+}

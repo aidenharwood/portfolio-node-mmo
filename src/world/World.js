@@ -30,6 +30,7 @@ import { WorldGen, REGION, WATER_LEVEL, HUB } from './Gen.js';
 import { Chunk, CHUNK, RES0 } from './Chunks.js';
 import { C, HEARTH, FORGE, HIVE, ARC, CARGO, RUNE } from './palette.js';
 import { LANDMARK_BUILDERS, SETTLEMENT_BUILDERS } from './Landmarks.js';
+import { townPlot, cityPlot } from './places.js';
 import { HAMLET_BUILDERS, DISTRICT_BUILDERS, buildTown, buildCity, buildCityWall, buildBrightwater, buildCampsite, serviceProps } from './Towns.js';
 import { STORY_BUILDERS, foundryYard, placeObjects, objectProps } from './StorySites.js';
 import { NPCS } from './mapData.js';
@@ -623,6 +624,18 @@ export class World {
       for (const p of r.pois) {
         if (p.type === 'camp' && Math.hypot(x - p.x, z - p.z) < p.radius + 8) return p;
         if (PLACES.has(p.type) && Math.hypot(x - p.x, z - p.z) < placeReach(p) + 6 + pad) return p;
+      }
+    }
+    return null;
+  }
+
+  // The town whose own streets are at (x, z), if any (its plot, world/places.js): roads give way
+  // to them.
+  streetsAt(x, z) {
+    for (const r of this.gen.regionsNear(x, z, this._sr ??= [])) {
+      for (const p of r.pois) {
+        if (p.type === 'town' && Math.hypot(x - p.x, z - p.z) < p.r + 12 && townPlot(p).inside(x - p.x, z - p.z, 1)) return p;
+        if (p.type === 'city' && Math.hypot(x - p.x, z - p.z) < p.wall + 8 && cityPlot(p).inside(x - p.x, z - p.z, 1)) return p;
       }
     }
     return null;
@@ -1367,6 +1380,8 @@ export class World {
       for (let i = 0; i < pts.length - 1; i++) {
         const [ax, az] = pts[i];
         const [bx, bz] = pts[i + 1];
+        // (Inside a walled town the road gives way to its own paved streets.)
+        if (this.streetsAt(ax, az) && this.streetsAt(bx, bz)) continue;
         const tl = Math.hypot(bx - ax, bz - az) || 1;
         const ox = (-(bz - az) / tl) * (width / 2);
         const oz = ((bx - ax) / tl) * (width / 2);

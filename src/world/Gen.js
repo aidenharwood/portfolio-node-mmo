@@ -18,10 +18,12 @@
 //             of each act's lands, in districts. Brightwater, at the hub, is a town.
 import { makeNoise2D, fbm, smoothstep } from '../core/noise.js';
 import { mulberry32 } from '../core/rng.js';
-import { SIZES, CITIES, CITY_WALL, HAMLETS, planHamlet, planCampsite, campsiteKind, campsiteName, dressVillage, planTown, planCity, planHub, hamletName, townName, pathBearing, hamletPlot, villagePlot, campsitePlot, townPlot, cityPlot, hubPlot } from './places.js';
+import { SIZES, CITIES, CITY_WALL, HAMLETS, planHamlet, planCampsite, campsiteKind, campsiteName, dressVillage, planTown, planCity, planHub, hamletName, townName, pathBearing, hamletPlot, villagePlot, campsitePlot, townPlot, townPlan, cityPlot, hubPlot, cityHeartPlot, cityHeartPlan, districtPlan, cityAvenues, CITY } from './places.js';
+const CITY_HEART = CITY.heart * Math.SQRT2;
 import { storyPlaces, storyIn } from './story.js';
 import { TIERS, campLayout, campPlot } from './campLayout.js';
-import { padEdge, plotOf } from './plots.js';
+import { padEdge, plotOf, plotFrom } from './plots.js';
+import { streetPads } from './streets.js';
 
 // A landmark's, a ruin's or a story place's ground: an irregular plot of radius R round it, always
 // holding the middle two-thirds of it (where its bespoke works and folk stand).
@@ -800,7 +802,9 @@ export class WorldGen {
           // Its ground: its plot (world/places.js), a couple of metres out; its plaza paved or trodden.
           const plot = city ? cityPlot(place) : townPlot(place);
           pad(w.x, w.z, plot.R + 2, h, city ? 22 : 16, false, plot, 2);
-          pad(w.x, w.z, city ? SIZES.city.r + 6 : 11, h, 3, city ? 'stone' : true);
+          // A town's plaza paved with its streets (below); a city's heart, a square of flagstones.
+          if (city) pad(w.x, w.z, CITY_HEART + 2, h, 3, 'stone', cityHeartPlot(place), 0);
+          else pad(w.x, w.z, 11, h, 3, true);
           region.pois.push(place);
         } else if (rng() < (ring === 1 ? 0.55 : 0.4)) {
           // A friendly village round the waystone (so on the roads), in about two regions of five.
@@ -1098,13 +1102,21 @@ export class WorldGen {
         // The town round the old camp streams in as a part of its own.
         region.pois.push({ type: 'hubtown', id: 'ht:0,0', x: 0, z: 0, name: HUB.name });
       }
-      else if (p.type === 'town') planTown(p, extra, this.streetsAt(region, p.x, p.z));
+      else if (p.type === 'town') {
+        planTown(p, extra, this.streetsAt(region, p.x, p.z));
+        // Its streets and plaza paved (no draws).
+        streetPads(townPlan(p), (poly) => region.pads.push({ x: p.x, z: p.z, r: Math.max(...poly.map(([x, z]) => Math.hypot(x, z))) + 1, h: p.h, fall: 2, dirt: 'stone', crisp: true, plot: plotFrom(poly), margin: 0 }));
+      }
       else if (p.type === 'city') {
+        // Paving (no draws): its avenues and its heart's streets, each district's square and lanes.
+        const paved = (cx, cz, h) => (poly) => region.pads.push({ x: cx, z: cz, r: Math.max(...poly.map(([x, z]) => Math.hypot(x, z))) + 1, h, fall: 2, dirt: 'stone', crisp: true, plot: plotFrom(poly), margin: 0 });
         for (const d of planCity(p, extra, this.streetsAt(region, p.x, p.z))) {
           region.pois.push(d);
-          pad(d.x, d.z, d.r - 4, p.h, 3, 'stone');
+          streetPads(districtPlan(d), paved(d.x, d.z, p.h));
         }
-        region.pois.push({ type: 'citywall', id: `yw:${key}`, x: p.x, z: p.z, wall: p.wall, h: p.h, quarters: p.quarters, name: p.name, act: p.act });
+        for (const poly of cityAvenues(p)) paved(p.x, p.z, p.h)(poly);
+        streetPads(cityHeartPlan(p), paved(p.x, p.z, p.h));
+        region.pois.push({ type: 'citywall', id: `yw:${key}`, cityId: p.id, seed: p.seed, x: p.x, z: p.z, wall: p.wall, h: p.h, quarters: p.quarters, name: p.name, act: p.act });
       }
     }
     return region;

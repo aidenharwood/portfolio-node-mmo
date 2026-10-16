@@ -246,7 +246,8 @@ export class Chunk {
     for (const p of feats.pads) {
       if (!p.dirt || Math.hypot(x - p.x, z - p.z) >= p.r + 4) continue;
       const e = padEdge(p, x, z);
-      if (e < 4) out.lerp(p.dirt === 'stone' ? PAVE : DIRT, smoothstep(4, -1, e) * 0.85);
+      // (A street's paving keeps a crisp edge; a yard's trodden ground fades out.)
+      if (e < 4) out.lerp(p.dirt === 'stone' ? PAVE : DIRT, (p.crisp ? smoothstep(0.8, -0.4, e) : smoothstep(4, -1, e)) * (p.crisp ? 0.95 : 0.85));
     }
     return out.multiplyScalar(0.94 + gen.nD(x * 0.15, z * 0.15) * 0.06);
   }

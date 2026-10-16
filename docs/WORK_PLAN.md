@@ -501,29 +501,53 @@ The story must be completable without the raid: it ends at the gate opening, and
 ### Path-following and Phase 6b
 
 ### P-1 Moving defendable and path-following in the sim
-- status: todo
+- status: review
 - size: M
 - depends: S-1
 - why: the war-walker, the stampede's caravans and escort quests all need a moving, damageable thing the sim walks along a route.
 - start: `sim/WorldEvents.js`, `sim/WorldSim.js`, the roads that link waystones (as routes)
 - scope: a moving defendable with health, a route, stuck-recovery, scaling with participants, and interest management for something that crosses regions (`wev` currently covers events within about 700 m).
 - acceptance:
-  - [ ] Headless test: a defendable follows a road across several regions and is reported to nearby players throughout.
-  - [ ] A stuck one recovers or fails cleanly.
-  - [ ] Standard DoD.
+  - [x] Headless test: a defendable follows a road across several regions and is reported to nearby players throughout.
+  - [x] A stuck one recovers or fails cleanly.
+  - [x] Standard DoD (`npm test` green; no visuals of its own).
 - notes:
+  - 2026-10-15: on branch `p-walker` (worktree `../portfolio-node-mmo-walker`), commits 478fb94 and 088e9f8. The plan is [2026-10-15-war-walker.md](superpowers/plans/2026-10-15-war-walker.md).
+  - `sim/Routes.js` builds a route of 300–480 m along the roads between waystones and keeps out of the cities and the hub. Its follower jumps gaps up to 30 m and is otherwise `stuck`.
+  - `WorldEvents.lead()` carries a structure or an enemy along a route, and the event's centre moves with it. Interest management needed no change, because `near()` and `wev` already go by the event's centre.
 
 ### P-2 Synth War-walker event
-- status: todo
+- status: review
 - size: M
 - depends: P-1
 - scope: a Colossus-class walker with escorts crosses a region toward a town. Weak points must be broken before it arrives. Reuse the raid framework's immunity-while-weak-point-adds-live and shield mechanics **(check)**. If it arrives, use the existing overrun and Retake flow.
 - acceptance:
-  - [ ] `tools/eventcheck.mjs` covers won, lost and abandoned, scaling with participants, and a stuck walker.
-  - [ ] A new enemy model and a codex entry.
-  - [ ] Standard DoD.
+  - [x] `tools/eventcheck.mjs` covers won, lost and abandoned, scaling with participants, and a stuck walker.
+  - [x] A new enemy model and a codex entry (the walker and its power couplings).
+  - [x] Standard DoD, except the F3 frame check: the browser pane was hidden, so no frames ran. Captures were rendered by hand.
   - [ ] (user) server restarted.
 - notes:
+  - 2026-10-15: on branch `p-walker`, commits a115eaa to 2c9be6a.
+  - **(check) answered:** this reuses BossScript's immunity *pattern* (a wrapped `applyHit`, and the `rimm` and `shield` sim events the client already draws), not the class, which needs a raid encounter.
+  - **Defaults to confirm:** an abandoned or stuck walker turns back and nothing is overrun. Only one that arrives overruns the settlement.
+  - **Differences from the plan:**
+    - The walker isn't elite, because the gold tint and random affixes didn't suit it. Its base hp is 4500, about 2.5 Colossus fights, or roughly 3¾ min solo against a ~4 min walk.
+    - Its hull scales by EnemySim's crowd rule only. The plan's extra event scaling stacked on top of it, ×3.5 for three players.
+    - Its velocity is its walking pace, so the leg animator strides.
+  - The director doesn't start walkers yet, and there's no admin or dev-panel entry: that's P-4. A quest's `{ type: 'event', event: 'walker' }` step works now.
+  - **Final review fixes** (e6fcce4):
+    - `roadRoute` threw where a settlement's region had no waystone, which would have broken the shared sim tick.
+    - The hull healed to full whenever the walker leashed. It now never leashes.
+    - Players waiting at the beacon made it turn back. Now someone within 200 m of the settlement counts as being there.
+    - Screens weren't told it was immune. Now `w.immune` is set while the couplings hold.
+    - The hull is 2880 (1.6 Colossus fights) and routes are at least 360 m. That fits a solo budget: meeting it, the couplings, the hull and the escort come to about 3:50 against a walk of at least 4:00.
+    - The couplings now hover at 3.2 m, so melee can reach them.
+  - **Deferred minors from the review:**
+    - Dead players still count as "near".
+    - `lure` and `muzzle` on the warwalker entry do nothing.
+    - `canStand` checks water twice.
+    - F3 frame cost isn't measured: the browser pane was hidden.
+  - **Your WIP on `p-walker`** (uncommitted `typeFor` and `startNear` edits) is untouched. Note that `typeFor` sends a walker to landmarks. Walkers are settlement events: on a loss, `fall()` would overrun the landmark. That's P-4's director rule to settle.
 
 ### P-3 Wild Stampede event
 - status: todo
@@ -585,40 +609,91 @@ The story must be completable without the raid: it ends at the gate opening, and
 Task split: B-1 is beats 1–5, B-2 beats 6–7, B-3 beat 8, B-4 beat 11, and B-5 beats 9, 10 and 12 plus the act's close.
 
 ### B-1 Ironreach hub and opening quests
-- status: todo
+- status: review
 - size: M
 - depends: A-10, P-2
 - needs: DEC-10
 - scope: Ironreach's story dressing, beats 1–2, war-walker hooks into the story (quest-started via A-2), flags registered.
 - acceptance:
-  - [ ] `questcheck` plays the new quests, including the choice and Act II flags read back.
-  - [ ] Standard DoD.
+  - [x] `questcheck` plays the new quests, including the choice and Act II flags read back.
+  - [x] Standard DoD (`npm test` green on a clean checkout; captures of Isa and Ironreach's wall; buildcheck measures the wall).
 - notes:
+  - 2026-10-15: on branch `act-iii` (worktree `../portfolio-node-mmo-act3`, cut from `p-walker` e6fcce4), commits 1e518df..872bd86. The plan is [2026-10-15-act-iii-b1.md](superpowers/plans/2026-10-15-act-iii-b1.md). Started before A-10 at the user's word ("continue with act 3").
+  - **Scope:** beats 1–5 per the spec (c1–c5), wider than "beats 1–2" above.
+  - **Built:**
+    - Foundrywright Isa Brannock (`city3:engineer`) stands by Ironreach's citadel door, and its wall towers carry smokestacks.
+    - `ironstone` is the nearest waystone outside the walls that isn't in a village square. `ironhamlet` is the nearest settlement with a walker road.
+    - Moments: `act3`, `emissary`, `plea`.
+    - Flags: `act3_started`, `synth_orders_known`. Act II's `told_ashe` / `kept_wardens_secret` are read back in c1 and c5.
+    - The journal's ACTS has Act III marked `partial`, and says Act III continues.
+  - **Review fixes:**
+    - The plea no longer says the Pilgrim lost its sleepers.
+    - The emissary names the termination pulse.
+    - The stone is never a village square (it was on seeds 777 and 95028).
+    - c2 and c4 no longer assume the stone was woken.
+  - **For the user:**
+    - Read the c1–c5 lines.
+    - `GameMenu.js` shows a partial act as done (5 / 5, green) once c5 is finished. It needs a "more to come" row when `A.partial` is set. The file is the user's, so this was left alone.
+    - c3 counts only a won walker (A-2's rule), and a lost one overruns the settlement until it's retaken.
 
 ### B-2 The Fallen Titan story place and quests
-- status: todo
+- status: review
 - size: M
 - depends: B-1
 - needs: DEC-1b, DEC-10
 - scope: beat 3 and the place.
 - acceptance:
-  - [ ] Placement, `poicheck` and `buildcheck` as in A-4.
-  - [ ] `questcheck` plays the quests.
-  - [ ] Standard DoD.
+  - [x] Placement, `poicheck` and `buildcheck` as in A-4.
+  - [x] `questcheck` plays the quests.
+  - [x] Standard DoD (`npm test` green on a clean checkout; captures of the Titan, its core and the yard).
 - notes:
+  - 2026-10-16: on branch `act-iii`, commits e02e275..68c16c2. The plan is [2026-10-15-act-iii-b2.md](superpowers/plans/2026-10-15-act-iii-b2.md). Scope is beats 6–7 of the approved beat sheet (c6, c7).
+  - **Places:**
+    - *The Fallen Titan* is the existing kneeling-titan landmark, set out from Ironreach, with its core housing torn out at its knees (`titan:core`). The generator's titans can no longer be called "Fallen" ("Shattered" instead).
+    - The *Salvage Rig* is a Synth relay camp just beyond the Titan from the city (new `away` / `keep` / `around` placement options, used only by it). It sits 70–80 m out on ten seeds.
+    - *Brannock's Yard* is a fenced yard just outside the walls, with its gate toward the city and the cradle under a gantry.
+  - **Quests:**
+    - c6 *The Fallen Titan*: reach it, clear the rig, pull the core. Moment `titan`; sets `titan_core_taken`.
+    - c7 *Reading the Core*: wake the core in the cradle, then hold the yard against 3 Synth waves. Moment `coreread`: "INTRUSION IN THE NETWORK. CONTAINMENT HELD. ORIGIN: UNKNOWN." Who it was stays open (DEC-1c).
+  - **Final review fixes:**
+    - A defence can carry a `gate` bearing. The yard's waves come down its gate's line, so they get in, which eventcheck now checks with the world's own pathing. Before, most waves pressed against the back fence.
+    - The rig was on the way to the Titan, so it got cleared before its step began.
+    - The cradle now starts empty.
+    - One c7 line contradicted "the old war".
+  - **Deferred:**
+    - `main.js` OBJECTS entries for `titancore` and `cradle`. Their prompts fall back to "Use", like Act II's array objects. `main.js` holds the user's uncommitted edits.
+    - Generator POIs in about 3 regions per seed reshuffle round the new places. Chest ids there may now name different chests; that's harmless if nobody has explored Act III's lands.
+    - The Titan has no chest, like the Pilgrim.
+    - The rig is level 21 for a level-19 quest, within the precedent of Act II's Psion nest.
+    - `eventcheck` crashes on seed 777 in an Act II overrun section. This predates this work: it crashes the same way on 208456b.
 
 ### B-3 The Foundry Below dungeon
-- status: todo
+- status: review
 - size: L
 - depends: B-1, G-2
 - needs: DEC-1b, DEC-10
 - start: `world/dungeons.js`, `world/DungeonGen.js`, `sim/Dungeons.js`, `tools/dungeoncheck.mjs`
 - scope: a Synth-theme dungeon with a structural twist from G-2 (not the standard route), open-world copy and private runs at all tiers, a reward chest, achievements.
 - acceptance:
-  - [ ] `dungeoncheck` covers the layout across many private runs and a headless run through the instance manager.
-  - [ ] Waygate and gate-yard entry work, with the story flag it needs.
-  - [ ] Standard DoD.
+  - [x] `dungeoncheck` covers the layout across many private runs (25), and runs through the instance manager. The Foundry Below is entered at its hatch and through a waygate, and its open-world copy takes shared slot 3. The full boss-and-chest run is still played only on the Vault, by the same generic code.
+  - [x] Waygate and gate-yard entry work, with the story flag it needs (`titan_core_taken`; listed sealed until then).
+  - [x] Standard DoD (`npm test` green on a clean checkout; a capture of the hatch).
 - notes:
+  - 2026-10-16: on branch `act-iii`, commits 66ffc11..89529fe. The plan is [2026-10-16-act-iii-b3.md](superpowers/plans/2026-10-16-act-iii-b3.md).
+  - **Built:**
+    - *The Foundry Below*: Synth theme, level 21, an open-world copy and private runs at every tier with the reward chest. It's sealed until `titan_core_taken`.
+    - Boss: the Colossus, as *The Forge-Overseer*. Mini-boss: a Bulwark, *The Line Foreman*.
+    - Its way in is a blast hatch in a rock cut out past Ironreach, story place `foundrybelow`.
+    - Quest c8 (a `dungeon` step), the flag `foundry_below_cleared`, and the achievement *Down the Line* (74 achievements now).
+  - **No G-2 twist (decision):** G-2 isn't built, so the dungeon uses the standard route for now. G-2 can add the twist later without moving its id or its way in.
+  - **Final review fixes:**
+    - The hatch, the Titan's core and the cradle now have names and prompts; the hatch was labelled "Object".
+    - dungeoncheck covers the waygate and the open-world copy.
+    - The hatch now stands in the cut, and buildcheck builds the site.
+  - **To know:**
+    - On seed 12345 the new place lands on region (-8,9), and that region's generator layout reshuffles. A Scav fort and a camp there are gone, so Ironreach's war table now marks 2 forts, not 3. This is inherent to adding a story place.
+    - The ground round the hatch is level 23, and the blurb says "highlands" where the biome is forest and marsh. Both are flavour.
+    - The boss pair repeats the Vault's (Colossus + Bulwark). B-4's named mechanics are meant to set the open-world Colossus apart.
 
 ### B-4 The Colossus foundry
 - status: todo
@@ -998,6 +1073,11 @@ Append-only. Newest last. Format: `YYYY-MM-DD — ID — what changed — checks
 - 2026-10-15 — A-5, A-6, A-7 — all of Act II (b1–b12, moments, barks, flags) on branch `act-ii-story` (worktree `../portfolio-node-mmo-act2`, head 476fa0a), merged with A-1–A-3 and A-4's branch. The fresh-reviewer pass fixed b2's Spore Field, the dungeon waypoint and the journal line — `npm test` green; questcheck plays all 8 choice combinations — read the Act II lines, decide how to merge (one PR, or A-4's own PR first), restart the server after merging, and play from b1.
 - 2026-10-15 — A-5, A-6, A-7 (and A-4) — `act-ii-story` merged into local `main` as 9e151bc, which also brings A-4's Farcall Array (fe7ef51); branch and worktree removed — `npm test` green on the merged commit, run in a clean checkout — push `main`, restart the server, read the Act II lines, play from b1. A-4's own task block still shows `todo`, because its session couldn't write here.
 - 2026-10-15 — DEC-1b, DEC-10 — the Act III story bible and beat sheet decided with the user (the Synths' quarantine, quests c1–c12, the cage-or-shield choice, Foundrywright Isa Brannock). Spec committed as 82373cc. The user chose tech first, so P-1 and P-2 are planned next — no code changed — none.
+- 2026-10-15 — P-1, P-2 — routes along the roads, events that lead something along them, and the Synth war-walker (couplings, escort, overrun on arrival, turns back if abandoned or stuck), with models, codex entries, the tracker and docs, on branch `p-walker` (478fb94..e6fcce4, with the final review's fixes). `npm test` green on a clean checkout — restart the server on 8080 after merging. Walkers come only from quests or the console until P-4.
+- 2026-10-15 — B-1 — Act III's opening: Ironreach (Isa Brannock, smokestacks) and quests c1–c5 (The Highland Road, Iron Footsteps, The Walker, Words from the Stone, What the Voice Wants), with moments, flags and the journal. On branch `act-iii` (on `p-walker`), 1e518df..872bd86, with a fresh review's fixes. `npm test` green on a clean checkout — read the lines; merge `p-walker` first, then `act-iii`; restart the server on 8080.
+- 2026-10-16 — B-2 — the Fallen Titan, the Salvage Rig and Brannock's Yard, and quests c6–c7 (The Fallen Titan, Reading the Core), with moments and `titan_core_taken`; a fresh review's fixes (gated defences, the rig beyond the Titan). On branch `act-iii`, e02e275..68c16c2. `npm test` green on a clean checkout — read the c6–c7 lines; merge `p-walker`, then `act-iii`; restart the server on 8080.
+- 2026-10-16 — B-3 — the Foundry Below (a Synth dungeon past Ironreach, sealed until the Titan's core is taken; Forge-Overseer boss), its hatch, quest c8, `foundry_below_cleared` and Down the Line; a fresh review's fixes. On branch `act-iii`, 66ffc11..89529fe. `npm test` green on a clean checkout — read the c8 lines; G-2's twist is still to come.
+- 2026-10-16 — P-1, P-2, B-1, B-2, B-3 — merged into local `main` as aeb5bb3 (`act-iii`, which carries `p-walker`'s commits), at the user's word. Merged in a separate worktree on top of main's scenery-kit commits (87a24ee) with no conflicts; `npm test` green on the merged tree. `main` was fast-forwarded with the main checkout's uncommitted work left in place (the user's WorldEvents.js hunk set aside and restored). Not pushed — restart the server on 8080; read the c1–c8 lines; playtest Act III so far. The tasks stay in `review` until then.
 ---
 
 ## 12. Backlog and open questions

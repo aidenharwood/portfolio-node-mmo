@@ -1,5 +1,6 @@
 import { VILLAGE_OBJECTS } from '../rpg/sidequests.js';
-import { plotOf } from './plots.js';
+import { plotOf, plotFrom } from './plots.js';
+import { streetPlan } from './streets.js';
 
 // Settlements of every size: hamlets, villages (the kits in world/Gen.js SETTLEMENTS), towns and
 // the four story cities. With the world generator (world/Gen.js) this decides where each place's
@@ -127,7 +128,7 @@ export const campsitePlot = (p) => plotOf(p, { R: p.r, shapes: 'campsite', inner
 // inside the ground the generator keeps clear round it, its radius + 12.)
 export const townPlot = (p) => plotOf(p, { R: p.r + 10, shapes: 'town', inner: TOWN.house + 2 });
 // (A city's wall: a many-sided ring of straight runs, just outside where its round wall stood.)
-export const cityPlot = (p) => plotOf(p, { R: p.wall + 6, shapes: { blob: 1 }, inner: p.wall + 1 });
+export const cityPlot = (p) => plotOf({ id: p.cityId ?? p.id, seed: p.seed }, { R: p.wall + 6, shapes: { blob: 1 }, inner: p.wall + 1 });
 export const hubPlot = (hub) => plotOf({ id: 'hub', seed: 0x5eed }, { R: hub.radius + 4, shapes: 'town', inner: hub.radius - 6 });
 
 // ---------------------------------------------------------------- campsites
@@ -184,25 +185,76 @@ export function dressVillage(place, rng) {
 // door; houses on the outer ring, walls round it all, gates where the roads come in. Townsfolk
 // stand about the ring street. `streets`: the bearings the roads leave by.
 export const TOWN = { stall: 6.4, board: 6.8, door: 10, service: 15, street: 19.5, house: 25 };
+// A town's street plan (world/streets.js): its streets, plaza and lots, on its plot.
+const plans = new Map();
+export function townPlan(place) {
+  let plan = plans.get(place.id);
+  if (!plan) {
+    if (plans.size > 400) plans.clear();
+    plans.set(place.id, (plan = streetPlan({ plot: townPlot(place), seed: place.seed ?? 1 })));
+  }
+  return plan;
+}
+
+// One of a place's folk at local (lx, lz), facing bearing `facing`.
+function folkAt(place, rng, n, role, lx, lz, facing, extra = {}) {
+  return { id: `n:${place.key}:${place.tag}${n}`, place: place.id, role, x: place.x + lx, z: place.z + lz, facing, seed: Math.floor(rng() * 1e9), ...extra };
+}
+
+// The services' lots: those fronting the plaza that no road comes in across, the rest after.
+function serviceLots(plan, streets, n) {
+  const off = (l) => Math.min(Math.PI, ...streets.map((a) => Math.abs(Math.atan2(Math.sin(Math.atan2(l.x, l.z) - a), Math.cos(Math.atan2(l.x, l.z) - a)))));
+  const order = [...plan.plazaLots].sort((p, q) => off(q) - off(p));
+  const rest = plan.lots.filter((l) => l.kind === 'street').sort((p, q) => Math.hypot(p.x, p.z) - Math.hypot(q.x, q.z));
+  return [...order, ...rest].slice(0, n);
+}
+
 export function planTown(place, rng, streets) {
   place.tag = 't';
   place.streets = streets;
-  const [inn, workshop, post, market, board] = spread(between(streets, 5, 0.5), 0.75);
-  place.services = { inn, workshop, post, market, board };
+  const plan = townPlan(place);
+  // The inn, the workshop and the Warden post on the plaza, each its keeper at the door.
+  const [inn, workshop, post] = serviceLots(plan, streets, 3);
+  const P = plan.plaza;
+  const side = (u, v) => plan.fromUV(u, v);
+  const lot = (l) => ({ x: l.x, z: l.z, ry: l.ry, wd: l.wd, dp: l.dp });
+  // The market: the gunsmith's and the armourer's stalls along the side of the plaza away from the
+  // workshop, facing in; the quest board at one corner of it.
+  const [wu, wv] = plan.toUV(workshop.x, workshop.z);
+  const mside = Math.abs(wu) > Math.abs(wv) ? ['u', -Math.sign(wu)] : ['v', -Math.sign(wv)];
+  const inward = (d) => {
+    const [x, z] = mside[0] === 'u' ? plan.fromUV(-mside[1], 0) : plan.fromUV(0, -mside[1]);
+    return Math.atan2(x, z) + d;
+  };
+  const edgeAt = (along, inset) => (mside[0] === 'u' ? side(mside[1] * (P.hu - inset), along) : side(along, mside[1] * (P.hv - inset)));
+  const [t1x, t1z] = edgeAt(-5.2, 3.6);
+  const [t2x, t2z] = edgeAt(5.2, 3.6);
+  const [bx, bz] = edgeAt(-P.hu + 2.2, 1.6);
+  place.services = { inn: lot(inn), workshop: lot(workshop), post: lot(post) };
+  const door = (l) => plan.front(l, 1.1);
   const n = [
-    folk(place, rng, 0, 'innkeeper', inn, TOWN.door),
-    folk(place, rng, 1, 'smith', workshop, TOWN.door),
-    folk(place, rng, 2, 'warden', post, TOWN.door),
-    folk(place, rng, 3, 'trader', market - 0.36, TOWN.stall, { stock: 'weapons' }),
-    folk(place, rng, 4, 'trader', market + 0.36, TOWN.stall, { stock: 'armor' }),
-    folk(place, rng, 5, 'board', board, TOWN.board),
+    folkAt(place, rng, 0, 'innkeeper', ...door(inn), inn.ry),
+    folkAt(place, rng, 1, 'smith', ...door(workshop), workshop.ry),
+    folkAt(place, rng, 2, 'warden', ...door(post), post.ry),
+    folkAt(place, rng, 3, 'trader', t1x, t1z, inward(0), { stock: 'weapons' }),
+    folkAt(place, rng, 4, 'trader', t2x, t2z, inward(0), { stock: 'armor' }),
+    folkAt(place, rng, 5, 'board', bx, bz, inward(0.5)),
   ];
+  // Townsfolk about the streets (the same draws as ever, so nothing after them moves).
   const k = 4 + Math.floor(rng() * 4);
-  between(streets, k, 0.3).forEach((a, i) => n.push(folk(place, rng, 6 + i, 'flavor', a + (rng() - 0.5) * 0.15, TOWN.street + (rng() - 0.5) * 1.2)));
+  const ways = plan.streets.length ? plan.streets : [{ dir: 'u', o: 0, u0: -P.hu, u1: P.hu, v0: -1, v1: 1 }];
+  for (let i = 0; i < k; i++) {
+    const s = ways[i % ways.length];
+    // (Out along the street, either end, rather than in the plaza.)
+    const t = i % 2 ? 0.6 + rng() * 0.33 : 0.07 + rng() * 0.33;
+    const off = (rng() - 0.5) * 2.4;
+    const [x, z] = plan.along(s, t, off);
+    n.push(folkAt(place, rng, 6 + i, 'flavor', x, z, s.dir === 'u' ? plan.axis + (i % 2 ? 0 : Math.PI) : plan.axis + Math.PI / 2 + (i % 2 ? 0 : Math.PI)));
+  }
   // The Wardens' waygate on the plaza, before the workshop: the way down into the dungeons, as a
   // private run (gameplay phase 5). (Placed without drawing from `rng`, so nothing after it moves.)
-  const [gx, gz] = polar(workshop, 7.4);
-  n.push({ id: `n:${place.key}:t20`, place: place.id, role: 'gate', gate: 'dungeon', x: place.x + gx, z: place.z + gz, facing: workshop + Math.PI, seed: 0 });
+  const [gx, gz] = plan.front(workshop, 4.2);
+  n.push({ id: `n:${place.key}:t20`, place: place.id, role: 'gate', gate: 'dungeon', x: place.x + gx, z: place.z + gz, facing: workshop.ry, seed: 0 });
   place.npcs = n;
 }
 
@@ -214,56 +266,147 @@ export function planTown(place, rng, streets) {
 // city is built a district at a time as it streams in.
 export const DISTRICTS = ['market', 'crafts', 'homes', 'gates'];
 export const DISTRICT_TITLE = { market: 'Market', crafts: 'Crafts Quarter', homes: 'Homes', gates: 'Gate Yard' };
-export const CITY = { board: 7.5, door: 13.5, hall: 19.5, folk: 11 };
+export const CITY = { board: 7.5, door: 13.5, hall: 19.5, folk: 11, heart: 22.5, block: 18 };
+
+// A city's grid: its avenues run along and across the axis of its walls' plot (world/plots.js),
+// from wall to wall; its heart is a square round the waystone where they cross, and its four
+// districts squares out along them, each laid out on a street plan of its own aligned to the same
+// grid (the avenue its main street); the quarters between hold the terraces backed on the walls.
+const square = (cx, cz, half, axis) => {
+  const s = Math.sin(axis);
+  const c = Math.cos(axis);
+  return [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([u, v]) => [cx + (u * s + v * c) * half, cz + (u * c - v * s) * half]);
+};
+export const cityAxis = (place) => cityPlot(place).rot;
+export const cityHeartPlot = (place) => plotFrom(square(0, 0, CITY.heart, cityAxis(place)));
+export const districtPlot = (d) => plotFrom(square(0, 0, CITY.block, d.axis));
+const cityPlans = new Map();
+const planned = (key, make) => {
+  let plan = cityPlans.get(key);
+  if (!plan) {
+    if (cityPlans.size > 400) cityPlans.clear();
+    cityPlans.set(key, (plan = make()));
+  }
+  return plan;
+};
+// The heart's plan: the plaza, the citadel's and the inn's great lots on it, halls round it.
+export const cityHeartPlan = (place) => planned(place.id, () => streetPlan({ plot: cityHeartPlot(place), axis: cityAxis(place), seed: place.seed ?? 1, plaza: 9, service: [14, 9], lot: [9, 7.5], edge: false, margin: 0.8 }));
+// A district's: its square, with lots round it and down its lanes.
+// (Its square sized to its use — the market's for stalls, the homes' a green, the gate yard's wide
+// for its two great gates — and only the crafts quarter's with a great lot on it, for its workshop.)
+const DISTRICT_SQUARE = { market: 7, crafts: 7, homes: 5, gates: 8.5 };
+export const districtPlan = (d) => planned(d.id, () => streetPlan({
+  plot: districtPlot(d), axis: d.axis, seed: d.seed ?? 1, plaza: DISTRICT_SQUARE[d.kind] ?? 6, street: 5, service: [11.5, 8], lot: [7.2, 6.5],
+  edge: true, cross: false, plazaRow: d.kind === 'crafts',
+}));
+// The terraces backed against a city's walls, and nothing else (its wall's plot: edge lots only).
+export const cityWallPlan = (place) => planned(`${place.cityId ?? place.id}|wall`, () => streetPlan({ plot: cityPlot(place), axis: cityAxis(place), seed: place.seed ?? 1, streets: false, plaza: 0, lot: [9, 7.5] }));
+
+// A city's avenues (local outlines, for paving): along and across its axis, from wall to wall,
+// `w` wide.
+export function cityAvenues(place, w = 8) {
+  const axis = cityAxis(place);
+  const s = Math.sin(axis);
+  const c = Math.cos(axis);
+  const L = place.wall - 3;
+  const quad = (u0, u1, v0, v1) => [[u0, v0], [u1, v0], [u1, v1], [u0, v1]].map(([u, v]) => [u * s + v * c, u * c - v * s]);
+  return [quad(-L, L, -w / 2, w / 2), quad(-w / 2, w / 2, -L, L)];
+}
+
 export function planCity(place, rng, streets) {
   place.tag = 'c';
   place.streets = streets;
   const S = SIZES.city;
-  const [citadel, inn, board, war] = spread(between(streets, 4, 0.42), 0.9);
-  place.services = { citadel, inn, board, war };
+  const axis = cityAxis(place);
+  const heart = cityHeartPlan(place);
+  // The citadel and the inn on the plaza, the High Warden and the innkeeper at their doors; the
+  // board and the war table on the plaza between them.
+  const [citadel, inn] = serviceLots(heart, [], 2);
+  place.services = { citadel: { x: citadel.x, z: citadel.z, ry: citadel.ry, wd: citadel.wd, dp: citadel.dp }, inn: { x: inn.x, z: inn.z, ry: inn.ry, wd: inn.wd, dp: inn.dp } };
+  const door = (l, out = 1.4) => heart.front(l, out);
+  const P = heart.plaza;
+  const [cu, cv] = heart.toUV(citadel.x, citadel.z);
+  // Across the plaza from the citadel's side, the board and the war table, facing it.
+  const back = Math.abs(cu) > Math.abs(cv) ? (t) => heart.fromUV(-Math.sign(cu) * (P.hu - 2.5), t) : (t) => heart.fromUV(t, -Math.sign(cv) * (P.hv - 2.5));
+  const toward = (x, z) => Math.atan2(citadel.x - x, citadel.z - z);
+  const [bx, bz] = back(-4.5);
+  const [wx, wz] = back(4.5);
   place.npcs = [
-    folk(place, rng, 0, 'warden', citadel, CITY.door, { name: HIGH_WARDENS[place.act - 1] }),
-    folk(place, rng, 1, 'innkeeper', inn, CITY.door),
-    folk(place, rng, 2, 'board', board, CITY.board),
-    folk(place, rng, 3, 'warroom', war, CITY.board),
-    ...between(streets, 3, 0.3).map((a, i) => folk(place, rng, 4 + i, 'flavor', a + 0.45, CITY.folk + rng() * 1.5)),
+    folkAt(place, rng, 0, 'warden', ...door(citadel), citadel.ry, { name: HIGH_WARDENS[place.act - 1] }),
+    folkAt(place, rng, 1, 'innkeeper', ...door(inn), inn.ry),
+    folkAt(place, rng, 2, 'board', bx, bz, toward(bx, bz)),
+    folkAt(place, rng, 3, 'warroom', wx, wz, toward(wx, wz)),
   ];
+  // Townsfolk about the heart's streets (the same draws as ever).
+  for (let i = 0; i < 3; i++) {
+    const s = heart.streets[i % Math.max(1, heart.streets.length)];
+    const t = rng();
+    const [x, z] = s ? heart.along(s, i % 2 ? 0.8 + t * 0.15 : 0.05 + t * 0.15, 1.5) : [0, 0];
+    place.npcs.push(folkAt(place, rng, 4 + i, 'flavor', x, z, axis + (i % 2 ? 0 : Math.PI)));
+  }
   // Farcall's captain of the watch (Act II; world/story.js STORY_FOLK), by the citadel door. Set
   // without a draw from `rng`, so the districts after keep the layouts they had.
+  const [sx, sz] = heart.front(citadel, 1.4);
+  const along = [Math.cos(citadel.ry) * 2.2, -Math.sin(citadel.ry) * 2.2];
   if (place.act === 2) {
-    const [lx, lz] = polar(citadel + 0.35, CITY.door);
-    place.npcs.push({ id: `n:${place.key}:${place.tag}7`, place: place.id, role: 'story', folk: 'captain', x: place.x + lx, z: place.z + lz, facing: citadel + 0.35 + Math.PI, seed: 0x0ce7a });
+    place.npcs.push({ id: `n:${place.key}:${place.tag}7`, place: place.id, role: 'story', folk: 'captain', x: place.x + sx + along[0], z: place.z + sz + along[1], facing: citadel.ry, seed: 0x0ce7a });
   }
   // Ironreach's foundrywright (Act III), on the same terms by the same door.
   if (place.act === 3) {
-    const [lx, lz] = polar(citadel + 0.35, CITY.door);
-    place.npcs.push({ id: `n:${place.key}:${place.tag}7`, place: place.id, role: 'story', folk: 'engineer', x: place.x + lx, z: place.z + lz, facing: citadel + 0.35 + Math.PI, seed: 0x15a3b });
+    place.npcs.push({ id: `n:${place.key}:${place.tag}7`, place: place.id, role: 'story', folk: 'engineer', x: place.x + sx + along[0], z: place.z + sz + along[1], facing: citadel.ry, seed: 0x15a3b });
   }
-  // Districts between the roads, kept from overlapping (each spans ~0.85 radians of the ring).
-  const at = spread(between(streets, DISTRICTS.length, 0.5), 2 * Math.asin(S.district / S.ring) + 0.06);
+  // The districts out along the avenues, each facing the heart.
+  const at = DISTRICTS.map((_, k) => axis + (k * Math.PI) / 2);
   place.quarters = at;
   return DISTRICTS.map((kind, k) => {
     const [lx, lz] = polar(at[k], S.ring);
     const d = {
       type: 'district', id: `d:${place.key}:${k}`, kind, city: place.id, name: `${place.name} ${DISTRICT_TITLE[kind]}`, cityName: place.name,
-      x: place.x + lx, z: place.z + lz, r: S.district, rot: at[k] + Math.PI, key: place.key, tag: `d${k}.`, level: place.level, h: place.h,
+      x: place.x + lx, z: place.z + lz, r: S.district, rot: at[k] + Math.PI, axis, key: place.key, tag: `d${k}.`, level: place.level, h: place.h,
       seed: Math.floor(rng() * 1e9),
     };
+    const plan = districtPlan(d);
+    const Q = plan.plaza;
+    // Its square's sides in the plan's frame: the one toward the heart and the one away from it.
+    const [hu, hv] = plan.toUV(-lx, -lz);
+    const away = Math.abs(hu) > Math.abs(hv) ? [-Math.sign(hu), 0] : [0, -Math.sign(hv)];
+    const side = (o, t, inset) => (away[0] ? plan.fromUV(away[0] * (Q.hu - inset), t + o) : plan.fromUV(t + o, away[1] * (Q.hv - inset)));
+    const facingIn = (x, z) => Math.atan2(-x, -z);
     const out = [];
-    // One at a time: each takes the next id.
-    const add = (role, la, ld, extra) => out.push(folk(d, rng, out.length, role, d.rot + la, ld, extra));
+    let n = 0;
+    const add = (role, x, z, facing, extra) => out.push(folkAt(d, rng, n++, role, x, z, facing, extra));
     if (kind === 'market') {
-      add('trader', -0.55, 6.5, { stock: 'weapons' });
-      add('trader', 0.55, 6.5, { stock: 'armor' });
-      add('trader', Math.PI, 6.5, { stock: 'all' });
-    } else if (kind === 'crafts') add('smith', Math.PI, 7);
-    else if (kind === 'gates') {
-      add('gate', Math.PI - 0.68, 10, { gate: 'dungeon' });
-      add('gate', Math.PI + 0.68, 10, { gate: 'raid' });
+      // Three stalls round the square, their traders facing in.
+      for (const [o, stock] of [[-4, 'weapons'], [4, 'armor']]) {
+        const [x, z] = side(o, 0, 3);
+        add('trader', x, z, facingIn(x, z), { stock });
+      }
+      // The third on a side square to theirs.
+      const [x, z] = away[0] ? plan.fromUV(0, Q.hv - 3) : plan.fromUV(Q.hu - 3, 0);
+      add('trader', x, z, facingIn(x, z), { stock: 'all' });
+    } else if (kind === 'crafts') {
+      // The great workshop at the back of the square, the smith at its door.
+      const lot = [...plan.plazaLots].sort((p, q) => Math.hypot(p.x - side(0, 0, -6)[0], p.z - side(0, 0, -6)[1]) - Math.hypot(q.x - side(0, 0, -6)[0], q.z - side(0, 0, -6)[1]))[0];
+      d.services = { workshop: lot ? { x: lot.x, z: lot.z, ry: lot.ry, wd: lot.wd, dp: lot.dp } : null };
+      const [x, z] = lot ? plan.front(lot, 1.2) : side(0, 0, 2);
+      add('smith', x, z, lot ? lot.ry : facingIn(x, z));
+    } else if (kind === 'gates') {
+      // The sealed gates at the back of the square, facing in.
+      // (On the square's two sides off its street, facing each other across it.)
+      for (const [s, gate] of [[-1, 'dungeon'], [1, 'raid']]) {
+        const [x, z] = plan.fromUV(0, s * (Q.hv - 1.2));
+        add('gate', x, z, facingIn(x, z), { gate });
+      }
     }
-    // Folk about the square's sides (its back holds the workshop, or the gates).
-    const sides = kind === 'homes' ? [1.4, -1.4, 2.4, -2.4] : [1.45, -1.45];
-    for (const la of sides) add('flavor', la + (rng() - 0.5) * 0.2, 8.5 + rng() * 1.5);
+    // Folk about the square's sides and lanes (the same draws as ever).
+    const sides = kind === 'homes' ? 4 : 2;
+    for (let i = 0; i < sides; i++) {
+      const s = plan.streets[i % Math.max(1, plan.streets.length)];
+      const t = rng();
+      const o = (rng() - 0.5) * 2;
+      const [x, z] = s ? plan.along(s, i % 2 ? 0.75 + t * 0.2 : 0.05 + t * 0.2, o) : side(0, 0, 3);
+      add('flavor', x, z, Math.atan2(-x, -z));
+    }
     d.npcs = out;
     return d;
   });

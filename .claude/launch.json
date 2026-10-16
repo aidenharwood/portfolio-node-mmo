@@ -4,14 +4,47 @@
     {
       "name": "game",
       "runtimeExecutable": "python",
-      "runtimeArgs": ["serve.py", "5173"],
+      "runtimeArgs": [
+        "serve.py",
+        "5173"
+      ],
       "port": 5173
+    },
+    {
+      "name": "game-alt",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-c",
+        "import os,sys,runpy; sys.argv=['serve.py',os.environ.get('PORT','5176')]; runpy.run_path('serve.py', run_name='__main__')"
+      ],
+      "port": 5176
     },
     {
       "name": "game-walker",
       "runtimeExecutable": "python",
-      "runtimeArgs": ["-c", "import os,sys,runpy; os.chdir('../portfolio-node-mmo-walker'); sys.argv=['serve.py',os.environ.get('PORT','5174')]; runpy.run_path('serve.py', run_name='__main__')"],
+      "runtimeArgs": [
+        "-c",
+        "import os,sys,runpy; os.chdir('../portfolio-node-mmo-walker'); sys.argv=['serve.py',os.environ.get('PORT','5174')]; runpy.run_path('serve.py', run_name='__main__')"
+      ],
       "port": 5174
+    },
+    {
+      "name": "game-act3",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-c",
+        "import os,sys,runpy; os.chdir('../portfolio-node-mmo-act3'); sys.argv=['serve.py',os.environ.get('PORT','5177')]; runpy.run_path('serve.py', run_name='__main__')"
+      ],
+      "port": 5177
+    },
+    {
+      "name": "game-fixes",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-c",
+        "import os,sys,runpy; os.chdir('../portfolio-node-mmo-fixes'); sys.argv=['serve.py',os.environ.get('PORT','5178')]; runpy.run_path('serve.py', run_name='__main__')"
+      ],
+      "port": 5178
     }
   ]
 }

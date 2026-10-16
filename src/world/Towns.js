@@ -7,7 +7,7 @@
 import * as THREE from 'three';
 import { piece, flatten, G, shade } from '../render/ModelKit.js';
 import { C, HEARTH, FORGE, LAMP, CARGO, RUNE } from './palette.js';
-import { TOWN, CITY, HUB_RING, SIZES, townPlot, cityPlot, hubPlot, campsitePlot } from './places.js';
+import { TOWN, CITY, HUB_RING, SIZES, townPlot, townPlan, cityPlot, cityAxis, cityHeartPlan, cityWallPlan, districtPlan, hubPlot, campsitePlot } from './places.js';
 import { plotOf } from './plots.js';
 import { prop } from './scenery/props.js';
 import { mulberry32 } from '../core/rng.js';
@@ -76,8 +76,9 @@ function site(w, p, reach) {
       return h;
     },
     col: (x, z, r, h, base = null) => w.addCollider(x, z, r, h, base === null ? w.groundHeight(x, z) : y0 + base),
-    // Is a round footprint at (x, z) clear of the roads?
-    clear: (x, z, r) => lines.every((s) => segDist(x, z, s) > r + 1.8),
+    // Is a round footprint at (x, z) clear of the roads? (`keep`, where set: the roads that still
+    // run here — a walled town's give way to its streets inside its walls.)
+    clear(x, z, r) { return (this.keep ?? lines).every((s) => segDist(x, z, s) > r + 1.8); },
   };
 }
 
@@ -245,9 +246,14 @@ function plotCrossings(f, plot, merge) {
 // A wall round a place along its plot's outline (world/plots.js): straight runs of panel on a
 // footing with a glowing band along each side, a tower at every corner and every so often along a
 // long side, and a gate — two towers and a beam over the road — wherever a road comes through.
-function plotWall(f, plot, { ht = 3.2, thick = 0.8, gate = 4.8, tower = 1.8, every = 9, color = C.stone, cap = C.stoneDark, band = HEARTH, roof = C.metalDark, masts = false, stacks = false }) {
+// `ways`: more gates, where streets (local points on the outline) run out to it.
+function plotWall(f, plot, { ht = 3.2, thick = 0.8, gate = 4.8, tower = 1.8, every = 9, color = C.stone, cap = C.stoneDark, band = HEARTH, roof = C.metalDark, masts = false, stacks = false, ways = [] }) {
   const P = plot.perimeter;
   const gates = plotCrossings(f, plot, gate + tower * 2);
+  for (const [x, z] of ways) {
+    const t = plot.tOf(Math.atan2(x, z));
+    if (!gates.some((g) => Math.min(Math.abs(g - t), 1 - Math.abs(g - t)) * P < gate + tower * 2)) gates.push(t);
+  }
   const half = (gate / 2 + tower / 2) / P;
   const near = (t, w) => gates.some((g) => Math.min(Math.abs(g - t), 1 - Math.abs(g - t)) < w);
   const world = (q) => [f.p.x + q.x, f.p.z + q.z];
@@ -788,40 +794,104 @@ function lampRing(f, d, step = 0.62) {
 }
 
 // Market stalls behind the place's traders.
+// (Each stall `out` metres behind its trader, facing the way they face.)
 function stalls(f, out = 2) {
   for (const n of f.p.npcs) {
     if (n.role !== 'trader') continue;
-    const a = bearingOf(f.p, n);
-    const d = Math.hypot(n.x - f.p.x, n.z - f.p.z) + out;
-    const [x, z] = f.at(a, d);
-    stall(f.put(x, z, a + Math.PI), CLOTH[Math.floor(f.rnd() * CLOTH.length)], n.stock ?? 'all');
+    const x = n.x - Math.sin(n.facing) * out;
+    const z = n.z - Math.cos(n.facing) * out;
+    stall(f.put(x, z, n.facing), CLOTH[Math.floor(f.rnd() * CLOTH.length)], n.stock ?? 'all');
     f.col(x, z, 1.45, 1.1);
   }
 }
 
 // A walled town round its waystone: the market and the board on the plaza, the inn, the workshop
 // and the Warden post on the inner ring, houses round the ring street, walls and gates.
+// Houses on a street plan's lots (world/streets.js), each facing its street (or the plaza, or in
+// from the wall), wherever the roads, the folk and the doors already there leave room. `skip`:
+// lots taken already. Returns how many it built.
+function houseLots(f, st, plan, { skip = new Set(), storeys = 0.3, flat = false, big = 1, kit = st.kit } = {}) {
+  const { rnd } = f;
+  const pick = (list) => list[Math.floor(rnd() * list.length)];
+  let n = 0;
+  for (const l of plan.lots) {
+    if (skip.has(l)) continue;
+    const x = f.p.x + l.x;
+    const z = f.p.z + l.z;
+    const wd = Math.max(4.4, (l.wd - 1.2) * big);
+    const dp = Math.max(4, (l.dp - 1.4) * big);
+    const r = Math.hypot(wd, dp) / 2;
+    if (!f.clear(x, z, r * 0.8) || nearFolk(f.p, x, z, r + 0.6)) continue;
+    if (f.doorsteps?.some((s) => inFootprint(s, x, z, l.ry, wd / 2 + 0.6, dp / 2 + 0.6))) continue;
+    const cols = building(f.put(x, z, l.ry), {
+      wd, dp, ht: 3, storeys: rnd() < storeys ? 2 : 1, wall: pick(st.walls), roof: pick(st.roofs), trim: st.trim, flat: flat !== (rnd() < 0.12),
+      chimney: rnd() < 0.4, antenna: rnd() < 0.2, awning: rnd() < 0.15 ? pick(CLOTH) : null, style: kit,
+    });
+    bodyCols(f.w, x, z, l.ry, cols);
+    f.doorsteps?.push(stepAt(x, z, l.ry, wd > 4.5 ? -wd * 0.22 : 0, dp / 2 + 1.1));
+    n++;
+  }
+  return n;
+}
+
+// Lamps down both sides of a plan's main streets, every so many metres, off the doors and folk.
+function streetLamps(f, plan, every = 11) {
+  for (const s of plan.streets.filter((q) => q.main)) {
+    const len = s.dir === 'u' ? s.u1 - s.u0 : s.v1 - s.v0;
+    const n = Math.max(1, Math.floor(len / every));
+    for (let i = 0; i <= n; i++) {
+      for (const side of [-1, 1]) {
+        const [lx, lz] = plan.along(s, (i + (side > 0 ? 0.5 : 0)) / (n + 1), side * (s.w / 2 + 0.25));
+        const [x, z] = [f.p.x + lx, f.p.z + lz];
+        // (Not in the plaza: its own lamps stand at its corners.)
+        const [u, v] = plan.toUV(lx, lz);
+        if (Math.abs(u) < plan.plaza.hu && Math.abs(v) < plan.plaza.hv) continue;
+        if (f.clear(x, z, 0.3) && !nearFolk(f.p, x, z, 1.4) && !f.doorsteps.some(([sx, sz]) => Math.hypot(sx - x, sz - z) < 1.4)) lamp(f, x, z);
+      }
+    }
+  }
+  for (const [su, sv] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+    const [lx, lz] = plan.fromUV(su * (plan.plaza.hu - 0.6), sv * (plan.plaza.hv - 0.6));
+    const [x, z] = [f.p.x + lx, f.p.z + lz];
+    if (f.clear(x, z, 0.3) && !nearFolk(f.p, x, z, 1.4)) lamp(f, x, z, 3.4);
+  }
+}
+
+// A town (world/places.js planTown): on its street plan, the inn, the workshop and the Warden post
+// on the plaza, the market's stalls along one side of it and the waygate before the workshop;
+// houses down both sides of the streets and in a row backing onto the wall; a water tower and a
+// shed on lots of their own; lamps down the main streets; walls round its plot.
 export function buildTown(w, p) {
-  const R = p.r;
-  const f = site(w, p, R + 4);
+  const plan = townPlan(p);
+  const plot = townPlot(p);
+  const f = site(w, p, plot.R + 4);
+  // Inside its walls, its streets: the roads in run only to its gates.
+  f.keep = f.lines.filter(([ax, az, bx, bz]) => !(plot.inside(ax - p.x, az - p.z, 1) && plot.inside(bx - p.x, bz - p.z, 1)));
   const st = styleAt(w, p.x, p.z);
   const S = p.services;
   const flat = f.rnd() < st.flat;
+  const used = new Set();
+  const lotOf = (s) => plan.lots.find((l) => Math.abs(l.x - s.x) < 0.01 && Math.abs(l.z - s.z) < 0.01);
   for (const [key, make] of [['inn', inn], ['workshop', workshop], ['post', wardenPost]]) {
-    const a = S[key];
-    const [x, z] = f.at(a, TOWN.service);
-    const b = make(f.put(x, z, a + Math.PI), st);
-    bodyCols(w, x, z, a + Math.PI, b.cols);
-    f.doorsteps.push(stepAt(x, z, a + Math.PI, 0, b.cols[0].hz + 1.05));
+    const s = S[key];
+    const x = p.x + s.x;
+    const z = p.z + s.z;
+    const b = make(f.put(x, z, s.ry), st);
+    bodyCols(w, x, z, s.ry, b.cols);
+    f.doorsteps.push(stepAt(x, z, s.ry, 0, b.cols[0].hz + 1.05));
+    used.add(lotOf(s));
   }
   stalls(f);
   serviceProps(w, p, f);
-  // A few smaller things on the inner ring between the services: a water tower, a shed.
-  const busy = [S.inn, S.workshop, S.post, S.market, S.board].map((b) => [b, 0.62]);
-  for (let a = 0.2, k = 0; a < TAU && k < 3; a += 0.55) {
-    const [x, z] = f.at(a, TOWN.service);
-    if (busy.some(([b, hw]) => Math.abs(wrap(a - b)) < hw) || !f.clear(x, z, 2.6) || nearFolk(p, x, z, 3)) continue;
-    const h = f.put(x, z, a + Math.PI);
+  // A water tower and a shed, on lots of their own away from the plaza.
+  let k = 0;
+  for (const l of plan.lots) {
+    if (k >= 2 || used.has(l) || l.kind === 'plaza') continue;
+    const x = p.x + l.x;
+    const z = p.z + l.z;
+    if (!f.clear(x, z, 2.6) || nearFolk(p, x, z, 3)) continue;
+    used.add(l);
+    const h = f.put(x, z, l.ry);
     if (k++ % 2 === 0) {
       for (const [ox, oz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) piece(h, G.box(0.18, 4.5, 0.18), C.metalDark, { pos: [ox, 2.25, oz], outline: 0.012 });
       piece(h, G.cyl(1.5, 1.5, 2.2, 12), st.walls[2], { pos: [0, 5.6, 0], outline: 0.03 });
@@ -832,90 +902,124 @@ export function buildTown(w, p) {
       f.col(x, z, 2, 3);
     }
   }
-  houseRing(f, st, TOWN.house, { flat, plot: townPlot(p) });
-  lampRing(f, TOWN.street + 1.6);
-  for (const a of [0.5, 2.6, 4.7]) {
-    const [x, z] = f.at(a, 3.4);
-    if (f.clear(x, z, 0.2) && !nearFolk(p, x, z, 1.5)) lamp(f, x, z, 2.6);
-  }
-  plotWall(f, townPlot(p), { color: st.wall, cap: st.trim, roof: st.roofs[0] });
+  houseLots(f, st, plan, { skip: used, flat });
+  streetLamps(f, plan);
+  // Gates where the roads cross its walls, and where its main and cross streets run out to them.
+  const ways = plan.streets.filter((s) => s.main).flatMap((s) => [plan.along(s, 0), plan.along(s, 1)]);
+  plotWall(f, plot, { color: st.wall, cap: st.trim, roof: st.roofs[0], ways });
   flatten(f.g);
   w.finish(f.g);
 }
 
 // ---------------------------------------------------------------- cities
-// A city's heart: the plaza round its waystone (the board and the war table on it), the Warden
-// citadel and the inn on the hall ring with other great halls between, the city walls.
+// Roads give way to a city's own streets inside its walls (they run only to its gates).
+const keepRoads = (f, plot, p) => f.lines.filter(([ax, az, bx, bz]) => !(plot.inside(ax - p.x, az - p.z, 1) && plot.inside(bx - p.x, bz - p.z, 1)));
+
+// A city's heart (world/places.js planCity): its plaza where the avenues cross, the waystone on it
+// with the board and the war table, the Warden citadel and the inn on lots of their own facing
+// it, great halls down the avenues out of it, planters and lamps at its corners.
 export function buildCity(w, p) {
-  const f = site(w, p, CITY.hall + 12);
+  const plan = cityHeartPlan(p);
+  const f = site(w, p, CITY.heart * 1.5 + 12);
+  f.keep = keepRoads(f, cityPlot(p), p);
   const st = styleAt(w, p.x, p.z);
   const S = p.services;
-  const big = [['citadel', citadel], ['inn', (h) => inn(h, st, true)]];
-  for (const [key, make] of big) {
-    const a = S[key];
-    const [x, z] = f.at(a, CITY.hall);
-    const b = make(f.put(x, z, a + Math.PI));
-    bodyCols(w, x, z, a + Math.PI, b.cols);
+  const used = new Set();
+  for (const [key, make] of [['citadel', citadel], ['inn', (h) => inn(h, st, true)]]) {
+    const s = S[key];
+    const x = p.x + s.x;
+    const z = p.z + s.z;
+    const b = make(f.put(x, z, s.ry));
+    bodyCols(w, x, z, s.ry, b.cols);
+    f.doorsteps.push(stepAt(x, z, s.ry, 0, (b.cols[0]?.hz ?? 4) + 1.05));
+    used.add(plan.lots.find((l) => Math.abs(l.x - s.x) < 0.01 && Math.abs(l.z - s.z) < 0.01));
   }
   serviceProps(w, p, f);
-  // Planters and banners round the plaza.
-  for (let a = 0.15; a < TAU; a += TAU / 10) {
-    const [x, z] = f.at(a, 4.6);
-    if (!f.clear(x, z, 0.8) || nearFolk(p, x, z, 1.8)) continue;
-    const h = f.put(x, z, a);
+  // Planters at the plaza's corners.
+  for (const [su, sv] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+    const [lx, lz] = plan.fromUV(su * (plan.plaza.hu - 1.4), sv * (plan.plaza.hv - 1.4));
+    const [x, z] = [p.x + lx, p.z + lz];
+    if (nearFolk(p, x, z, 1.8)) continue;
+    const h = f.put(x, z, plan.axis);
     piece(h, G.box(1.4, 0.6, 1.4), C.stoneDark, { pos: [0, 0.3, 0], pattern: 'blocks', outline: 0.015 });
     piece(h, G.box(1.55, 0.1, 1.55), C.stone, { pos: [0, 0.62, 0], outline: 0.01 });
     piece(h, G.box(1.2, 0.06, 1.2), C.dirtDark, { pos: [0, 0.66, 0], outline: 0 });
     shrub(h, [0, 0.7, 0], { rng: seedOf(x, z) });
     f.col(x, z, 0.8, 1.2);
   }
-  houseRing(f, st, CITY.hall, { step: 0.62, skip: [[S.citadel, 0.75], [S.inn, 0.7]], storeys: 1, big: 1.35, flat: true, kit: 'city' });
-  lampRing(f, 26.5, 0.4);
+  houseLots(f, st, plan, { skip: used, storeys: 1, big: 1.1, flat: true, kit: 'city' });
+  streetLamps(f, plan, 9);
   flatten(f.g);
   w.finish(f.g);
 }
 
 // A city's walls, a point of interest of their own (so the city streams in a part at a time):
-// gates where the roads come through, terraces backed against them between the districts, and
-// trees along the boulevard.
+// gates where the roads come through and where the avenues run out to them, terraces backed
+// against them in the quarters between the avenues, and trees down both sides of the avenues.
 export function buildCityWall(w, p) {
+  const plot = cityPlot(p);
   const f = site(w, p, p.wall + 4);
+  f.keep = keepRoads(f, plot, p);
   const st = styleAt(w, p.x, p.z);
-  const half = Math.asin(SIZES.city.district / SIZES.city.ring);
-  const quarters = p.quarters ?? [];
-  houseRing(f, st, p.wall - 8, { step: 0.11, skip: quarters.map((b) => [b, half + 0.1]), storeys: 0.75, flat: true, kit: 'city' });
-  for (let a = 0.05; a < TAU; a += 0.16) {
-    if (quarters.some((b) => Math.abs(wrap(a - b)) < half + 0.05)) continue;
-    const [x, z] = f.at(a, 38 + (Math.round(a / 0.16) % 2) * 3);
-    if (!f.clear(x, z, 1.2)) continue;
-    townTree(f.put(x, z), [0, 0, 0], { s: 0.92, rng: seedOf(x, z) });
-    f.col(x, z, 0.35, 3);
+  const axis = cityAxis(p);
+  const toUV = (x, z) => [x * Math.sin(axis) + z * Math.cos(axis), x * Math.cos(axis) - z * Math.sin(axis)];
+  const fromUV = (u, v) => [u * Math.sin(axis) + v * Math.cos(axis), u * Math.cos(axis) - v * Math.sin(axis)];
+  // (Out of the avenues, the heart and the districts: the terraces keep to the quarters.)
+  const AV = 6;
+  const inQuarter = (lx, lz, r) => {
+    const [u, v] = toUV(lx, lz);
+    const D = SIZES.city.ring;
+    const inDistrict = (a, b) => Math.abs(b) < CITY.block + r + 1 && Math.abs(a) > D - CITY.block - r - 1 && Math.abs(a) < D + CITY.block + r + 1;
+    return Math.abs(u) > AV + r && Math.abs(v) > AV + r && Math.max(Math.abs(u), Math.abs(v)) > CITY.heart + r && !inDistrict(u, v) && !inDistrict(v, u);
+  };
+  const terraces = cityWallPlan(p);
+  const lots = terraces.lots.filter((l) => inQuarter(l.x, l.z, Math.hypot(l.wd, l.dp) / 2));
+  houseLots(f, st, { ...terraces, lots }, { storeys: 0.75, flat: true, kit: 'city' });
+  // Trees down both sides of the avenues, between the heart and the districts and out past them.
+  const L = p.wall - 6;
+  for (let u = CITY.heart + 3; u < L; u += 7) {
+    for (const [du, dv] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+      for (const turn of [0, 1]) {
+        const [a, b] = turn ? [dv * (AV - 0.8), du * u] : [du * u, dv * (AV - 0.8)];
+        const [lx, lz] = fromUV(a, b);
+        const [x, z] = [p.x + lx, p.z + lz];
+        // (Not in a district's square: its own street runs on there.)
+        if (Math.abs(turn ? b : a) > SIZES.city.ring - CITY.block - 1 && Math.abs(turn ? b : a) < SIZES.city.ring + CITY.block + 1) continue;
+        if (!plot.inside(lx, lz, 3) || !f.clear(x, z, 1)) continue;
+        townTree(f.put(x, z), [0, 0, 0], { s: 0.9, rng: seedOf(x, z) });
+        f.col(x, z, 0.35, 3);
+      }
+    }
   }
   // Farcall (Act II) is the city of signal masts, Ironreach (Act III) the foundry city: masts or
   // smokestacks stand on their wall towers.
-  plotWall(f, cityPlot(p), { ht: 5.6, thick: 1.4, gate: 6.4, tower: 3, every: 7, color: C.stone, cap: C.stoneDark, roof: st.roofs[0], masts: p.act === 2, stacks: p.act === 3 });
+  const ways = [[L + 3, 0], [-(L + 3), 0], [0, L + 3], [0, -(L + 3)]].map(([u, v]) => fromUV(u, v));
+  plotWall(f, plot, { ht: 5.6, thick: 1.4, gate: 6.4, tower: 3, every: 7, color: C.stone, cap: C.stoneDark, roof: st.roofs[0], masts: p.act === 2, stacks: p.act === 3, ways });
   flatten(f.g);
   w.finish(f.g);
 }
 
-// The districts round a city's heart, each built on its own (local +z faces the city's heart;
-// the side toward it opens on the boulevard).
+// The districts out along a city's avenues (local +z faces the city's heart), each built on its
+// own street plan (world/places.js districtPlan): its square on the avenue, rows of houses down
+// it and round the district's edge.
 function district(w, p) {
   const f = site(w, p, p.r + 4);
   f.st = styleAt(w, p.x, p.z);
-  f.front = [[p.rot, 0.75]];
+  f.plan = districtPlan(p);
+  const city = w.poiById?.(p.city);
+  if (city) f.keep = keepRoads(f, cityPlot(city), city);
+  f.used = new Set();
   return f;
 }
 function finishDistrict(w, f, ring = {}) {
-  houseRing(f, f.st, 16.5, { step: 0.5, skip: f.front, storeys: 0.6, ...ring });
-  houseRing(f, f.st, 22.5, { step: 0.38, skip: f.front, storeys: 0.6, ...ring });
-  lampRing(f, 10.5, 0.9);
+  houseLots(f, f.st, f.plan, { skip: f.used, storeys: 0.6, ...ring });
+  streetLamps(f, f.plan, 9);
   flatten(f.g);
   w.finish(f.g);
 }
 
 export const DISTRICT_BUILDERS = {
-  // The market: traders' stalls round a square with an obelisk, shops with awnings round that.
+  // The market: traders' stalls round a square with an obelisk, crates by them, shops round that.
   market(w, p) {
     const f = district(w, p);
     stalls(f);
@@ -924,8 +1028,10 @@ export const DISTRICT_BUILDERS = {
     piece(h, G.box(0.7, 4.2, 0.7), C.stone, { pos: [0, 2.6, 0], outline: 0.03 });
     piece(h, G.octa(0.4), RUNE, { pos: [0, 5.1, 0], scale: [1, 1.5, 1], glow: true, outline: 0.01 });
     f.col(p.x, p.z, 1, 4.6);
+    const Q = f.plan.plaza;
     for (let k = 0; k < 5; k++) {
-      const [x, z] = f.at(p.rot + 1.2 + k * 0.9, 4.2 + f.rnd() * 1.5);
+      const [lx, lz] = f.plan.fromUV((f.rnd() - 0.5) * 2 * (Q.hu - 1.2), (k % 2 ? 1 : -1) * (Q.hv - 1));
+      const [x, z] = [p.x + lx, p.z + lz];
       if (!nearFolk(p, x, z, 1.5)) {
         const c = f.put(x, z, f.rnd() * 3);
         piece(c, G.box(0.9, 0.9, 0.9), CARGO[k % CARGO.length], { pos: [0, 0.45, 0], outline: 0.015 });
@@ -935,49 +1041,55 @@ export const DISTRICT_BUILDERS = {
     finishDistrict(w, f, { storeys: 0.5 });
   },
 
-  // The crafts quarter: the great workshop behind the smith, forges and a crane.
+  // The crafts quarter: the great workshop on its square behind the smith, a crane by it.
   crafts(w, p) {
     const f = district(w, p);
-    const smith = p.npcs.find((n) => n.role === 'smith');
-    const a = smith ? bearingOf(p, smith) : p.rot + Math.PI;
-    const [x, z] = f.at(a, 12.5);
-    const b = workshop(f.put(x, z, a + Math.PI), f.st, true);
-    bodyCols(w, x, z, a + Math.PI, b.cols);
-    f.front.push([a, 0.55]);
-    const [cx, cz] = f.at(a + 1.2, 9);
-    if (!nearFolk(p, cx, cz, 2)) {
-      const c = f.put(cx, cz, a);
-      piece(c, G.box(0.6, 11, 0.6), 0xd9a227, { pos: [0, 5.5, 0], outline: 0.03 });
-      piece(c, G.box(0.4, 0.4, 7), 0xd9a227, { pos: [0, 10.8, 2.6], outline: 0.02 });
-      piece(c, G.cyl(0.03, 0.03, 4, 4), 0x2a2e36, { pos: [0, 8.6, 5.4], outline: 0 });
-      piece(c, G.box(1, 0.7, 1), C.metalDark, { pos: [0, 6.3, 5.4], outline: 0.02 });
-      f.col(cx, cz, 0.6, 11);
+    const s = p.services?.workshop;
+    if (s) {
+      const x = p.x + s.x;
+      const z = p.z + s.z;
+      const b = workshop(f.put(x, z, s.ry), f.st, true);
+      bodyCols(w, x, z, s.ry, b.cols);
+      f.used.add(f.plan.lots.find((l) => Math.abs(l.x - s.x) < 0.01 && Math.abs(l.z - s.z) < 0.01));
+      const [cx, cz] = [x + Math.cos(s.ry) * (s.wd / 2 + 2.5), z - Math.sin(s.ry) * (s.wd / 2 + 2.5)];
+      if (!nearFolk(p, cx, cz, 2) && f.clear(cx, cz, 1)) {
+        const c = f.put(cx, cz, s.ry);
+        piece(c, G.box(0.6, 11, 0.6), 0xd9a227, { pos: [0, 5.5, 0], outline: 0.03 });
+        piece(c, G.box(0.4, 0.4, 7), 0xd9a227, { pos: [0, 10.8, 2.6], outline: 0.02 });
+        piece(c, G.cyl(0.03, 0.03, 4, 4), 0x2a2e36, { pos: [0, 8.6, 5.4], outline: 0 });
+        piece(c, G.box(1, 0.7, 1), C.metalDark, { pos: [0, 6.3, 5.4], outline: 0.02 });
+        f.col(cx, cz, 0.6, 11);
+      }
     }
     finishDistrict(w, f, { flat: true });
   },
 
-  // The homes: tall houses round a green with a couple of trees.
+  // The homes: tall houses down the street and round a green with a couple of trees.
   homes(w, p) {
     const f = district(w, p);
-    for (const [la, d] of [[Math.PI * 0.5, 4], [-Math.PI * 0.6, 5]]) {
-      const [x, z] = f.at(p.rot + la, d);
+    const Q = f.plan.plaza;
+    for (const [su, sv] of [[1, 1], [-1, -1]]) {
+      const [lx, lz] = f.plan.fromUV(su * (Q.hu - 1.2), sv * (Q.hv - 1.2));
+      const [x, z] = [p.x + lx, p.z + lz];
       if (nearFolk(p, x, z, 2.2)) continue;
       townTree(f.put(x, z), [0, 0, 0], { s: 1.0, rng: seedOf(x, z) });
       f.col(x, z, 0.4, 3);
     }
-    const g = f.put(p.x, p.z);
-    piece(g, G.cyl(3.2, 3.2, 0.08, 18), 0x5f9e4c, { pos: [0, 0.04, 0], outline: 0 });
-    finishDistrict(w, f, { storeys: 0.85, step: 0.44 });
+    const g = f.put(p.x, p.z, f.plan.axis);
+    piece(g, G.box(Q.hv * 2 - 1, 0.08, Q.hu * 2 - 1), 0x5f9e4c, { pos: [0, 0.04, 0], outline: 0 });
+    finishDistrict(w, f, { storeys: 0.85 });
   },
 
-  // The gate yard: the sealed dungeon and raid gates (built with the services), braziers, and
-  // the guards' halls along the sides.
+  // The gate yard: the sealed dungeon and raid gates facing each other across its square (built
+  // with the services), braziers by them, the guards' halls down its street.
   gates(w, p) {
     const f = district(w, p);
     serviceProps(w, p, f);
-    for (const n of p.npcs) if (n.role === 'gate') f.front.push([bearingOf(p, n), 0.9]);
+    const Q = f.plan.plaza;
     for (const s of [-1, 1]) {
-      const [x, z] = f.at(p.rot + Math.PI + s * 1.5, 6);
+      const [lx, lz] = f.plan.fromUV(s * (Q.hu - 1), 0);
+      const [x, z] = [p.x + lx, p.z + lz];
+      if (nearFolk(p, x, z, 1.5)) continue;
       const b = f.put(x, z);
       piece(b, G.cyl(0.45, 0.3, 1.1, 8), C.metalDark, { pos: [0, 0.55, 0], outline: 0.015 });
       piece(b, G.cone(0.38, 0.9, 7), FORGE, { pos: [0, 1.5, 0], glow: true, outline: 0.01 });

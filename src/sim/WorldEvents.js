@@ -171,8 +171,12 @@ export class WorldEvents {
     if (PLACE_TYPES.has(poi.type)) {
       if (race === 'hive') return 'surge';
       if (race === 'scav') return 'siege';
-      return level >= DIRECTOR.spreadLevel && this.rng() < DIRECTOR.spread ? 'surge' : null;
+      return level >= DIRECTOR.spreadLevel &&
+        this.rng() < DIRECTOR.spread ? 'surge' : null;
     }
+
+    if (level >= 5 && this.rng() < 0.1) return 'walker';
+
     return level >= 5 ? 'anomaly' : null;
   }
 
