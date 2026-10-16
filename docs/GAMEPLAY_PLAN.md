@@ -125,7 +125,26 @@ Changes:
 - **Check:** `tools/powercurve.mjs` (the table above) becomes a test that fails if a level drifts outside its targets.
 
 ### 3.2 Hordes
-Camp size grows with region level:
+**Superseded for camps (2026-10-16, [the act lands and camps spec](superpowers/specs/2026-10-15-act-lands-and-camps-design.md)).**
+
+- **Act lands.** The world is cut into rings, one per act, with borders bent by noise and taken a whole region at a time:
+  - Act I: to about 1000 m, scavs and fauna only;
+  - Act II: to about 2000 m, mostly Hive;
+  - Act III: to about 3000 m, mostly Synths;
+  - Act IV: beyond, any faction.
+- **The soft wall.** Crossing into a later act's lands names them and their levels, in amber if you're under-levelled. Warden frontier posts stand where roads cross, the far side shows that act's colours, and the map draws the borders. Nothing blocks the way.
+- **Camps come in three tiers.** Each is laid out by `world/campLayout.js` and built from the faction's props (`world/scenery/props.js`):
+
+| Tier | Radius | Garrison | Spawners | Squad, every |
+|---|---|---|---|---|
+| Outpost | 10 m | 6–10 | 1 | 2–3, 30 s |
+| Camp | 18 m | 12–20 | 1–2 | 3–4, 25 s |
+| Base | 28 m | 25–40 | 2–3 | 4–6, 20 s |
+
+- **Strongholds** are bases with the race boss on a throne.
+- **Reinforcement waves.** While someone alive is near, squads come from the spawners until the camp reaches its target: the garrison, ×1.5 for two players and up to ×2.5 for four, capped per tier and at 600 alive across all camps. A cleared camp lulls for 30 s. Left alone for a minute, a camp fills again.
+
+The old table, for camps before the act lands (and still the size of an event's garrison):
 
 | Region level | Camp size | Elites | Champion |
 |---|---|---|---|

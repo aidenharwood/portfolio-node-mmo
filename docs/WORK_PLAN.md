@@ -943,6 +943,30 @@ Don't start these unless a trigger fires. Trigger: a layer's p95 tick time creep
 - Regions within a layer on worker threads.
 - External crash reporting.
 
+### W-1 Act lands and procedural camps
+- status: review
+- size: L
+- why: Synths turned up at level 4; camps emptied under a crowd and all looked alike.
+- spec: [2026-10-15-act-lands-and-camps-design.md](superpowers/specs/2026-10-15-act-lands-and-camps-design.md) · plan: [2026-10-15-act-lands-and-camps.md](superpowers/plans/2026-10-15-act-lands-and-camps.md)
+- acceptance:
+  - [x] No Hive before Act II and no Synths before Act III, on 5 seeds (`tools/campcheck.mjs`).
+  - [x] Every settled place keeps its position for a seed (campcheck fingerprints).
+  - [x] Tiered camps placed apart from each other and the roads, with room for their garrisons.
+  - [x] Layouts are deterministic and identical on the server and the screen; every piece kind has a builder.
+  - [x] Reinforcement waves: refill, crowd target, dead players, clearing with a crowd, quiet refill, story bosses, budget (campcheck).
+  - [x] Frontier posts at every road into a later act; act banner; map borders.
+  - [ ] (user) Playtest the Rustjaw Foundry: its garrison is base-tier now (25–40, was 10–14 guards).
+  - [ ] (user) F3 frame cost at a base: not measured (the browser pane was hidden).
+  - [ ] (user) Restart the server after merging.
+- notes:
+  - 2026-10-16: on branch `act-lands-camps` (worktree `../portfolio-node-mmo-camps`), with main merged in at bb3acd0 (the scenery props).
+  - **Load** (`tools/loadsim.mjs`, seed 12345, 60 s):
+    - 40 players: 2.80 → 3.49 ms a tick (peak 8.9 → 8.0).
+    - 100 players: 9.85 → 13.2 ms a tick (peak 22.6 → 27.6), over the 12.5 ms budget. The cost is the bigger garrisons; lowering the waves' cap didn't change it.
+  - **Client build of a base:** 50–70 ms. Baking about 1,550 prop meshes accounts for 46 ms of it. Caching baked prop variants was suggested to the scenery session.
+  - **Also fixed:** siege engines behind a wall never fired, because rooted enemies took a path (`EnemySim.wayTo`).
+  - **Known flake:** hordecheck's "Splitting" check fails about 1 run in 12, on main too.
+
 ---
 
 ## 10. Next up
