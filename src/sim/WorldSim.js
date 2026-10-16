@@ -281,7 +281,7 @@ export class Encounters {
     const L = this.layoutOf(def);
     let k = 0;
     return list.map((s) => {
-      const at = s.opts.boss ? (L.throne ?? L.posts[0]) : L.posts[k++ % Math.max(1, L.posts.length)] ?? { x: 0, z: 0 };
+      const at = (s.opts.boss ? L.throne ?? L.posts[0] : L.posts[k++ % Math.max(1, L.posts.length)]) ?? { x: 0, z: 0 };
       return { ...s, x: def.x + at.x, z: def.z + at.z, enemy: null, respawnAt: 0 };
     });
   }
@@ -347,14 +347,19 @@ export class Encounters {
           if (slot.enemy && !slot.enemy.alive) { slot.enemy = null; slot.respawnAt = Infinity; }
         }
         alive = camp.enemies.reduce((n, e) => n + (e.alive ? 1 : 0), 0);
-        if (alive === 0 && !camp.cleared) camp.lullUntil = time + LULL;
+        // Emptied (the first time or again): a breather before the next squad.
+        if (alive === 0 && !camp.empty) camp.lullUntil = time + LULL;
+        camp.empty = alive === 0;
         alive = this.updateWaves(camp, time, alive);
       }
+      // Cleared stays cleared (a quest's clear, a stronghold's bonus, once) until its garrison is
+      // back of itself — the squads cut down as they come don't make it a camp to clear again.
       if (alive === 0 && !camp.cleared) {
         camp.cleared = true;
+        camp.held = !camp.def.room;
         if (camp.def.room) this.sim.host.onRoomCleared?.(camp);
         else this.sim.host.onCampCleared?.(camp);
-      } else if (alive > 0 && camp.cleared) {
+      } else if (alive > 0 && camp.cleared && !camp.held) {
         camp.cleared = false;
         if (camp.def.room) this.sim.host.onRoomRestored?.(camp);
         else this.sim.host.onCampRestored?.(camp);
@@ -484,6 +489,7 @@ export class Encounters {
       if (time - camp.quietSince >= QUIET_REFILL) {
         for (const slot of camp.slots) if (!slot.enemy) { this.spawnSlot(camp, slot); alive++; }
         camp.quietSince = time;
+        camp.held = false;
       }
       return alive;
     }
@@ -522,7 +528,8 @@ export class Encounters {
     }
     for (const u of extra) {
       const post = L.posts[Math.floor(Math.random() * L.posts.length)] ?? { x: 0, z: 0 };
-      const e = this.sim.spawnEnemy(u.type, spot(), { level: def.level, camp, elite: u.opts.elite, variant: u.opts.variant, transient: true });
+      // (Not transient: a squad that finds nobody walks to its post and stays.)
+      const e = this.sim.spawnEnemy(u.type, spot(), { level: def.level, camp, elite: u.opts.elite, variant: u.opts.variant });
       e.home.set(def.x + post.x, e.home.y, def.z + post.z);
       camp.enemies.push(e);
       if (foe) e.aggro(true, foe);
@@ -542,7 +549,7 @@ export class Encounters {
 
   activate(camp, time) {
     camp.state = 'active';
-    for (const slot of camp.slots) if (time >= slot.respawnAt) this.spawnSlot(camp, slot);
+    for (const slot of camp.slots) if (time >= slot.respawnAt) { this.spawnSlot(camp, slot); camp.held = false; }
   }
 
   // `at`: somewhere else it comes in from (a squad's spawner); its post stays its home.

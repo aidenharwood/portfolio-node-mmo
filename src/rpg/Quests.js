@@ -738,6 +738,13 @@ export class QuestLog {
       for (const o of q.objectives ?? []) if (o.race && OLD_RACE[o.race]) o.race = OLD_RACE[o.race];
       this.defs.set(q.id, q);
     }
+    // Generated quests at a camp the world no longer has (camps were laid out anew with the act
+    // lands) can't be done, and would keep their giver from offering another: dropped.
+    if (this.world?.poiById) {
+      for (const q of d.generated ?? []) {
+        if ((q.objectives ?? []).some((o) => o.camp && !this.world.poiById(o.camp))) this.defs.delete(q.id);
+      }
+    }
     // Quests from the old fixed valley no longer exist; drop their progress.
     this.active = Object.fromEntries(Object.entries(d.active ?? {}).filter(([id]) => this.defs.has(id)));
     this.stage = Object.fromEntries(Object.entries(d.stage ?? {}).filter(([id]) => this.active[id]));

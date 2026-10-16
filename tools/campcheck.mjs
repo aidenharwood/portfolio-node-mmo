@@ -7,6 +7,7 @@ import { WorldGen, ACTS } from '../src/world/Gen.js';
 import { HeadlessWorld } from '../server/world.js';
 import { WorldSim, MAX_CAMP_ENEMIES } from '../src/sim/WorldSim.js';
 import { storyPlaces } from '../src/world/story.js';
+import { QuestLog } from '../src/rpg/Quests.js';
 import { TIERS, campLayout } from '../src/world/campLayout.js';
 import { PIECE_BUILDERS } from '../src/world/build/campKit.js';
 
@@ -362,6 +363,108 @@ function waves() {
   }
 }
 if (!arg('--seed')) waves();
+
+// ---------------------------------------------------------------- the final review's findings
+function reviewed() {
+  console.log('Review fixes:');
+  const world = new HeadlessWorld(12345);
+  const events = [];
+  const cleared = [];
+  const host = { world, emit: (ev) => events.push(ev), onKilled() {}, onCampCleared: (c) => cleared.push(c) };
+  const find = (test) => {
+    for (let ring = 1; ring < 14; ring++) {
+      for (let rx = -ring; rx <= ring; rx++) {
+        for (let rz = -ring; rz <= ring; rz++) {
+          if (Math.max(Math.abs(rx), Math.abs(rz)) !== ring) continue;
+          const c = world.gen.region(rx, rz).pois.find((p) => p.type === 'camp' && !p.story && test(p));
+          if (c) return c;
+        }
+      }
+    }
+    return null;
+  };
+  const player = (id) => ({ id, position: new THREE.Vector3(), velocity: new THREE.Vector3(), radius: 0.45, height: 2, alive: true });
+  const put = (p, x, z) => p.position.set(x, world.groundHeight(x, z), z);
+  const run = (sim, ps, seconds, each = null) => {
+    for (let t = 0; t < seconds; t += 0.1) {
+      world.track(ps.map((p) => p.position));
+      sim.update(0.1);
+      each?.(t);
+    }
+  };
+  const kill = (sim, e) => sim.applyHit(e.id, { by: 1, damage: e.hp + (e.shield ?? 0) + 1, source: 'melee', poise: 0, knockback: 0, dir: { x: 0, z: 1 } });
+
+  // 1. A stronghold cleared and its squads cut down as they come is cleared once, not every lull.
+  {
+    const fort = find((p) => p.stronghold);
+    const sim = new WorldSim(host);
+    const ps = [player(1), player(2)];
+    sim.setPlayers(ps);
+    ps.forEach((p, i) => put(p, fort.x + fort.radius + 4, fort.z + i * 2));
+    run(sim, ps, 1);
+    const camp = sim.encounters.camps.get(fort.id);
+    cleared.length = 0;
+    run(sim, ps, 600, (t) => { if (Math.round(t * 10) % 5 === 0) for (const e of camp.enemies) if (e.alive) kill(sim, e); });
+    const n = cleared.filter((c) => c === camp).length;
+    check(n === 1, `a stronghold held down for 10 min counts as cleared once (${n})`);
+  }
+  // 2. A crowd standing back from every spawner still brings squads in, and they stay.
+  {
+    const base = find((p) => p.tier === 'base' && !p.stronghold);
+    const L = campLayout(base, world.gen.campProbe);
+    let best = null;
+    for (let a = 0; a < Math.PI * 2; a += 0.05) {
+      const x = base.x + Math.sin(a) * (base.radius + 7);
+      const z = base.z + Math.cos(a) * (base.radius + 7);
+      const d = Math.min(...L.spawners.map((s) => Math.hypot(base.x + s.x - x, base.z + s.z - z)));
+      if (!best || d > best.d) best = { x, z, d };
+    }
+    const sim = new WorldSim(host);
+    const ps = [1, 2, 3, 4].map(player);
+    sim.setPlayers(ps);
+    ps.forEach((p, i) => put(p, best.x + i, best.z));
+    run(sim, ps, 1);
+    const camp = sim.encounters.camps.get(base.id);
+    const from = events.length;
+    let most = 0;
+    run(sim, ps, 120, () => { most = Math.max(most, camp.enemies.filter((e) => e.alive).length); });
+    const poofs = events.slice(from).filter((e) => e.k === 'poof').length;
+    check(best.d > 30 && most > camp.slots.length && poofs === 0, `four players ${Math.round(best.d)} m from every spawner: squads come and stay (${most} at most for ${camp.slots.length}; ${poofs} vanished)`);
+  }
+  // 3. A saved generated quest at a camp the world no longer has is dropped, and its giver offers again.
+  {
+    const q = new QuestLog({ world, hud: null, stats: { level: 5 }, player: { position: new THREE.Vector3() } });
+    const gone = { id: 'contract:7', kind: 'contract', giver: 'warden', theme: 'warden', generated: true, target: 'c:3,3:9', title: 'Contract: Gone', objectives: [{ type: 'clear', camp: 'c:3,3:9', count: 1, text: 'Clear it' }], rewards: { xp: 10 } };
+    const here = find(() => true);
+    const kept = { ...gone, id: 'contract:8', giver: 'w2', target: here.id, objectives: [{ type: 'clear', camp: here.id, count: 1, text: 'Clear it' }] };
+    q.load({ generated: [gone, kept], active: { 'contract:7': [0], 'contract:8': [0] } });
+    check(!q.active['contract:7'] && !!q.active['contract:8'], 'a saved camp quest whose camp is gone is dropped; one whose camp is there stays');
+  }
+  // 4. A boss's camp with nowhere to stand doesn't throw.
+  {
+    const sim = new WorldSim(host);
+    let wet = null;
+    for (let x = -2000; x < 2000 && !wet; x += 37) for (let z = -2000; z < 2000 && !wet; z += 41) if (world.gen.campProbe(x, z) && world.gen.campProbe(x + 6, z) && world.gen.campProbe(x, z + 6) && world.gen.campProbe(x - 6, z - 6)) wet = { x, z };
+    let threw = null;
+    try {
+      sim.encounters.makeSlots({ id: 'sc:t:boss', type: 'camp', x: wet.x, z: wet.z, radius: 6, tier: 'outpost', race: 'hive', style: 'nest', level: 12, seed: 3, boss: { type: 'psion', name: 'T', tag: 't' }, story: 't' });
+    } catch (e) { threw = e.message; }
+    check(!threw, `a boss camp with no dry posts lays out without throwing (${threw ?? 'ok'})`);
+  }
+  // 5. A stronghold's garrison stands at its posts, the walls 28 m out now, not crammed in a 12.5 m keep.
+  {
+    const fort = find((p) => p.stronghold);
+    const sim = new WorldSim(host);
+    const ps = [player(1)];
+    sim.setPlayers(ps);
+    put(ps[0], fort.x + fort.radius + 30, fort.z);
+    run(sim, ps, 1);
+    const camp = sim.encounters.camps.get(fort.id);
+    const far = camp.slots.filter((s) => s.enemy && Math.hypot(s.enemy.position.x - s.x, s.enemy.position.z - s.z) > 3).length;
+    check(camp.state === 'active' && far <= 2, `a stronghold's guards stand at their posts (${far} of ${camp.slots.length} pushed more than 3 m off)`);
+  }
+}
+if (!arg('--seed')) reviewed();
 
 for (const seed of SEEDS) {
   console.log(`Seed ${seed}:`);
