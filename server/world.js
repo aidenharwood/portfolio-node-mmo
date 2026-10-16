@@ -30,6 +30,7 @@ export class HeadlessWorld extends World {
     this.queue = [];
     this.heightTiles = new Map();
     this.objectParts = null; // quest objects' looks are each screen's business
+    this.headless = true; // (a camp's props are each screen's business too: world/build/campKit.js)
   }
 
   // Nothing to light, flood or draw.

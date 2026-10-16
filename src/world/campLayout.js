@@ -224,9 +224,9 @@ function build(def, probe) {
     const x = Math.sin(a) * d;
     const z = Math.cos(a) * d;
     const gap = k < 3000 ? 2.2 : 1.2;
-    if (blocked(x, z)) continue;
     if (!pieces.every((p) => !p.r || Math.hypot(p.x - x, p.z - z) >= p.r + 0.6)) continue;
     if (!posts.every((q) => Math.hypot(q.x - x, q.z - z) >= gap)) continue;
+    if (blocked(x, z)) continue; // (the costliest test, last)
     posts.push({ x, z });
   }
 
